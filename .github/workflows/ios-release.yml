@@ -57,18 +57,23 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
       - name: Archive signed application
-        run: >-
-          xcodebuild
-          -project ios/YNNuJwHelper.xcodeproj
-          -scheme YNNuJwHelper
-          -configuration Release
-          -destination 'generic/platform=iOS'
-          -archivePath build/YNNuJwHelper.xcarchive
-          HAND_HELPER_WEB_URL='${{ inputs.web_url }}'
-          DEVELOPMENT_TEAM="$IOS_TEAM_ID"
-          CODE_SIGN_STYLE=Manual
-          PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME"
-          archive
+        run: |
+          WEB_URL='${{ inputs.web_url }}'
+          WEB_HOST="${WEB_URL#https://}"
+          WEB_HOST="${WEB_HOST%%/*}"
+          test -n "$WEB_HOST"
+          xcodebuild \
+            -project ios/YNNuJwHelper.xcodeproj \
+            -scheme YNNuJwHelper \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/YNNuJwHelper.xcarchive \
+            HAND_HELPER_WEB_SCHEME=https \
+            HAND_HELPER_WEB_HOST="$WEB_HOST" \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME" \
+            archive
       - name: Create export options
         run: |
           cat > build/ExportOptions.plist <<EOF

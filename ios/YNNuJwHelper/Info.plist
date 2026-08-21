@@ -21,7 +21,7 @@
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>HandHelperWebURL</key>
-    <string>$(HAND_HELPER_WEB_URL)</string>
+    <string>$(HAND_HELPER_WEB_SCHEME)://$(HAND_HELPER_WEB_HOST)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSFaceIDUsageDescription</key>
