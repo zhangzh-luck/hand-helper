@@ -18,6 +18,9 @@
 
 - `.github/workflows/ios-build.yml`：无需签名，只验证 iOS Simulator 可以编译；产物是模拟器 `.app`，不能安装到真实 iPhone。
 - `.github/workflows/ios-release.yml`：手动触发，导出可安装的签名 IPA。
+- `.github/workflows/ios-unsigned-ipa.yml`：无需 Apple 证书，导出供本机签名工具处理的未签名设备 IPA。
+
+若只需临时测试，可运行 **Build unsigned iOS IPA**。它不会保存或使用 Apple ID、证书、描述文件；下载产物后，需在本机使用你自己的签名工具签名，才能安装到 iPhone。
 
 要运行签名 IPA 工作流，在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加以下 **Repository secrets**（只添加，不要把值发给任何人）：
 
