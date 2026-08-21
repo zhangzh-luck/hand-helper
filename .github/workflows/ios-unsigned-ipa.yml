@@ -1,0 +1,50 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-device-ipa:
+    runs-on: macos-14
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build device app without Apple signing
+        run: >-
+          xcodebuild
+          -project ios/YNNuJwHelper.xcodeproj
+          -scheme YNNuJwHelper
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath build/DerivedData
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY=""
+          build
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH='build/DerivedData/Build/Products/Release-iphoneos/YNNuJwHelper.app'
+          test -d "$APP_PATH"
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          (
+            cd build/ipa
+            /usr/bin/zip -qry ../HandHelper-unsigned.ipa Payload
+          )
+          unzip -l build/HandHelper-unsigned.ipa | grep -q 'Payload/YNNuJwHelper.app/Info.plist'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hand-Helper-unsigned-ipa
+          path: build/HandHelper-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
