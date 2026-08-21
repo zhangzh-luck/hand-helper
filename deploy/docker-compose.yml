@@ -1,0 +1,32 @@
+name: ynnu-jw-helper
+
+services:
+  backend:
+    build:
+      context: ../backend
+    env_file: ../.env
+    volumes:
+      - jw-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+  web:
+    build:
+      context: ../web
+    # 仅允许宿主机 Nginx 访问；/api/ 由容器内部转发给 backend。
+    ports:
+      - "127.0.0.1:18101:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  jw-data:

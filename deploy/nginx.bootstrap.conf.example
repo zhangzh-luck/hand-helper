@@ -1,0 +1,15 @@
+# 首次签发 Let's Encrypt 证书时使用此文件。
+# 将 example.com 替换为自己的域名后，保存为 /etc/nginx/conf.d/hand-helper.conf。
+server {
+  listen 80;
+  listen [::]:80;
+  server_name example.com;
+
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 404;
+  }
+}
