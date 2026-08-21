@@ -1,0 +1,92 @@
+name: Export signed iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: 'IPA distribution type'
+        required: true
+        default: development
+        type: choice
+        options:
+          - development
+          - ad-hoc
+          - app-store-connect
+      web_url:
+        description: 'HTTPS URL loaded by the app, e.g. https://your-domain.example'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  signed-ipa:
+    runs-on: macos-14
+    environment: ios-release
+    defaults:
+      run:
+        shell: bash
+    env:
+      IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate signing secrets
+        run: |
+          test -n "$IOS_CERTIFICATE_BASE64"
+          test -n "$IOS_CERTIFICATE_PASSWORD"
+          test -n "$IOS_PROVISIONING_PROFILE_BASE64"
+          test -n "$IOS_PROVISIONING_PROFILE_NAME"
+          test -n "$IOS_TEAM_ID"
+      - name: Install certificate and provisioning profile
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/ios-distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo -n "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          echo -n "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+      - name: Archive signed application
+        run: >-
+          xcodebuild
+          -project ios/YNNuJwHelper.xcodeproj
+          -scheme YNNuJwHelper
+          -configuration Release
+          -destination 'generic/platform=iOS'
+          -archivePath build/YNNuJwHelper.xcarchive
+          HAND_HELPER_WEB_URL='${{ inputs.web_url }}'
+          DEVELOPMENT_TEAM="$IOS_TEAM_ID"
+          CODE_SIGN_STYLE=Manual
+          PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME"
+          archive
+      - name: Create export options
+        run: |
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>${{ inputs.distribution }}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$IOS_TEAM_ID</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.zhangzh.hangassistant</key><string>$IOS_PROVISIONING_PROFILE_NAME</string>
+            </dict>
+          </dict></plist>
+          EOF
+      - name: Export IPA
+        run: xcodebuild -exportArchive -archivePath build/YNNuJwHelper.xcarchive -exportPath build/export -exportOptionsPlist build/ExportOptions.plist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YNNuJwHelper-${{ inputs.distribution }}-ipa
+          path: build/export/*.ipa
+          if-no-files-found: error

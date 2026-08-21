@@ -17,3 +17,7 @@ web/android/*.jks
 web/android/*.keystore
 ios/.build/
 DerivedData/
+ios/Config/HandHelper.local.xcconfig
+ios/**/*.mobileprovision
+ios/**/*.p12
+ios/**/*.xcarchive
