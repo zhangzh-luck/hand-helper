@@ -1,5 +1,6 @@
-// 默认连接已部署的 Hand Helper 服务；可在 Xcode Build Settings 或 xcodebuild 参数中覆盖。
-HAND_HELPER_WEB_URL = https://jw.zhangzh.cc
+// 分开保存协议与主机名，避免 xcconfig 将 URL 中的 // 误当作注释。
+HAND_HELPER_WEB_SCHEME = https
+HAND_HELPER_WEB_HOST = jw.zhangzh.cc
 PRODUCT_BUNDLE_IDENTIFIER = com.zhangzh.hangassistant
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
