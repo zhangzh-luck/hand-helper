@@ -1,5 +1,5 @@
-// 非敏感构建默认值。发布前在 Xcode Build Settings 或 xcodebuild 参数中覆盖服务地址。
-HAND_HELPER_WEB_URL = https://hand-helper.example.invalid
+// 默认连接已部署的 Hand Helper 服务；可在 Xcode Build Settings 或 xcodebuild 参数中覆盖。
+HAND_HELPER_WEB_URL = https://jw.zhangzh.cc
 PRODUCT_BUNDLE_IDENTIFIER = com.zhangzh.hangassistant
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
