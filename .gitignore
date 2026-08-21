@@ -15,6 +15,8 @@ web/.env.android.local
 web/android/key.properties
 web/android/*.jks
 web/android/*.keystore
+# APK 由发布流程单独上传到服务器，不随源码仓库提交。
+web/public/download/*.apk
 ios/.build/
 DerivedData/
 ios/Config/HandHelper.local.xcconfig
