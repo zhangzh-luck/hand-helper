@@ -1,0 +1,90 @@
+# 将下面两个 limit_req_zone 放在 nginx.conf 的 http { ... } 中，不能放在 server 块内。
+limit_req_zone $binary_remote_addr zone=hand_helper_auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=hand_helper_import:10m rate=6r/m;
+limit_req_zone $binary_remote_addr zone=hand_helper_ai:10m rate=4r/m;
+
+# 首次签发证书前保留此 HTTP 站点；将 example.com 替换为自己的域名。
+server {
+  listen 80;
+  listen [::]:80;
+  server_name example.com;
+
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# Certbot 成功签发证书后启用本服务器块，并替换域名与证书路径。
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  server_name example.com;
+
+  ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_session_timeout 1d;
+  ssl_session_cache shared:SSL:10m;
+
+  # 课程表与成绩文件导入最大 5 MB，预留少量请求体开销。
+  client_max_body_size 6m;
+
+  add_header X-Content-Type-Options nosniff always;
+  add_header X-Frame-Options DENY always;
+  add_header Referrer-Policy strict-origin-when-cross-origin always;
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+  # 仅登录与刷新令牌使用较严格限流，避免普通页面读取被误限流。
+  location ~ ^/api/v1/auth/(login|refresh)$ {
+    limit_req zone=hand_helper_auth burst=5 nodelay;
+    proxy_pass http://127.0.0.1:18101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+  }
+
+  # 导入仅解析用户主动上传的文件；限制频率和请求大小，避免文件解析被滥用。
+  location ~ ^/api/v1/(timetable/import-file|grades/import-file|grades/import-confirm)$ {
+    limit_req zone=hand_helper_import burst=3 nodelay;
+    proxy_pass http://127.0.0.1:18101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+  }
+
+  # 模型调用由用户手动发起且可能较慢；单独限流，避免意外产生过多第三方调用。
+  location ~ ^/api/v1/(ai/settings|grades/ai-analysis)$ {
+    limit_req zone=hand_helper_ai burst=2 nodelay;
+    proxy_pass http://127.0.0.1:18101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+
+  location = /sw.js {
+    proxy_pass http://127.0.0.1:18101;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:18101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:18101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
