@@ -167,6 +167,12 @@ html[data-appearance="dark"] .login-card .login-btn { color:#191919; background:
 html[data-appearance="dark"] .login-card .login-btn:hover { background:#f5f5f5; }
 html[data-appearance="dark"] .login-card .login-error { color:#fecaca; background:transparent; }
 
+.login-loading-card { justify-items:center; }
+.login-loading-card .login-desc { margin-bottom:20px; }
+.auth-loading-spinner { width:22px; height:22px; border:2px solid #d8dce3; border-top-color:#1d1d1d; border-radius:50%; animation:auth-loading-spin .7s linear infinite; }
+@keyframes auth-loading-spin { to { transform:rotate(360deg); } }
+html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; border-top-color:#f5f5f5; }
+
 .manual-import { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 12px; padding:12px; border-radius:14px; background:#fff; box-shadow:0 2px 9px #1e293b0d; }
 .manual-import .secondary-button { background:#f1f5f9; color:#475569; }
 .import-status { display:grid; flex-basis:100%; gap:4px; padding-top:2px; }.import-status b { font-size:13px; color:#334155; }.import-status small { line-height:1.5; }.import-status.waiting_for_user b { color:#1d4ed8; }.import-status.page_not_ready b,.import-status.failed b,.import-status.timed_out b { color:#b91c1c; }.import-success { flex-basis:100%; margin:0; color:#15803d; font-size:13px; }
