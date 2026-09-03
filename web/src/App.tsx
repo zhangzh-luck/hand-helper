@@ -679,6 +679,17 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
   </main>;
 }
 
+function AuthGateLoading() {
+  return <main className="login" aria-busy="true" aria-live="polite">
+    <section className="login-card login-loading-card" aria-label="正在验证登录状态">
+      <div className="login-logo"><img src="/pwa-192.png" alt="航的助手" width="80" height="80" /></div>
+      <h1 className="login-title">航的助手</h1>
+      <p className="login-desc">正在安全验证登录状态…</p>
+      <span className="auth-loading-spinner" aria-hidden="true" />
+    </section>
+  </main>;
+}
+
 const PRIMARY_ROUTE_ORDER = ['/', '/timetable', '/grades', '/settings'];
 
 function primaryRouteIndex(pathname: string) {
@@ -737,7 +748,7 @@ export default function App() {
     void api.me().then(() => { if (active) setAuthState('authenticated'); }).catch(markUnauthenticated);
     return () => { active = false; window.removeEventListener('hand-helper:unauthenticated', markUnauthenticated); };
   }, []);
-  if (authState === 'checking') return <main className="login"><h1>航的助手</h1><p>正在验证登录状态…</p></main>;
+  if (authState === 'checking') return <AuthGateLoading />;
   if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
   if (location.pathname === '/login') return <Navigate to="/" replace />;
   return <div className="shell"><NativeStartupNotice /><NetworkNotice /><PrimaryRouteTransition appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={setAppearanceMode} /><BottomNav appearance={resolvedAppearanceMode} /></div>;
