@@ -14,57 +14,50 @@ async function readEnvelope<T>(response: Response, fallbackMessage: string): Pro
   }
 }
 
-export async function request<T>(path: string, options: RequestInit = {}, retried = false): Promise<T> {
-  const token = localStorage.getItem('access_token');
+function notifyUnauthenticated() {
+  window.dispatchEvent(new Event('hand-helper:unauthenticated'));
+}
+
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    const headers = new Headers(options.headers);
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    response = await fetch(`${API}${path}`, {
+      credentials: 'include',
+      ...options,
+      headers,
+    });
   } catch {
     throw new Error('无法连接服务器，请检查网络，随后刷新页面再试。');
   }
   const payload = await readEnvelope<T>(response, '服务器响应异常');
-  if (response.status === 401 && !retried && path !== '/api/v1/auth/refresh') {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
-      try {
-        const tokens = await request<TokenPayload>('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }, true);
-        localStorage.setItem('access_token', tokens.access_token);
-        localStorage.setItem('refresh_token', tokens.refresh_token);
-        return request<T>(path, options, true);
-      } catch {
-        // 继续执行统一的失效处理；不暴露服务端细节。
-      }
-    }
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    window.location.reload();
-  }
+  if (response.status === 401) notifyUnauthenticated();
   if (!response.ok || !payload.success) throw new Error(payload.error?.message ?? '请求失败');
   return payload.data;
 }
 export async function upload<T>(path: string, file: File, fields: Record<string, string> = {}): Promise<T> {
-  const token = localStorage.getItem('access_token');
   const form = new FormData();
   Object.entries(fields).forEach(([key, value]) => form.append(key, value));
   form.append('file', file);
   let response: Response;
   try {
     response = await fetch(`${API}${path}`, {
-      method: 'POST', body: form, headers: token ? { Authorization: `Bearer ${token}` } : {},
+      method: 'POST', body: form, credentials: 'include',
     });
   } catch {
     throw new Error('无法连接服务器，请检查网络，随后刷新页面再试。');
   }
   const payload = await readEnvelope<T>(response, '上传服务响应异常');
+  if (response.status === 401) notifyUnauthenticated();
   if (!response.ok || !payload.success) throw new Error(payload.error?.message ?? '上传失败');
   return payload.data;
 }
 const termQuery = (termId?: number) => termId ? `?term_id=${termId}` : '';
 export const api = {
-  login: (username: string, password: string) => request<TokenPayload>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  logout: (refreshToken: string) => request<{ logged_out: boolean }>('/api/v1/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }),
-  appAccount: () => request<AppAccount>('/api/v1/auth/account'),
-  updateAppAccount: (payload: AppAccountUpdate) => request<AppAccount>('/api/v1/auth/account', { method: 'PUT', body: JSON.stringify(payload) }),
+  login: (username: string, password: string) => request<AuthMe>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  logout: () => request<{ logged_out: boolean }>('/api/v1/auth/logout', { method: 'POST' }),
+  me: () => request<AuthMe>('/api/v1/auth/me'),
   profile: () => request<Profile>('/api/v1/profile'),
   updateProfile: (profile: ProfileUpdate) => request<Profile>('/api/v1/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   terms: () => request<Term[]>('/api/v1/terms'),
@@ -96,9 +89,7 @@ export const api = {
   gradeAiAnalyses: (termId?: number) => request<GradeAiAnalysisHistory[]>(`/api/v1/grades/ai-analyses${termQuery(termId)}`),
   clearGradeAiAnalyses: () => request<{ deleted: number }>('/api/v1/grades/ai-analyses', { method: 'DELETE' }),
 };
-export type TokenPayload = { access_token: string; refresh_token: string; token_type: string };
-export type AppAccount = { username: string };
-export type AppAccountUpdate = { username: string; current_password: string; new_password?: string };
+export type AuthMe = { authenticated: true; username: string };
 export type Profile = { display_name: string; avatar_data_url: string | null };
 export type ProfileUpdate = { display_name: string; avatar_data_url?: string | null };
 export type Term = { id: number; source_term_id: string; display_name: string; start_date: string | null; is_current: boolean };

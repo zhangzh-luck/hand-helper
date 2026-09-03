@@ -4,13 +4,17 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from argon2 import PasswordHasher, Type
 
 # API 回归测试绝不读取开发者的 .env、账号或真实缓存。
 TEST_DB = Path(__file__).resolve().parents[1] / "data" / "test_api.db"
 if TEST_DB.exists():
     TEST_DB.unlink()
-os.environ["APP_ADMIN_USERNAME"] = "admin"
-os.environ["APP_ADMIN_PASSWORD_HASH"] = "$2b$12$aK5M/nGGxmVBqk5w7cSTh.uhF3vDyphBKwywutAUyhjnDWuwJih6W"
+os.environ["ADMIN_USERNAME"] = "admin"
+os.environ["ADMIN_PASSWORD_HASH"] = PasswordHasher(type=Type.ID).hash("change-me")
+os.environ["SESSION_SECRET"] = "test-session-secret-only-for-unit-tests-1234567890"
+os.environ["SESSION_MAX_AGE"] = "3600"
+os.environ["SESSION_COOKIE_SECURE"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./data/test_api.db"
 os.environ["AUTO_CREATE_SCHEMA"] = "true"
 # 仅用于测试数据库的固定 Fernet 密钥；与任何开发或生产密钥无关。
@@ -29,7 +33,9 @@ GRADE_HTML = """<html><body><table>
 def login_headers(client: TestClient) -> dict[str, str]:
     login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "change-me"})
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+    assert "httponly" in login.headers["set-cookie"].lower()
+    assert "samesite=lax" in login.headers["set-cookie"].lower()
+    return {}
 
 
 def import_test_grades(client: TestClient, headers: dict[str, str]) -> tuple[int, dict]:
@@ -50,7 +56,9 @@ def import_test_grades(client: TestClient, headers: dict[str, str]) -> tuple[int
 def test_api_auth_and_local_file_import():
     with TestClient(app) as client:
         assert client.get("/api/v1/grades").status_code == 401
+        assert client.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"}).status_code == 401
         headers = login_headers(client)
+        assert client.get("/api/v1/auth/me").json()["data"] == {"authenticated": True, "username": "admin"}
         assert client.get("/api/v1/profile", headers=headers).json()["data"]["display_name"] == "张自航"
         profile = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": "data:image/png;base64,aGVsbG8="})
         assert profile.json()["data"]["display_name"] == "测试同学"
@@ -118,16 +126,35 @@ def test_manual_course_crud_and_timetable_merge():
         assert client.post("/api/v1/manual-courses", headers=headers, json={**payload, "week_expression": "1-21周"}).status_code == 422
 
 
-def test_app_account_can_change_username_and_password():
+def test_single_owner_session_lifecycle_and_csrf():
     with TestClient(app) as client:
-        headers = login_headers(client)
-        assert client.get("/api/v1/auth/account", headers=headers).json()["data"]["username"] == "admin"
-        assert client.put("/api/v1/auth/account", headers=headers, json={"username": "new-admin", "current_password": "wrong-password"}).status_code == 401
-        changed = client.put("/api/v1/auth/account", headers=headers, json={"username": "new-admin", "current_password": "change-me", "new_password": "new-password"})
-        assert changed.status_code == 200
-        assert client.post("/api/v1/auth/login", json={"username": "new-admin", "password": "new-password"}).status_code == 200
-        restored = client.put("/api/v1/auth/account", headers=headers, json={"username": "admin", "current_password": "new-password", "new_password": "change-me"})
-        assert restored.status_code == 200
+        login_headers(client)
+        assert client.get("/api/v1/grades").status_code == 200
+        # A forged cookie cannot be resolved to a server-side session.
+        client.cookies.set("hand_helper_session", "forged-session-id")
+        assert client.get("/api/v1/grades").status_code == 401
+        client.cookies.clear()
+        login_headers(client)
+        assert client.post("/api/v1/custom-schedules", headers={"Origin": "https://attacker.invalid"}, json={"title": "不应创建", "scheduled_date": date.today().isoformat(), "scheduled_time": "09:00"}).status_code == 403
+        assert client.post("/api/v1/auth/logout").status_code == 200
+        assert client.get("/api/v1/grades").status_code == 401
+
+
+def test_login_rate_limit_uses_ip_and_username():
+    with TestClient(app) as client:
+        for _ in range(5):
+            assert client.post("/api/v1/auth/login", json={"username": "rate-test", "password": "wrong"}).status_code == 401
+        assert client.post("/api/v1/auth/login", json={"username": "rate-test", "password": "wrong"}).status_code == 429
+
+
+def test_session_survives_application_restart():
+    with TestClient(app) as first_client:
+        login_headers(first_client)
+        session_id = first_client.cookies.get("hand_helper_session")
+        assert session_id
+    with TestClient(app) as restarted_client:
+        restarted_client.cookies.set("hand_helper_session", session_id)
+        assert restarted_client.get("/api/v1/auth/me").status_code == 200
 
 
 def test_ai_grade_analysis_is_encrypted_and_cached(monkeypatch):
@@ -176,8 +203,11 @@ def test_ai_grade_analysis_is_encrypted_and_cached(monkeypatch):
         assert first.status_code == 200 and first.json()["data"]["cached"] is False
         cached = client.post(f"/api/v1/grades/ai-analysis?term_id={term_id}", headers=headers)
         assert cached.status_code == 200 and cached.json()["data"]["cached"] is True
+        session_id = client.cookies.get("hand_helper_session")
+        client.cookies.clear()
         unauthenticated_history = client.get(f"/api/v1/grades/ai-analyses?term_id={term_id}")
         assert unauthenticated_history.status_code == 401
+        client.cookies.set("hand_helper_session", session_id)
         history = client.get(f"/api/v1/grades/ai-analyses?term_id={term_id}", headers=headers)
         assert history.status_code == 200
         assert len(history.json()["data"]) == 1

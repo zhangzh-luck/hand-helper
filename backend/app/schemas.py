@@ -14,26 +14,17 @@ class ApiResponse(BaseModel, Generic[T]):
     request_id: str
     server_time: datetime
 class LoginRequest(BaseModel):
-    username: str
-    password: str
-class AppAccountOut(BaseModel):
-    username: str
-class AppAccountUpdateInput(BaseModel):
     username: str = Field(min_length=1, max_length=128)
-    current_password: str = Field(min_length=1, max_length=256)
-    new_password: str | None = Field(default=None, min_length=8, max_length=256)
+    password: str = Field(min_length=1, max_length=512)
+class AuthMeOut(BaseModel):
+    authenticated: bool = True
+    username: str
 class AppProfileOut(BaseModel):
     display_name: str
     avatar_data_url: str | None = None
 class AppProfileInput(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
     avatar_data_url: str | None = Field(default=None, max_length=1_400_000)
-class TokenPayload(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-class RefreshRequest(BaseModel):
-    refresh_token: str
 class TermOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

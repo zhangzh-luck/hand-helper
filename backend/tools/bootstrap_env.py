@@ -5,7 +5,7 @@ import getpass
 import secrets
 from pathlib import Path
 
-from passlib.hash import bcrypt
+from argon2 import PasswordHasher, Type
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT / ".env"
@@ -24,7 +24,7 @@ def read_existing() -> dict[str, str]:
 
 def main() -> None:
     values = read_existing()
-    default_user = values.get("APP_ADMIN_USERNAME", "admin")
+    default_user = values.get("ADMIN_USERNAME", "admin")
     username = input(f"应用管理员用户名 [{default_user}]: ").strip() or default_user
     while True:
         password = getpass.getpass("应用管理员密码（不会回显）: ")
@@ -37,20 +37,26 @@ def main() -> None:
             break
     values.update(
         {
-            "APP_ADMIN_USERNAME": username,
-            "APP_ADMIN_PASSWORD_HASH": bcrypt.hash(password),
-            "JWT_SECRET": secrets.token_urlsafe(48),
+            "ADMIN_USERNAME": username,
+            "ADMIN_PASSWORD_HASH": PasswordHasher(type=Type.ID).hash(password),
+            "SESSION_SECRET": secrets.token_urlsafe(48),
+            "SESSION_MAX_AGE": values.get("SESSION_MAX_AGE", "1209600"),
+            "SESSION_COOKIE_SECURE": values.get("SESSION_COOKIE_SECURE", "false"),
+            "TRUST_PROXY_HEADERS": values.get("TRUST_PROXY_HEADERS", "false"),
             "DATABASE_URL": values.get("DATABASE_URL", "sqlite+aiosqlite:///./data/ynnu_jw_helper.db"),
             "CORS_ORIGINS": values.get("CORS_ORIGINS", "http://localhost:5173"),
-            "ACCESS_TOKEN_MINUTES": values.get("ACCESS_TOKEN_MINUTES", "15"),
-            "REFRESH_TOKEN_DAYS": values.get("REFRESH_TOKEN_DAYS", "30"),
         }
     )
     ordered = [
-        "APP_ADMIN_USERNAME", "APP_ADMIN_PASSWORD_HASH", "JWT_SECRET", "DATABASE_URL", "CORS_ORIGINS",
-        "ACCESS_TOKEN_MINUTES", "REFRESH_TOKEN_DAYS",
+        "ADMIN_USERNAME", "ADMIN_PASSWORD_HASH", "SESSION_SECRET", "SESSION_MAX_AGE", "SESSION_COOKIE_SECURE",
+        "TRUST_PROXY_HEADERS", "DATABASE_URL", "CORS_ORIGINS",
     ]
-    ENV_PATH.write_text("\n".join(f"{key}={values.get(key, '')}" for key in ordered) + "\n", encoding="utf-8")
+    # Keep unrelated settings such as AI_CREDENTIAL_MASTER_KEY. Drop only the
+    # retired JWT configuration so running this helper never discards an API key.
+    for key in {"APP_ADMIN_USERNAME", "APP_ADMIN_PASSWORD_HASH", "JWT_SECRET", "ACCESS_TOKEN_MINUTES", "REFRESH_TOKEN_DAYS"}:
+        values.pop(key, None)
+    remaining = [key for key in values if key not in ordered]
+    ENV_PATH.write_text("\n".join(f"{key}={values.get(key, '')}" for key in [*ordered, *remaining]) + "\n", encoding="utf-8")
     print(f"已安全写入 {ENV_PATH}；请勿提交该文件。")
 
 

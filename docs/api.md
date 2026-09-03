@@ -1,12 +1,12 @@
 # API
 
-所有 `/api/v1` 响应均为 `{success,data,error,request_id,server_time}`，除应用登录外都需要 `Authorization: Bearer <access token>`。
+所有 `/api/v1` 响应均为 `{success,data,error,request_id,server_time}`。除登录和健康检查外，API 均需浏览器携带 HttpOnly Session Cookie；前端不保存 Token。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | POST | `/api/v1/auth/login` | 应用管理员登录 |
-| POST | `/api/v1/auth/refresh` | 刷新令牌 |
-| GET / PUT | `/api/v1/auth/account` | 查看或修改应用账户 |
+| POST | `/api/v1/auth/logout` | 销毁当前服务端 Session 并清除 Cookie |
+| GET | `/api/v1/auth/me` | 读取当前单用户登录状态 |
 | GET | `/api/v1/terms` | 已由本地文件导入的学期 |
 | POST | `/api/v1/timetable/import-file` | 导入打印 `.xls` 课表 |
 | POST | `/api/v1/timetable/rebuild-sessions?term_id=` | 周次转日期 |
