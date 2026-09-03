@@ -1,6 +1,6 @@
 // 分开保存协议与主机名，避免 xcconfig 将 URL 中的 // 误当作注释。
 HAND_HELPER_WEB_SCHEME = https
-HAND_HELPER_WEB_HOST = jw.zhangzh.cc
+HAND_HELPER_WEB_HOST = portal.zhangzh.cc
 PRODUCT_BUNDLE_IDENTIFIER = com.zhangzh.hangassistant
 MARKETING_VERSION = 0.1.1
 CURRENT_PROJECT_VERSION = 2

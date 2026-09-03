@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 
 // 所有 API 基地址只在这里决策：Web 保持同源 /api，原生包使用 HTTPS API。
-const DEFAULT_ANDROID_API_URL = 'https://jw.zhangzh.cc';
+const DEFAULT_ANDROID_API_URL = 'https://portal.zhangzh.cc';
 
 function normalizedBaseUrl(value: string | undefined) {
   return value?.trim().replace(/\/$/, '') ?? '';
