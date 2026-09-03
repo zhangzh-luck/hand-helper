@@ -2,20 +2,23 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { moveWeekInTerm } from './App';
 
-describe('未登录路由', () => it('直接展示登录页，不再保留展示页', () => {
-  localStorage.clear();
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: false, error: { message: '未登录' } }), { status: 401 })));
+});
+
+describe('未登录路由', () => it('验证会话后展示登录页，不再保留展示页', async () => {
   render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><App /></MemoryRouter></QueryClientProvider>);
+  expect(await screen.findByRole('button', { name: '登录' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '航的助手' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '登录' })).toBeInTheDocument();
 }));
 
-describe('底部导航', () => it('显示四个主要页面', () => {
-  localStorage.setItem('access_token', 'test');
+describe('底部导航', () => it('会话有效时显示四个主要页面', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true, data: { authenticated: true, username: 'admin' } }), { status: 200 })));
   const { container } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/timetable']}><App /></MemoryRouter></QueryClientProvider>);
-  expect(screen.getByRole('link', { name: '今日' })).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: '今日' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: '课程表' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: '分析' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument();

@@ -498,7 +498,6 @@ function AppearanceModeSelector({ mode, onChange }: { mode: AppearanceMode; onCh
 function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChange }: { appearanceMode: AppearanceMode; resolvedAppearanceMode: 'light' | 'dark'; onAppearanceModeChange: (mode: AppearanceMode) => void }) {
   const queryClient = useQueryClient();
   const { scrollRef: settingsScrollRef, headerStyle: settingsHeaderStyle } = useCollapsiblePageTitle();
-  const appAccount = useQuery({ queryKey: ['app-account'], queryFn: api.appAccount });
   const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile });
   const terms = useQuery({ queryKey: ['terms'], queryFn: api.terms });
   const periods = useQuery({ queryKey: ['period-times'], queryFn: api.periodTimes });
@@ -511,29 +510,11 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const preferredTerm = terms.data?.find((term) => term.source_term_id === currentAcademicTermId()) ?? terms.data?.find((term) => term.is_current) ?? terms.data?.[0];
   useEffect(() => { if (profile.data) setDisplayName(profile.data.display_name); }, [profile.data]);
-  const [appUsername, setAppUsername] = useState('');
-  const [currentAppPassword, setCurrentAppPassword] = useState('');
-  const [newAppPassword, setNewAppPassword] = useState('');
-  const [confirmAppPassword, setConfirmAppPassword] = useState('');
-  useEffect(() => { if (appAccount.data) setAppUsername(appAccount.data.username); }, [appAccount.data]);
   const appLogout = useMutation({
-    mutationFn: async () => {
-      const refreshToken = localStorage.getItem('refresh_token');
-      if (refreshToken) await api.logout(refreshToken);
-    },
+    mutationFn: api.logout,
     onSettled: () => {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
       // 退出后替换当前功能页地址，避免刷新时仍停留在 /settings 等受保护路径。
-      window.location.replace('/');
-    },
-  });
-  const updateAppAccount = useMutation({
-    mutationFn: () => api.updateAppAccount({ username: appUsername.trim(), current_password: currentAppPassword, ...(newAppPassword ? { new_password: newAppPassword } : {}) }),
-    onSuccess: () => {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      window.location.reload();
+      window.location.replace('/login');
     },
   });
   const saveProfile = useMutation({
@@ -552,29 +533,20 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
     reader.onload = () => { setNewAvatar(String(reader.result)); setAvatarError(null); };
     reader.readAsDataURL(file);
   };
-  const sectionTitle = settingsSection === 'account' ? '账号设置' : settingsSection === 'time' ? '时间设置' : settingsSection === 'personal' ? '个性化设置' : settingsSection === 'data' ? '数据与导入' : settingsSection === 'analysis' ? '成绩分析设置' : settingsSection === 'about' ? '关于助手' : '设置';
+  const sectionTitle = settingsSection === 'account' ? '账号安全' : settingsSection === 'time' ? '时间设置' : settingsSection === 'personal' ? '个性化设置' : settingsSection === 'data' ? '数据与导入' : settingsSection === 'analysis' ? '成绩分析设置' : settingsSection === 'about' ? '关于助手' : '设置';
   const accountTitleCollapsible = settingsSection === 'account';
   const sectionTitleCollapsible = Boolean(settingsSection);
   const settingsPageClassName = `${accountTitleCollapsible ? 'account-settings-page ' : ''}${sectionTitleCollapsible ? 'settings-section-page ' : ''}${resolvedAppearanceMode === 'dark' ? 'settings-page-dark' : ''}`.trim();
   return <Page title={sectionTitle} icon={accountTitleCollapsible ? <KeyRound size={20} /> : !settingsSection ? <SettingsIcon size={20} /> : undefined} action={settingsSection ? <button type="button" className="settings-back" onClick={() => setSettingsSection(null)}><ChevronLeft size={18} />返回</button> : undefined} mainRef={settingsScrollRef} className={settingsPageClassName} headerClassName={sectionTitleCollapsible ? 'collapsible-page-header settings-section-header' : undefined} headerStyle={sectionTitleCollapsible ? settingsHeaderStyle : undefined} compactTitle={sectionTitleCollapsible}>
     {settingsSection === 'personal' && <p className="settings-inline-note">外观偏好与个人资料会直接显示在本页；目前已适配今日页、底侧栏和设置页面。</p>}
-    {settingsSection === 'account' && <p className="settings-inline-note">隐私与安全选项会直接显示在本页，暂未开放设备和会话管理。</p>}
+    {settingsSection === 'account' && <p className="settings-inline-note">管理员用户名和密码仅由服务器环境变量配置；本页不会保存或展示密码。</p>}
     {settingsSection === 'data' && <p className="settings-inline-note">课程表与成绩只通过你主动选择的导出文件写入本地缓存，不再由服务器登录或抓取教务系统。</p>}
-    {!settingsSection && <section className="settings-menu"><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('account')}><span><b><KeyRound size={18} />账号设置</b><small>登录账户与退出</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('time')}><span><b><Clock3 size={18} />时间设置</b><small>学期第一周与节次时间</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('personal')}><span><b><Palette size={18} />个性化设置</b><small>显示姓名与首页头像</small></span><span aria-hidden="true">›</span></button><DataSettingsEntry onOpen={() => setSettingsSection('data')} /><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('analysis')}><span><b><GraduationCap size={18} />成绩分析设置</b><small>第三方模型服务与 API Key</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('about')}><span><b><Info size={18} />关于助手</b><small>版本、数据保护与使用说明</small></span><span aria-hidden="true">›</span></button></section>}
+    {!settingsSection && <section className="settings-menu"><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('account')}><span><b><KeyRound size={18} />账号安全</b><small>单用户登录与退出</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('time')}><span><b><Clock3 size={18} />时间设置</b><small>学期第一周与节次时间</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('personal')}><span><b><Palette size={18} />个性化设置</b><small>显示姓名与首页头像</small></span><span aria-hidden="true">›</span></button><DataSettingsEntry onOpen={() => setSettingsSection('data')} /><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('analysis')}><span><b><GraduationCap size={18} />成绩分析设置</b><small>第三方模型服务与 API Key</small></span><span aria-hidden="true">›</span></button><button type="button" className="settings-menu-item" onClick={() => setSettingsSection('about')}><span><b><Info size={18} />关于助手</b><small>版本、数据保护与使用说明</small></span><span aria-hidden="true">›</span></button></section>}
     {settingsSection === 'personal' && <AppearanceModeSelector mode={appearanceMode} onChange={onAppearanceModeChange} />}
     {settingsSection === 'account' && <>
       <section className="card settings-card account-settings-card">
-        <b>航的助手账户</b>
-        <small>修改账户名或密码后会立即退出当前账户；请用新的登录信息重新进入航的助手。</small>
-        <form className="credential-form" onSubmit={(event) => { event.preventDefault(); if (newAppPassword && newAppPassword !== confirmAppPassword) return; updateAppAccount.mutate(); }}>
-          <input aria-label="航的助手账户名" value={appUsername} onChange={(event) => setAppUsername(event.target.value)} autoComplete="username" required maxLength={128} placeholder="航的助手账户名" />
-          <input aria-label="当前登录密码" value={currentAppPassword} onChange={(event) => setCurrentAppPassword(event.target.value)} autoComplete="current-password" required type="password" placeholder="当前登录密码" />
-          <input aria-label="新登录密码" value={newAppPassword} onChange={(event) => setNewAppPassword(event.target.value)} autoComplete="new-password" type="password" minLength={8} maxLength={256} placeholder="新登录密码（留空则不修改）" />
-          <input aria-label="确认新登录密码" value={confirmAppPassword} onChange={(event) => setConfirmAppPassword(event.target.value)} autoComplete="new-password" type="password" minLength={8} maxLength={256} placeholder="确认新登录密码" />
-          <button type="submit" disabled={updateAppAccount.isPending || !appUsername.trim() || !currentAppPassword || (!!newAppPassword && newAppPassword !== confirmAppPassword) || (!newAppPassword && appUsername.trim() === appAccount.data?.username)}>{updateAppAccount.isPending ? '保存中…' : '保存并重新登录'}</button>
-        </form>
-        {newAppPassword && newAppPassword !== confirmAppPassword && <p className="error">两次输入的新密码不一致</p>}
-        {updateAppAccount.error && <p className="error">{updateAppAccount.error.message}</p>}
+        <b>单用户认证</b>
+        <small>登录凭据由部署环境中的 <code>ADMIN_USERNAME</code> 和 <code>ADMIN_PASSWORD_HASH</code> 管理。修改密码后，请重新生成 Argon2id 哈希并更新服务器 `.env`，再重启后端。</small>
       </section>
       <section className="card settings-card"><b>退出航的助手</b><small>退出本应用并返回登录页；不会删除已导入的课程表、成绩缓存或自定义安排。</small><button type="button" className="logout-button" disabled={appLogout.isPending} onClick={() => setLogoutConfirm(true)}>退出到登录页</button></section>
     </>}
@@ -689,9 +661,22 @@ function Empty({ text }: { text: string }) { return <div className="empty">{text
 function Page({ title, children, action, icon, className, headerClassName, headerStyle, compactTitle, mainRef }: { title: string; children: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode; className?: string; headerClassName?: string; headerStyle?: CSSProperties; compactTitle?: boolean; mainRef?: RefObject<HTMLElement> }) { return <main ref={mainRef} className={className}><header className={headerClassName} style={headerStyle}>{compactTitle && icon && <span className="page-fixed-title-icon" aria-hidden="true">{icon}</span>}<h1 className="page-title">{!compactTitle && icon && <span className="page-title-icon" aria-hidden="true">{icon}</span>}{title}</h1>{compactTitle && <span className="page-title-compact" aria-hidden="true">{title}</span>}{action}</header>{children}</main>; }
 
 function Login({ onSuccess }: { onSuccess: () => void }) {
-  const [username, setUsername] = useState(''); const [password, setPassword] = useState('');
-  const login = useMutation({ mutationFn: () => api.login(username, password), onSuccess: (tokens) => { localStorage.setItem('access_token', tokens.access_token); localStorage.setItem('refresh_token', tokens.refresh_token); onSuccess(); } });
-  return <main className="login"><h1>航的助手</h1><form onSubmit={(event) => { event.preventDefault(); login.mutate(); }}><input aria-label="账号" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required placeholder="账号" /><input aria-label="密码" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required type="password" placeholder="密码" /><button type="submit" disabled={login.isPending}>{login.isPending ? '登录中…' : '登录'}</button>{login.error && <p className="error">{login.error.message}</p>}</form></main>;
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const login = useMutation({ mutationFn: () => api.login(username, password), onSuccess });
+  return <main className="login">
+    <section className="login-card" aria-labelledby="login-title">
+      <div className="login-logo"><img src="/pwa-192.png" alt="航的助手" width="80" height="80" /></div>
+      <h1 className="login-title" id="login-title">航的助手</h1>
+      <p className="login-desc">输入管理员账号和密码以继续。</p>
+      <form className="login-form" onSubmit={(event) => { event.preventDefault(); login.mutate(); }}>
+        <input className="login-input" aria-label="用户名" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoFocus required placeholder="用户名" />
+        <input className="login-input" aria-label="密码" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required type="password" placeholder="密码" />
+        {login.error && <div className="login-error" role="alert">{login.error.message}</div>}
+        <button className="login-btn" type="submit" disabled={login.isPending}>{login.isPending ? '...' : '登录'}</button>
+      </form>
+    </section>
+  </main>;
 }
 
 const PRIMARY_ROUTE_ORDER = ['/', '/timetable', '/grades', '/settings'];
@@ -731,8 +716,9 @@ function PrimaryRouteTransition({ appearanceMode, resolvedAppearanceMode, onAppe
 }
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(Boolean(localStorage.getItem('access_token')));
+  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
   const navigate = useNavigate();
+  const location = useLocation();
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(savedAppearanceMode);
   const resolvedAppearanceMode = useResolvedAppearanceMode(appearanceMode);
   useEffect(() => { window.localStorage.setItem('appearance_mode', appearanceMode); }, [appearanceMode]);
@@ -744,7 +730,16 @@ export default function App() {
     );
     void updateNativeStatusBar(resolvedAppearanceMode);
   }, [resolvedAppearanceMode]);
-  if (!authenticated) return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login onSuccess={() => { setAuthenticated(true); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
+  useEffect(() => {
+    let active = true;
+    const markUnauthenticated = () => { if (active) setAuthState('unauthenticated'); };
+    window.addEventListener('hand-helper:unauthenticated', markUnauthenticated);
+    void api.me().then(() => { if (active) setAuthState('authenticated'); }).catch(markUnauthenticated);
+    return () => { active = false; window.removeEventListener('hand-helper:unauthenticated', markUnauthenticated); };
+  }, []);
+  if (authState === 'checking') return <main className="login"><h1>航的助手</h1><p>正在验证登录状态…</p></main>;
+  if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
+  if (location.pathname === '/login') return <Navigate to="/" replace />;
   return <div className="shell"><NativeStartupNotice /><NetworkNotice /><PrimaryRouteTransition appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={setAppearanceMode} /><BottomNav appearance={resolvedAppearanceMode} /></div>;
 }
 

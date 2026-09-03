@@ -29,7 +29,7 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-`.env` 仅需配置 bcrypt 格式的 `APP_ADMIN_PASSWORD_HASH`、随机 `JWT_SECRET`、数据库地址和可信 CORS 域名。不要提交 `.env` 或数据库文件。
+`.env` 需配置 Argon2id 格式的 `ADMIN_PASSWORD_HASH`、随机 `SESSION_SECRET`、数据库地址和可信 CORS 域名。生成哈希可执行 `cd backend; .\.venv\Scripts\python.exe -m tools.generate_password_hash`；不要提交 `.env` 或数据库文件。
 
 ## 导入数据
 

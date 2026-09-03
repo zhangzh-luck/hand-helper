@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 node_modules/
@@ -15,6 +16,8 @@ web/.env.android.local
 web/android/key.properties
 web/android/*.jks
 web/android/*.keystore
+web/android/.idea/
+web/android/iqoo-*.png
 # APK 由发布流程单独上传到服务器，不随源码仓库提交。
 web/public/download/*.apk
 ios/.build/

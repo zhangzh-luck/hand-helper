@@ -8,26 +8,18 @@ class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-class AppUser(TimestampMixin, Base):
-    __tablename__ = "app_users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-
 class AppProfile(TimestampMixin, Base):
     __tablename__ = "app_profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), unique=True)
     display_name: Mapped[str] = mapped_column(String(64), default="用户")
     avatar_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-class RefreshToken(Base):
-    __tablename__ = "refresh_tokens"
+class AppSession(Base):
+    """Server-side session metadata; only an HMAC of the browser secret is stored."""
+    __tablename__ = "app_sessions"
     id: Mapped[int] = mapped_column(primary_key=True)
-    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"))
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    session_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class AcademicTerm(TimestampMixin, Base):
@@ -89,7 +81,6 @@ class CustomSchedule(TimestampMixin, Base):
     """用户自行添加的日程；与教务课程数据完全隔离。"""
     __tablename__ = "custom_schedules"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200))
     scheduled_date: Mapped[date] = mapped_column(Date, index=True)
     scheduled_time: Mapped[str] = mapped_column(String(5))
@@ -97,9 +88,8 @@ class CustomSchedule(TimestampMixin, Base):
 class ManualCourse(TimestampMixin, Base):
     """用户手动维护的课程；不会被打印课表文件导入覆盖。"""
     __tablename__ = "manual_courses"
-    __table_args__ = (UniqueConstraint("user_id", "term_id", "course_name", "weekday", "start_period", "end_period", "week_expression", name="uq_manual_course_rule"),)
+    __table_args__ = (UniqueConstraint("term_id", "course_name", "weekday", "start_period", "end_period", "week_expression", name="uq_manual_course_rule"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), index=True)
     term_id: Mapped[int] = mapped_column(ForeignKey("academic_terms.id", ondelete="CASCADE"), index=True)
     course_name: Mapped[str] = mapped_column(String(255))
     teacher: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -169,4 +159,3 @@ class SyncJob(TimestampMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-

@@ -69,6 +69,104 @@ html[data-appearance="dark"] .login input {
 html[data-appearance="dark"] .login input::placeholder { color:#8798b2; }
 html[data-appearance="dark"] .login .error { color:#fca5a5; }
 
+/* 单用户登录页：保留应用本身的蓝紫色与圆角体系，和主应用共享同一套视觉语言。 */
+.login {
+  display:grid;
+  min-height:100dvh;
+  max-width:none;
+  margin:0;
+  padding:max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+  place-items:center;
+  background:
+    radial-gradient(circle at 12% 8%, rgb(96 165 250 / 20%), transparent 31%),
+    radial-gradient(circle at 93% 94%, rgb(99 102 241 / 17%), transparent 36%),
+    #f4f7fb;
+}
+.login-card {
+  width:min(100%, 408px);
+  display:grid;
+  gap:0;
+  padding:28px;
+  border:1px solid rgb(191 219 254 / 82%);
+  border-radius:28px;
+  background:rgb(255 255 255 / 90%);
+  box-shadow:0 24px 58px rgb(30 64 175 / 13%), inset 0 1px rgb(255 255 255 / 90%);
+  backdrop-filter:blur(18px);
+}
+.login-brand { display:flex; align-items:center; gap:12px; }
+.login-brand img { width:46px; height:46px; flex:0 0 auto; border-radius:14px; box-shadow:0 8px 18px rgb(37 99 235 / 22%); }
+.login-brand span { display:block; color:#6d8ed4; font-size:11px; font-weight:800; letter-spacing:.12em; }
+.login-brand h1 { margin:3px 0 0; color:#172033; font-size:27px; letter-spacing:-.035em; }
+.login-intro { margin:17px 0 24px; color:#64748b; font-size:14px; line-height:1.65; }
+.login form { display:grid; gap:16px; margin:0; }
+.login-field { display:grid; gap:7px; color:#334155; font-size:13px; font-weight:700; }
+.login-field > span { display:flex; align-items:center; gap:7px; }
+.login-field input { width:100%; min-height:48px; padding:12px 13px; border:1px solid #d6e0ee; border-radius:13px; outline:0; color:#172033; background:#fff; font:inherit; font-weight:400; transition:border-color .16s ease, box-shadow .16s ease; }
+.login-field input:focus { border-color:#5b82f1; box-shadow:0 0 0 4px rgb(59 130 246 / 12%); }
+.login-password { position:relative; }
+.login-password input { padding-right:48px; }
+.login-password .password-visibility { position:absolute; top:50%; right:6px; width:36px; height:36px; padding:0; transform:translateY(-50%); border-radius:10px; color:#62748d; background:transparent; }
+.login-password .password-visibility:hover { color:#2563eb; background:#eff6ff; }
+.login-submit { width:100%; min-height:48px; margin-top:5px; border-radius:13px; color:#fff; background:linear-gradient(135deg, #2563eb, #4f46e5); box-shadow:0 10px 20px rgb(37 99 235 / 24%); font:700 15px/1 inherit; transition:transform .16s ease, box-shadow .16s ease, opacity .16s ease; }
+.login-submit:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 13px 24px rgb(37 99 235 / 30%); }
+.login-submit:disabled { cursor:wait; opacity:.72; }
+.login-error { margin:0; padding:10px 12px; border-radius:11px; color:#b42318; background:#fff1f2; font-size:13px; line-height:1.45; }
+html[data-appearance="dark"] .login { background:radial-gradient(circle at 12% 8%, rgb(37 99 235 / 22%), transparent 31%), radial-gradient(circle at 93% 94%, rgb(99 102 241 / 16%), transparent 36%), #09111f; }
+html[data-appearance="dark"] .login-card { border-color:rgb(100 116 139 / 36%); background:rgb(17 28 49 / 90%); box-shadow:0 24px 58px rgb(0 0 0 / 30%), inset 0 1px rgb(255 255 255 / 4%); }
+html[data-appearance="dark"] .login-brand h1 { color:#f1f5f9; }
+html[data-appearance="dark"] .login-intro { color:#9fb0c8; }
+html[data-appearance="dark"] .login-field { color:#cbd5e1; }
+html[data-appearance="dark"] .login-field input { border-color:#314563; background:#111c31; color:#e7eefb; }
+html[data-appearance="dark"] .login-password .password-visibility { color:#9fb0c8; }
+html[data-appearance="dark"] .login-password .password-visibility:hover { color:#bfdbfe; background:#1e3a5f; }
+html[data-appearance="dark"] .login-error { color:#fecaca; background:rgb(127 29 29 / 38%); }
+@media (max-width:380px) { .login { padding-inline:14px; } .login-card { padding:23px 20px; border-radius:24px; } }
+
+/* 登录页采用 Hermes Studio 截图相同的克制居中版式，但不展示任何默认凭据。 */
+.login { background:#fafafa; }
+.login-card { width:min(100%,480px); padding:56px; border:1px solid #dcdcdc; border-radius:8px; background:#fff; box-shadow:none; backdrop-filter:none; }
+.login-brand { display:grid; justify-items:center; gap:22px; text-align:center; }
+.login-brand img { width:80px; height:80px; border-radius:0; box-shadow:none; }
+.login-brand h1 { margin:0; color:#191919; font-size:28px; letter-spacing:-.02em; }
+.login-brand p { margin:12px 0 0; color:#87909c; font-size:14px; }
+.login-card form { gap:14px; margin-top:32px; }
+.login-card form > input { width:100%; height:48px; padding:12px 16px; border:1px solid #dcdcdc; border-radius:6px; outline:0; color:#202020; background:#fff; font:14px/1.4 inherit; transition:border-color .16s ease, box-shadow .16s ease; }
+.login-card form > input:focus { border-color:#667085; box-shadow:0 0 0 3px rgb(15 23 42 / 7%); }
+.login-card form > input::placeholder { color:#98a2b3; }
+.login-submit { min-height:48px; margin-top:0; border-radius:6px; background:#1d1d1d; box-shadow:none; font-size:14px; }
+.login-submit:not(:disabled):hover { transform:none; background:#050505; box-shadow:none; }
+html[data-appearance="dark"] .login { background:#101114; }
+html[data-appearance="dark"] .login-card { border-color:#34363c; background:#1b1d22; box-shadow:none; }
+html[data-appearance="dark"] .login-brand h1 { color:#f5f5f5; }
+html[data-appearance="dark"] .login-brand p { color:#9a9da5; }
+html[data-appearance="dark"] .login-card form > input { border-color:#3c3f47; color:#f5f5f5; background:#15171b; }
+html[data-appearance="dark"] .login-card form > input:focus { border-color:#8b8e97; box-shadow:0 0 0 3px rgb(255 255 255 / 8%); }
+html[data-appearance="dark"] .login-submit { background:#f5f5f5; color:#191919; }
+html[data-appearance="dark"] .login-submit:not(:disabled):hover { background:#fff; }
+@media (max-width:520px) { .login-card { padding:42px 30px; } }
+
+/* 由项目所有者提供的 Hermes 式登录版式，按当前 React 项目的颜色变量重新落地。 */
+.login-card { text-align:center; }
+.login-logo { display:flex; justify-content:center; width:100%; margin-bottom:24px; }
+.login-logo img { display:block; width:80px; height:80px; border-radius:18px; object-fit:cover; overflow:hidden; clip-path:inset(0 round 18px); }
+.login-title { margin:0 0 10px; color:#191919; font-size:26px; font-weight:600; letter-spacing:normal; }
+.login-desc { margin:0 0 28px; color:#87909c; font-size:14px; line-height:1.6; }
+.login-card .login-form { display:flex; flex-direction:column; gap:14px; margin:0; }
+.login-card .login-form > input.login-input { width:100%; height:auto; min-height:0; padding:14px 16px; border:1px solid #dcdcdc; border-radius:6px; color:#202020; background:#fff; font:15px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; box-sizing:border-box; }
+.login-card .login-form > input.login-input:focus { border-color:#667085; box-shadow:none; }
+.login-card .login-form > input.login-input::placeholder { color:#98a2b3; }
+.login-card .login-btn { width:100%; padding:14px; border:0; border-radius:6px; color:#fff; background:#1d1d1d; box-shadow:none; font-size:15px; font-weight:500; cursor:pointer; transition:opacity .16s ease; }
+.login-card .login-btn:hover { transform:none; background:#1d1d1d; box-shadow:none; opacity:.85; }
+.login-card .login-btn:disabled { cursor:not-allowed; opacity:.5; }
+.login-card .login-error { padding:0; color:#b42318; background:transparent; font-size:13px; text-align:start; }
+html[data-appearance="dark"] .login-title { color:#f5f5f5; }
+html[data-appearance="dark"] .login-desc { color:#9a9da5; }
+html[data-appearance="dark"] .login-card .login-form > input.login-input { border-color:#3c3f47; color:#f5f5f5; background:#15171b; }
+html[data-appearance="dark"] .login-card .login-form > input.login-input:focus { border-color:#8b8e97; box-shadow:none; }
+html[data-appearance="dark"] .login-card .login-btn { color:#191919; background:#f5f5f5; }
+html[data-appearance="dark"] .login-card .login-btn:hover { background:#f5f5f5; }
+html[data-appearance="dark"] .login-card .login-error { color:#fecaca; background:transparent; }
+
 .manual-import { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 12px; padding:12px; border-radius:14px; background:#fff; box-shadow:0 2px 9px #1e293b0d; }
 .manual-import .secondary-button { background:#f1f5f9; color:#475569; }
 .import-status { display:grid; flex-basis:100%; gap:4px; padding-top:2px; }.import-status b { font-size:13px; color:#334155; }.import-status small { line-height:1.5; }.import-status.waiting_for_user b { color:#1d4ed8; }.import-status.page_not_ready b,.import-status.failed b,.import-status.timed_out b { color:#b91c1c; }.import-success { flex-basis:100%; margin:0; color:#15803d; font-size:13px; }
