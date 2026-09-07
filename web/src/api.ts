@@ -77,6 +77,7 @@ export const api = {
   previewGradesFile: (file: File, termId?: string) => upload<GradeImportPreview>(`/api/v1/grades/import-file${termId ? `?term_id=${encodeURIComponent(termId)}` : ''}`, file),
   confirmGradesImport: (payload: GradeImportConfirmInput) => request<{ term_id: number; source_term_id: string; grades_imported: number }>('/api/v1/grades/import-confirm', { method: 'POST', body: JSON.stringify(payload) }),
   grades: (termId?: number) => request<Grade[]>(`/api/v1/grades${termQuery(termId)}`),
+  deleteGrades: (termId: number) => request<{ term_id: number; grades_deleted: number; analyses_deleted: number }>(`/api/v1/grades?term_id=${termId}`, { method: 'DELETE' }),
   summary: (termId?: number) => request<Summary>(`/api/v1/grades/summary${termQuery(termId)}`),
   aiSettings: () => request<AiProviderSetting>('/api/v1/ai/settings'),
   updateAiSettings: (payload: AiProviderSettingInput) => request<AiProviderSetting>('/api/v1/ai/settings', { method: 'PUT', body: JSON.stringify(payload) }),

@@ -7,14 +7,14 @@ import DatePicker, { registerLocale } from 'react-datepicker';
 import { zhCN } from 'date-fns/locale';
 import 'react-datepicker/dist/react-datepicker.css';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Database, GraduationCap, Home, Info, KeyRound, Monitor, Moon, Palette, Pencil, Plus, Settings as SettingsIcon, Sun, Trash2, Upload, X } from 'lucide-react';
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, AiProviderSettingInput, CustomSchedule, CustomScheduleInput, Grade, GradeAiAnalysis, GradeAiAnalysisHistory, GradeImportPreview, ManualCourseInput, PeriodTime, Profile, ProfileUpdate, Session, Term } from './api';
 import { updateNativeStatusBar } from './native-runtime';
 
 const formatTime = (value: string) => new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 const DEFAULT_PERIOD_VALUES: Array<[number, string, string]> = [[1, '08:30', '09:15'], [2, '09:20', '10:05'], [3, '10:25', '11:10'], [4, '11:15', '12:00'], [5, '13:40', '14:25'], [6, '14:30', '15:15'], [7, '15:30', '16:15'], [8, '16:30', '17:15'], [9, '17:20', '18:05'], [10, '18:20', '19:05'], [11, '19:10', '19:55'], [12, '20:00', '20:45'], [13, '20:50', '21:35']];
 const DEFAULT_PERIODS: PeriodTime[] = DEFAULT_PERIOD_VALUES.map(([period_number, start_time, end_time]) => ({ period_number, start_time, end_time }));
-const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.1.0';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.2.0';
 type AppearanceMode = 'light' | 'dark' | 'system';
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 registerLocale('zh-CN', zhCN);
@@ -105,6 +105,11 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   const customSchedules = useQuery({ queryKey: ['custom-schedules', today], queryFn: () => api.customSchedules(today) });
   const [editingSchedule, setEditingSchedule] = useState<CustomSchedule | 'new' | null>(null);
   const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
+  useEffect(() => {
+    if (avatarPreviewOpen) document.documentElement.dataset.avatarPreview = 'open';
+    else delete document.documentElement.dataset.avatarPreview;
+    return () => { delete document.documentElement.dataset.avatarPreview; };
+  }, [avatarPreviewOpen]);
   const saveSchedule = useMutation({
     mutationFn: (payload: CustomScheduleInput) => editingSchedule === 'new' ? api.createCustomSchedule(payload) : api.updateCustomSchedule(editingSchedule!.id, payload),
     onSuccess: () => { setEditingSchedule(null); queryClient.invalidateQueries({ queryKey: ['custom-schedules'] }); },
@@ -204,12 +209,12 @@ const COURSE_COLOR_CLASSES = ['course-color-violet', 'course-color-sky', 'course
 const courseColorStorageKey = (termId: number) => `ynnu-jw-course-colors:${termId}`;
 function createCourseColorMap(sessions: Session[]): Record<string, string> {
   const courseNames = [...new Set(sessions.map((session) => session.course_name))].sort();
-  const palette = [...COURSE_COLOR_CLASSES];
-  for (let index = palette.length - 1; index > 0; index -= 1) {
-    const target = Math.floor(Math.random() * (index + 1));
-    [palette[index], palette[target]] = [palette[target], palette[index]];
-  }
-  return Object.fromEntries(courseNames.map((name, index) => [name, palette[index % palette.length]]));
+  return Object.fromEntries(courseNames.map((name) => {
+    // 首帧和后续渲染使用同一套颜色，避免随机洗牌导致课程卡片闪色。
+    let hash = 0;
+    for (let index = 0; index < name.length; index += 1) hash = ((hash * 31) + name.charCodeAt(index)) >>> 0;
+    return [name, COURSE_COLOR_CLASSES[hash % COURSE_COLOR_CLASSES.length]];
+  }));
 }
 function readCourseColorMap(termId: number): Record<string, string> | null {
   try {
@@ -217,10 +222,15 @@ function readCourseColorMap(termId: number): Record<string, string> | null {
     return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : null;
   } catch { return null; }
 }
+function resolveCourseColorMap(term: Term, sessions: Session[]): Record<string, string> {
+  const courseNames = new Set(sessions.map((session) => session.course_name));
+  const saved = readCourseColorMap(term.id);
+  return saved && [...courseNames].every((name) => saved[name]) ? saved : createCourseColorMap(sessions);
+}
 
 type TimetableSlot = { weekday: number; startPeriod: number; endPeriod: number };
 
-function WeekCalendar({ sessions, term, periods, anchor, courseColors, onSelect, pendingSlot, onSelectSlot, onAddSlot }: { sessions: Session[]; term: Term | undefined; periods: PeriodTime[]; anchor: Date; courseColors: Record<string, string>; onSelect: (session: Session) => void; pendingSlot: TimetableSlot | null; onSelectSlot: (slot: TimetableSlot | null) => void; onAddSlot: (slot: TimetableSlot) => void }) {
+function WeekCalendar({ sessions, term, periods, anchor, courseColors, selectedSessionId, onSelect, pendingSlot, onSelectSlot, onAddSlot }: { sessions: Session[]; term: Term | undefined; periods: PeriodTime[]; anchor: Date; courseColors: Record<string, string>; selectedSessionId: number | null; onSelect: (session: Session) => void; pendingSlot: TimetableSlot | null; onSelectSlot: (slot: TimetableSlot | null) => void; onAddSlot: (slot: TimetableSlot) => void }) {
   const start = mondayOf(anchor); const days = Array.from({ length: 7 }, (_, index) => addDays(start, index)); const today = localDateKey(new Date());
   const startDate = term?.start_date ? dateFromKey(term.start_date) : null;
   const currentWeek = startDate && start >= mondayOf(startDate) ? Math.floor((start.getTime() - mondayOf(startDate).getTime()) / 604800000) + 1 : null;
@@ -252,7 +262,7 @@ function WeekCalendar({ sessions, term, periods, anchor, courseColors, onSelect,
           const startPeriod = periods.findIndex((period) => period.start_time === formatTime(session.start_datetime));
           const endPeriod = periods.findIndex((period) => period.end_time === formatTime(session.end_datetime));
           if (day < 0 || startPeriod < 0 || endPeriod < startPeriod) return null;
-          return <button type="button" className={`week-course ${session.source === 'MANUAL' ? 'manual-course-card' : ''} ${courseColors[session.course_name] ?? 'course-color-sky'}`} key={session.id} title={`${session.course_name} · ${session.classroom ?? '教室待定'} · ${session.teacher ?? '教师待定'}`} onClick={() => onSelect(session)} style={{ gridColumn: day + 2, gridRow: `${startPeriod + 1} / ${endPeriod + 2}` }}><b>{session.course_name}</b><small>{session.classroom ?? '教室待定'}</small><small>{session.teacher ?? '教师待定'}</small></button>;
+          return <button type="button" className={`week-course ${session.source === 'MANUAL' ? 'manual-course-card' : ''} ${courseColors[session.course_name] ?? 'course-color-sky'} ${session.id === selectedSessionId ? 'is-detail-open' : ''}`} key={session.id} title={`${session.course_name} · ${session.classroom ?? '教室待定'} · ${session.teacher ?? '教师待定'}`} onClick={() => onSelect(session)} style={{ gridColumn: day + 2, gridRow: `${startPeriod + 1} / ${endPeriod + 2}` }}><b>{session.course_name}</b><small>{session.classroom ?? '教室待定'}</small><small>{session.teacher ?? '教师待定'}</small></button>;
         })}
       </div>
     </div>
@@ -280,13 +290,11 @@ function Timetable({ appearance }: { appearance: 'light' | 'dark' }) {
   };
   useEffect(() => {
     if (!selectedTerm || !sessions.data) return;
-    const courseNames = new Set(sessions.data.map((session) => session.course_name));
+    const next = resolveCourseColorMap(selectedTerm, sessions.data);
     const saved = readCourseColorMap(selectedTerm.id);
-    if (saved && [...courseNames].every((name) => saved[name])) {
-      setCourseColors(saved);
-      return;
-    }
-    resetCourseColors(selectedTerm, sessions.data);
+    const courseNames = new Set(sessions.data.map((session) => session.course_name));
+    if (!saved || ![...courseNames].every((name) => saved[name])) localStorage.setItem(courseColorStorageKey(selectedTerm.id), JSON.stringify(next));
+    setCourseColors(next);
   }, [selectedTerm?.id, sessions.data]);
   const saveManualCourse = useMutation({
     mutationFn: ({ courseId, payload }: { courseId?: number; payload: ManualCourseInput }) => courseId ? api.updateManualCourse(courseId, payload) : api.createManualCourse(payload),
@@ -308,7 +316,7 @@ function Timetable({ appearance }: { appearance: 'light' | 'dark' }) {
   const fileImport = useMutation({ mutationFn: api.importTimetableFile, onMutate: () => setFileImportNotice(null), onSuccess: async (result) => { setTermId(result.term_id); setFileImportNotice(`已导入 ${result.term_id} 的 ${result.courses_imported} 条课程规则，并生成 ${result.sessions_generated} 条课程日程。`); await queryClient.invalidateQueries({ queryKey: ['terms'] }); await queryClient.invalidateQueries({ queryKey: ['sessions'] }); const importedTerm = queryClient.getQueryData<Term[]>(['terms'])?.find((term) => term.source_term_id === result.term_id); const freshSessions = importedTerm ? queryClient.getQueryData<Session[]>(['sessions', importedTerm.id]) : undefined; if (importedTerm && freshSessions) resetCourseColors(importedTerm, freshSessions); } });
   return <Page title="课程表" icon={<CalendarDays size={20} />} mainRef={timetableScrollRef} className={`timetable-page${appearance === 'dark' ? ' timetable-page-dark' : ''}`} headerClassName={`collapsible-page-header${timetableSideControlsHidden ? ' collapsible-side-controls-hidden' : ''}`} headerStyle={timetableHeaderStyle} compactTitle>
     <div className="week-tools"><button aria-label="上一周" onClick={() => setWeekAnchor((date) => moveWeekInTerm(date, -1, selectedTerm))}><ChevronLeft size={18} /></button><button type="button" onClick={() => setWeekAnchor(new Date())}>回到今天</button><button aria-label="下一周或开学周" title={selectedTerm?.start_date && mondayOf(weekAnchor) < mondayOf(dateFromKey(selectedTerm.start_date)) ? `跳到 ${selectedTerm.start_date} 开学周` : '下一周'} onClick={() => setWeekAnchor((date) => moveWeekInTerm(date, 1, selectedTerm))}><ChevronRight size={18} /></button></div>
-{terms.isLoading ? <p className="muted">正在读取本地学期列表…</p> : terms.data?.length === 0 ? <Empty text="请导入教务系统打印的课程表文件，然后选择对应学期。" /> : <WeekCalendar sessions={sessions.data ?? []} term={selectedTerm} periods={periods.data ?? DEFAULT_PERIODS} anchor={weekAnchor} courseColors={courseColors} onSelect={(session) => { setPendingSlot(null); setSelectedSession(session); }} pendingSlot={pendingSlot} onSelectSlot={setPendingSlot} onAddSlot={(slot) => { if (!selectedTerm) return; setManualEditor({ initial: { term_id: selectedTerm.id, course_name: '', week_expression: `${Math.max(1, Math.floor((mondayOf(weekAnchor).getTime() - mondayOf(dateFromKey(selectedTerm.start_date ?? localDateKey(weekAnchor))).getTime()) / 604800000) + 1)}周`, weekday: slot.weekday, start_period: slot.startPeriod, end_period: slot.endPeriod, classroom: '', teacher: '' } }); }} />}
+{terms.isLoading ? <p className="muted">正在读取本地学期列表…</p> : terms.data?.length === 0 ? <Empty text="请导入教务系统打印的课程表文件，然后选择对应学期。" /> : <WeekCalendar sessions={sessions.data ?? []} term={selectedTerm} periods={periods.data ?? DEFAULT_PERIODS} anchor={weekAnchor} courseColors={selectedTerm && sessions.data ? resolveCourseColorMap(selectedTerm, sessions.data) : courseColors} selectedSessionId={selectedSession?.id ?? null} onSelect={(session) => { setPendingSlot(null); setSelectedSession(session); }} pendingSlot={pendingSlot} onSelectSlot={setPendingSlot} onAddSlot={(slot) => { if (!selectedTerm) return; setManualEditor({ initial: { term_id: selectedTerm.id, course_name: '', week_expression: `${Math.max(1, Math.floor((mondayOf(weekAnchor).getTime() - mondayOf(dateFromKey(selectedTerm.start_date ?? localDateKey(weekAnchor))).getTime()) / 604800000) + 1)}周`, weekday: slot.weekday, start_period: slot.startPeriod, end_period: slot.endPeriod, classroom: '', teacher: '' } }); }} />}
     {terms.error && <p className="error">读取本地课表失败：{String(terms.error)}</p>}
     <section className="timetable-management"><b>课表管理</b><TermPicker terms={terms.data} selected={selected} onChange={setTermId} /><FileImportPanel pending={fileImport.isPending} notice={fileImportNotice} error={fileImport.error} onUpload={(file) => { fileImport.reset(); fileImport.mutate(file); }} /></section>
     {selectedSession && <DetailSheet title={selectedSession.course_name} dark={appearance === 'dark'} onClose={() => setSelectedSession(null)}><Detail label="上课时间" value={`${selectedSession.session_date} ${formatTime(selectedSession.start_datetime)}—${formatTime(selectedSession.end_datetime)}`} /><Detail label="教室" value={selectedSession.classroom ?? '未提供'} /><Detail label="教师" value={selectedSession.teacher ?? '未提供'} /><Detail label="周次" value={selectedSession.week_expression ?? '未提供'} />{selectedSession.source === 'MANUAL' && selectedSession.manual_course_id && <div className="manual-course-detail-actions"><small>手动添加课程</small><span><button type="button" onClick={() => { if (!selectedTerm) return; setSelectedSession(null); setManualEditor({ courseId: selectedSession.manual_course_id!, initial: { term_id: selectedSession.term_id ?? selectedTerm.id, course_name: selectedSession.course_name, teacher: selectedSession.teacher, classroom: selectedSession.classroom, weekday: selectedSession.weekday ?? (new Date(`${selectedSession.session_date}T12:00:00`).getDay() || 7), start_period: selectedSession.start_period ?? 1, end_period: selectedSession.end_period ?? 1, week_expression: selectedSession.week_expression ?? '' } }); }}>编辑</button><button type="button" className="danger-button" onClick={() => { if (window.confirm(`确认删除手动课程“${selectedSession.course_name}”吗？`)) deleteManualCourse.mutate(selectedSession.manual_course_id!); }}>删除</button></span></div>}</DetailSheet>}
@@ -329,7 +337,9 @@ function Grades({ appearance }: { appearance: 'light' | 'dark' }) {
   const [selectedGrade, setSelectedGrade] = useState<Grade | null>(null);
   const [gradePreview, setGradePreview] = useState<GradeImportPreview | null>(null);
   const [analysis, setAnalysis] = useState<GradeAiAnalysis | null>(null);
+  const [analysisDetailOpen, setAnalysisDetailOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [deleteGradesConfirm, setDeleteGradesConfirm] = useState(false);
   const now = new Date();
   const academicYear = now.getMonth() >= 8 ? `${now.getFullYear()}-${now.getFullYear() + 1}-1` : `${now.getFullYear() - 1}-${now.getFullYear()}-2`;
   const selected = termId || terms.data?.find((term) => term.is_current)?.source_term_id || terms.data?.find((term) => term.source_term_id === academicYear)?.source_term_id || '';
@@ -337,7 +347,7 @@ function Grades({ appearance }: { appearance: 'light' | 'dark' }) {
   const grades = useQuery({ queryKey: ['grades', selectedTerm?.id], queryFn: () => api.grades(selectedTerm?.id) });
   const summary = useQuery({ queryKey: ['summary', selectedTerm?.id], queryFn: () => api.summary(selectedTerm?.id) });
   const analysisHistory = useQuery({ queryKey: ['grade-ai-analyses', selectedTerm?.id], queryFn: () => api.gradeAiAnalyses(selectedTerm?.id), enabled: Boolean(selectedTerm) });
-  useEffect(() => { setAnalysis(null); setHistoryOpen(false); }, [selectedTerm?.id]);
+  useEffect(() => { setAnalysis(null); setAnalysisDetailOpen(false); setHistoryOpen(false); setDeleteGradesConfirm(false); }, [selectedTerm?.id]);
   const previewImport = useMutation({
     mutationFn: (file: File) => api.previewGradesFile(file, importTermId.trim() || selected || undefined),
     onSuccess: setGradePreview,
@@ -359,22 +369,42 @@ function Grades({ appearance }: { appearance: 'light' | 'dark' }) {
     },
     onSuccess: async (result) => {
       setAnalysis(result);
+      setAnalysisDetailOpen(true);
       await queryClient.invalidateQueries({ queryKey: ['grade-ai-analyses'] });
+    },
+  });
+  const deleteGrades = useMutation({
+    mutationFn: () => {
+      if (!selectedTerm) throw new Error('请先选择一个学期');
+      return api.deleteGrades(selectedTerm.id);
+    },
+    onSuccess: async () => {
+      setDeleteGradesConfirm(false);
+      setSelectedGrade(null);
+      setAnalysis(null);
+      setAnalysisDetailOpen(false);
+      setHistoryOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['grades'] }),
+        queryClient.invalidateQueries({ queryKey: ['summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['grade-ai-analyses'] }),
+      ]);
     },
   });
   return <Page title="成绩分析" icon={<GraduationCap size={20} />} mainRef={gradesScrollRef} className={`grades-page${appearance === 'dark' ? ' grades-page-dark' : ''}`} headerClassName={`collapsible-page-header${gradesSideControlsHidden ? ' collapsible-side-controls-hidden' : ''}`} headerStyle={gradesHeaderStyle} compactTitle>
     <TermPicker terms={terms.data} selected={selected} onChange={setTermId} />
-    <section className="grade-import-actions"><label className="grade-import-term">导入学期（文件未标明时填写）<input aria-label="成绩导入学期" value={importTermId} onChange={(event) => setImportTermId(event.target.value)} placeholder={selected || '例如：2025-2026-2'} pattern="20\\d{2}-20\\d{2}-[12]" maxLength={11} /></label><label className="file-import-button"><Upload size={16} />{previewImport.isPending ? '正在识别成绩…' : '导入成绩文件'}<input type="file" accept=".xls,.html,.htm,application/vnd.ms-excel,text/html" disabled={previewImport.isPending} onChange={(event) => { const file = event.target.files?.[0]; if (file) { previewImport.reset(); previewImport.mutate(file); event.currentTarget.value = ''; } }} /></label><small>支持教务系统导出的 .xls 或 HTML 成绩文件；文件仅用于本次识别，不会保留原件。</small>{previewImport.error && <p className="error">识别失败：{previewImport.error.message}</p>}</section>
+    <section className="grade-import-actions"><label className="grade-import-term">导入学期（文件未标明时填写）<input aria-label="成绩导入学期" value={importTermId} onChange={(event) => setImportTermId(event.target.value)} placeholder={selected || '例如：2025-2026-2'} pattern="20\\d{2}-20\\d{2}-[12]" maxLength={11} /></label><label className="file-import-button"><Upload size={16} />{previewImport.isPending ? '正在识别成绩…' : '导入成绩文件'}<input type="file" accept=".xls,.html,.htm,application/vnd.ms-excel,text/html" disabled={previewImport.isPending} onChange={(event) => { const file = event.target.files?.[0]; if (file) { previewImport.reset(); previewImport.mutate(file); event.currentTarget.value = ''; } }} /></label>{Boolean(selectedTerm && grades.data?.length) && <button type="button" className="grade-delete-button" onClick={() => { deleteGrades.reset(); setDeleteGradesConfirm(true); }}>删除本学期成绩</button>}<small>支持教务系统导出的 .xls 或 HTML 成绩文件；文件仅用于本次识别，不会保留原件。</small>{previewImport.error && <p className="error">识别失败：{previewImport.error.message}</p>}{deleteGrades.error && <p className="error">删除失败：{deleteGrades.error.message}</p>}</section>
     <div className="metrics"><Metric label="已获学分" value={summary.data?.earned_credits ?? '—'} /><Metric label="平均成绩" value={summary.data?.average_score?.toFixed(1) ?? '—'} /><Metric label="绩点" value={summary.data?.gpa?.toFixed(2) ?? '—'} /><Metric label="不及格" value={summary.data?.failed_courses ?? '—'} /></div>
-    <section className="grade-ai-actions"><div><b>AI 成绩分析</b><small>仅在你点击后，将当前学期的课程名称、成绩、学分和绩点发送给已配置的模型服务。</small></div><div className="grade-ai-buttons"><button type="button" className="secondary-button" disabled={!selectedTerm} onClick={() => setHistoryOpen((open) => !open)}>{historyOpen ? '收起历史' : `历史分析${analysisHistory.data?.length ? ` ${analysisHistory.data.length}` : ''}`}</button><button type="button" disabled={!selectedTerm || analyze.isPending || !grades.data?.length} onClick={() => { analyze.reset(); analyze.mutate(false); }}>{analyze.isPending ? '分析中…' : '生成分析'}</button></div></section>
+    <section className="grade-ai-actions"><div><b>AI 成绩分析</b><small>仅在你点击后，将当前学期的课程名称、成绩、学分和绩点发送给已配置的模型服务。</small></div><div className="grade-ai-buttons"><button type="button" className="secondary-button" disabled={!selectedTerm} onClick={() => setHistoryOpen((open) => !open)}>{historyOpen ? '收起历史' : `历史分析${analysisHistory.data?.length ? ` ${analysisHistory.data.length}` : ''}`}</button><button type="button" disabled={!selectedTerm || analyze.isPending || (!analysis && !grades.data?.length)} onClick={() => { if (analysis) { setAnalysisDetailOpen(true); return; } analyze.reset(); analyze.mutate(false); }}>{analysis ? '查看分析' : analyze.isPending ? '分析中…' : '生成分析'}</button></div></section>
     {analyze.error && <p className="error">分析失败：{analyze.error.message}</p>}
-    {analysis && <section className="card grade-ai-result"><header><b>分析结果</b><span><small>{analysis.cached ? '已使用当前成绩快照的缓存结果' : `由 ${analysis.model} 生成`}</small><button type="button" className="secondary-button" disabled={analyze.isPending} onClick={() => { analyze.reset(); analyze.mutate(true); }}>{analyze.isPending ? '生成中…' : '重新生成'}</button></span></header><AiAnalysisReport content={analysis.content} /><button type="button" className="secondary-button grade-ai-collapse" onClick={() => setAnalysis(null)}>收起</button></section>}
-    {historyOpen && <GradeAiAnalysisHistoryPanel history={analysisHistory.data ?? []} loading={analysisHistory.isLoading} error={analysisHistory.error} onSelect={(entry) => setAnalysis({ ...entry, cached: true })} />}
-    <div className="stack">{grades.data?.map((grade: Grade) => <button type="button" className="card grade-card" key={grade.id} onClick={() => setSelectedGrade(grade)}><b>{grade.course_name}</b><span>成绩：{grade.score ?? '未公布'}　学分：{grade.credits ?? '—'}</span><small>{grade.course_type ?? '课程性质未提供'} · 绩点：{grade.grade_point ?? '—'}</small></button>)}</div>
+    {historyOpen && <GradeAiAnalysisHistoryPanel history={analysisHistory.data ?? []} loading={analysisHistory.isLoading} error={analysisHistory.error} onSelect={(entry) => { setAnalysis({ ...entry, cached: true }); setAnalysisDetailOpen(true); }} />}
+    <div className="stack">{grades.data?.map((grade: Grade) => <button type="button" className={`card grade-card${grade.id === selectedGrade?.id ? ' is-detail-open' : ''}`} key={grade.id} onClick={() => setSelectedGrade(grade)}><b>{grade.course_name}</b><span>成绩：{grade.score ?? '未公布'}　学分：{grade.credits ?? '—'}</span><small>{grade.course_type ?? '课程性质未提供'} · 绩点：{grade.grade_point ?? '—'}</small></button>)}</div>
     {summary.data?.gpa_note && <small className="muted">{summary.data.gpa_note}</small>}
     {terms.error && <p className="error">读取成绩分析失败：{String(terms.error)}</p>}
+    {analysis && analysisDetailOpen && <DetailSheet title="分析结果" dark={appearance === 'dark'} onClose={() => setAnalysisDetailOpen(false)}><div className="grade-ai-detail-meta"><small>{analysis.cached ? '已使用当前成绩快照的缓存结果' : `由 ${analysis.model} 生成`}</small><button type="button" className="secondary-button" disabled={analyze.isPending} onClick={() => { analyze.reset(); analyze.mutate(true); }}>{analyze.isPending ? '生成中…' : '重新生成'}</button></div><AiAnalysisReport content={analysis.content} /></DetailSheet>}
     {selectedGrade && <DetailSheet title={selectedGrade.course_name} dark={appearance === 'dark'} onClose={() => setSelectedGrade(null)}><Detail label="总评成绩" value={selectedGrade.score ?? '未公布'} /><Detail label="期末成绩" value={selectedGrade.final_exam_score ?? '未提供'} /><Detail label="平时成绩" value={selectedGrade.usual_score ?? '未提供'} /><Detail label="学分 / 绩点" value={`${selectedGrade.credits ?? '—'} / ${selectedGrade.grade_point ?? '—'}`} /><Detail label="课程性质" value={selectedGrade.course_type ?? '未提供'} /><Detail label="考试性质" value={selectedGrade.exam_type ?? '未提供'} /><Detail label="补考 / 重修" value={`${selectedGrade.makeup_flag ? '补考' : '否'} / ${selectedGrade.retake_flag ? '重修' : '否'}`} /></DetailSheet>}
     {gradePreview && <GradeImportSheet preview={gradePreview} pending={confirmImport.isPending} error={confirmImport.error} onClose={() => { if (!confirmImport.isPending) setGradePreview(null); }} onConfirm={(preview) => confirmImport.mutate(preview)} />}
+    {deleteGradesConfirm && selectedTerm && <ConfirmDialog title={`删除 ${selectedTerm.display_name} 的成绩？`} description={`将删除该学期已导入的全部 ${grades.data?.length ?? 0} 门成绩，以及对应的 AI 分析缓存。此操作无法撤销，其他学期不会受影响。`} confirmLabel="确认删除" pending={deleteGrades.isPending} onCancel={() => setDeleteGradesConfirm(false)} onConfirm={() => deleteGrades.mutate()} />}
   </Page>;
 }
 
@@ -550,7 +580,7 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       </section>
       <section className="card settings-card"><b>退出航的助手</b><small>退出本应用并返回登录页；不会删除已导入的课程表、成绩缓存或自定义安排。</small><button type="button" className="logout-button" disabled={appLogout.isPending} onClick={() => setLogoutConfirm(true)}>退出到登录页</button></section>
     </>}
-    {settingsSection === 'personal' && <section className="card settings-card"><b>个人资料</b><small>首页会使用这里的姓名和头像。头像仅保存在你的后端，支持 PNG、JPEG、WebP，最大 1 MB。</small><form className="profile-form" onSubmit={(event) => { event.preventDefault(); saveProfile.mutate(); }}><Avatar profile={newAvatar === undefined ? profile.data : { display_name: displayName || '张自航', avatar_data_url: newAvatar }} className="profile-avatar" /><label>显示姓名<input aria-label="显示姓名" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={64} required /></label><div className="profile-actions"><label className="profile-upload-button">选择头像<input aria-label="选择头像" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => chooseAvatar(event.target.files?.[0])} /></label>{(newAvatar !== undefined ? newAvatar : profile.data?.avatar_data_url) && <button className="secondary-button" type="button" onClick={() => setNewAvatar(null)}>移除头像</button>}<button type="submit" disabled={saveProfile.isPending || !displayName.trim()}>{saveProfile.isPending ? '保存中…' : '保存个人资料'}</button></div>{(avatarError || saveProfile.error) && <p className="error">{avatarError ?? saveProfile.error?.message}</p>}</form></section>}
+    {settingsSection === 'personal' && <section className="card settings-card"><b>个人资料</b><small>首页会使用这里的姓名和头像。头像仅保存在你的后端，支持 PNG、JPEG、WebP，最大 1 MB。</small><form className="profile-form" onSubmit={(event) => { event.preventDefault(); saveProfile.mutate(); }}><Avatar profile={newAvatar === undefined ? profile.data : { display_name: displayName || '张自航', avatar_data_url: newAvatar }} className="profile-avatar" /><label>显示姓名<input aria-label="显示姓名" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={64} required /></label><div className="profile-actions"><label className="profile-upload-button">选择头像<input aria-label="选择头像" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => chooseAvatar(event.target.files?.[0])} /></label>{(newAvatar !== undefined ? newAvatar : profile.data?.avatar_data_url) && <button className="secondary-button" type="button" onClick={() => setNewAvatar(null)}>移除头像</button>}<button type="submit" disabled={saveProfile.isPending || !displayName.trim()}>{saveProfile.isPending ? '保存中…' : '保存资料'}</button></div>{(avatarError || saveProfile.error) && <p className="error">{avatarError ?? saveProfile.error?.message}</p>}</form></section>}
     {settingsSection === 'time' && <><section className="card"><b>学期第一周</b><small>选择一个已导入的学期后，在日历中选择第一周的星期一。保存会重新生成该学期日程。</small>{terms.data?.length && preferredTerm ? <><label className="settings-select">学期<select aria-label="选择要配置的学期" value={selectedTermId ?? preferredTerm.id} onChange={(event) => setSelectedTermId(Number(event.target.value))}>{terms.data.map((term) => <option key={term.id} value={term.id}>{term.display_name}</option>)}</select></label><TermStartDateEditor term={terms.data.find((term) => term.id === selectedTermId) ?? preferredTerm} onSaved={() => { queryClient.invalidateQueries({ queryKey: ['terms'] }); queryClient.invalidateQueries({ queryKey: ['sessions'] }); }} /></> : <small>尚无学期数据；请先在课程表页导入打印课表文件。</small>}</section><section className="card settings-card"><b>节次时间</b><small>选择需要调整的节次。保存后，已有课程日程会按新时间重新生成。</small>{periods.data?.length ? <><label className="settings-select">节次<select aria-label="选择要配置的节次" value={selectedPeriodNumber ?? periods.data[0].period_number} onChange={(event) => setSelectedPeriodNumber(Number(event.target.value))}>{periods.data.map((period) => <option key={period.period_number} value={period.period_number}>第 {period.period_number} 节</option>)}</select></label><PeriodTimeEditor period={periods.data.find((period) => period.period_number === selectedPeriodNumber) ?? periods.data[0]} onSaved={() => { queryClient.invalidateQueries({ queryKey: ['period-times'] }); queryClient.invalidateQueries({ queryKey: ['sessions'] }); }} /></> : <small>正在读取节次时间…</small>}</section></>}
     {settingsSection === 'data' && <section className="card settings-card"><b>本地文件导入</b><small>课程表与成绩不会由服务器登录教务系统获取。请在教务系统中自行导出文件，再回到本应用导入。已确认入库的数据会保存在个人后端缓存中。</small><div className="about-list"><p><span>课程表</span><strong>导入打印的 .xls 课表</strong></p><p><span>成绩分析</span><strong>导入 .xls 或 HTML 成绩文件</strong></p><p><span>原始文件</span><strong>仅用于本次解析，不会保存</strong></p></div></section>}
     {settingsSection === 'analysis' && <><AiAnalysisSettings /><AiAnalysisHistorySettings /></>}
@@ -652,8 +682,22 @@ function ManualCourseSheetV2({ initial, periods, pending, error, editing, dark =
   return createPortal(<><div className={`sheet-mask sheet-mask-viewport${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet manual-course-sheet" role="dialog" aria-modal="true" aria-label={editing ? '编辑手动课程' : '添加手动课程'} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><h2>{editing ? '编辑课程' : '添加课程'}</h2><button type="button" onClick={onClose} disabled={pending}>关闭</button></header><p className="muted">课程会保存到当前学期，不会被教务系统同步或打印课表导入覆盖。</p><form onSubmit={(event) => { event.preventDefault(); if (!selectedWeeks.size) return; onSave({ term_id: initial.term_id, course_name: courseName.trim(), week_expression: manualCourseWeekExpression(selectedWeeks), weekday, start_period: startPeriod, end_period: endPeriod, classroom: classroom.trim() || null, teacher: teacher.trim() || null }); }}><label>课程名称<input aria-label="课程名称" value={courseName} onChange={(event) => setCourseName(event.target.value)} maxLength={255} required placeholder="例如：课程作业答疑" /></label><label>上课周次<button type="button" className="manual-week-trigger" aria-label="选择上课周次" onClick={() => setWeekPickerOpen(true)}><span>{selectedWeekText ? `第 ${selectedWeekText} 周` : '请选择上课周次'}</span><ChevronRight size={18} /></button></label><div className="manual-course-grid"><label>星期<select aria-label="上课星期" value={weekday} onChange={(event) => setWeekday(Number(event.target.value))}>{weekNames.map((name, index) => <option value={index + 1} key={name}>{name}</option>)}</select></label><label>开始节次<select aria-label="开始节次" value={startPeriod} onChange={(event) => setStartPeriod(Number(event.target.value))}>{periods.map((period) => <option value={period.period_number} key={period.period_number}>第 {period.period_number} 节 · {period.start_time}</option>)}</select></label><label>结束节次<select aria-label="结束节次" value={endPeriod} onChange={(event) => setEndPeriod(Number(event.target.value))}>{periods.map((period) => <option value={period.period_number} key={period.period_number}>第 {period.period_number} 节 · {period.end_time}</option>)}</select></label></div><label>教室地点<input aria-label="教室地点" value={classroom} onChange={(event) => setClassroom(event.target.value)} maxLength={255} placeholder="可留空" /></label><label>任课教师<input aria-label="任课教师" value={teacher} onChange={(event) => setTeacher(event.target.value)} maxLength={255} placeholder="可留空" /></label><small>保存后会按设置中的学期第一周周一和节次时间，自动生成每周课表日期。</small><div className="custom-schedule-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={pending}>取消</button><button type="submit" disabled={pending || !courseName.trim() || !selectedWeeks.size}>{pending ? '保存中…' : '保存课程'}</button></div>{error && <p className="error">{error.message}</p>}</form></section></div>{weekPickerOpen && <ManualWeekPicker selected={selectedWeeks} dark={dark} onClose={() => setWeekPickerOpen(false)} onConfirm={(weeks) => { setSelectedWeeks(weeks); setWeekPickerOpen(false); }} />}</>, document.body);
 }
 
+let detailSheetScrollLockCount = 0;
+
+function useDetailSheetScrollLock() {
+  useEffect(() => {
+    detailSheetScrollLockCount += 1;
+    document.documentElement.dataset.detailSheetOpen = 'true';
+    return () => {
+      detailSheetScrollLockCount = Math.max(0, detailSheetScrollLockCount - 1);
+      if (!detailSheetScrollLockCount) delete document.documentElement.dataset.detailSheetOpen;
+    };
+  }, []);
+}
+
 function Detail({ label, value }: { label: string; value: string }) { return <p><small>{label}</small><span>{value}</span></p>; }
 function DetailSheet({ title, children, onClose, dark = false }: { title: string; children: React.ReactNode; onClose: () => void; dark?: boolean }) {
+  useDetailSheetScrollLock();
   return createPortal(<div className={`sheet-mask sheet-mask-viewport${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={onClose}><section className="detail-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><h2>{title}</h2><button type="button" aria-label="关闭详情" onClick={onClose}>关闭</button></header>{children}</section></div>, document.body);
 }
 function ConfirmDialog({ title, description, confirmLabel, pending, onCancel, onConfirm }: { title: string; description: string; confirmLabel: string; pending: boolean; onCancel: () => void; onConfirm: () => void }) { return <div className="sheet-mask" role="presentation" onClick={pending ? undefined : onCancel}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}><h2>{title}</h2><p>{description}</p><div><button type="button" className="secondary-button" disabled={pending} onClick={onCancel}>取消</button><button type="button" className="logout-button" disabled={pending} onClick={onConfirm}>{pending ? '正在退出…' : confirmLabel}</button></div></section></div>; }
@@ -737,7 +781,7 @@ export default function App() {
     document.documentElement.dataset.appearance = resolvedAppearanceMode;
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
       'content',
-      resolvedAppearanceMode === 'dark' ? '#09111f' : '#f4f7fb',
+      resolvedAppearanceMode === 'dark' ? '#101827' : '#f4f7fb',
     );
     void updateNativeStatusBar(resolvedAppearanceMode);
   }, [resolvedAppearanceMode]);
@@ -747,6 +791,15 @@ export default function App() {
     window.addEventListener('hand-helper:unauthenticated', markUnauthenticated);
     void api.me().then(() => { if (active) setAuthState('authenticated'); }).catch(markUnauthenticated);
     return () => { active = false; window.removeEventListener('hand-helper:unauthenticated', markUnauthenticated); };
+  }, []);
+  useEffect(() => {
+    // 头像仅用于应用内展示；不要让 Safari/桌面浏览器把它作为可保存图片弹出菜单。
+    const suppressAvatarImageMenu = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement && target.matches('.user-avatar img, .avatar-preview-image-frame img, .nav-home-avatar')) event.preventDefault();
+    };
+    document.addEventListener('contextmenu', suppressAvatarImageMenu);
+    return () => document.removeEventListener('contextmenu', suppressAvatarImageMenu);
   }, []);
   if (authState === 'checking') return <AuthGateLoading />;
   if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
@@ -784,10 +837,12 @@ function NetworkNotice() {
 
 function BottomNav({ appearance }: { appearance: 'light' | 'dark' }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile, staleTime: 5 * 60 * 1000 });
   const activeIndex = pathname === '/timetable' ? 1 : pathname === '/grades' ? 2 : pathname === '/settings' ? 3 : 0;
   // 底部四个栏目是平级目的地：切换时替换当前历史项，Android 返回键不会在栏目之间倒退。
   const avatar = profile.data?.avatar_data_url;
-  return <nav className={`glass-nav four-nav${appearance === 'dark' ? ' nav-dark' : ''}`} style={{ '--nav-active-offset': `${activeIndex * 100}%` } as CSSProperties}><span className="nav-glass" /><span className="nav-active-pill" /><NavLink replace to="/">{avatar ? <img className="nav-home-avatar" src={avatar} alt="" aria-hidden="true" /> : <Home />}今日</NavLink><NavLink replace to="/timetable"><CalendarDays />课程表</NavLink><NavLink replace to="/grades"><GraduationCap />分析</NavLink><NavLink replace to="/settings"><SettingsIcon />设置</NavLink></nav>;
+  const go = (to: string) => () => navigate(to, { replace: true });
+  return <nav className={`glass-nav four-nav${appearance === 'dark' ? ' nav-dark' : ''}`} aria-label="主导航" style={{ '--nav-active-offset': `${activeIndex * 100}%` } as CSSProperties}><span className="nav-glass" /><span className="nav-active-pill" /><button type="button" className={`nav-button${activeIndex === 0 ? ' is-active' : ''}`} aria-current={activeIndex === 0 ? 'page' : undefined} onClick={go('/')}>{avatar ? <img className="nav-home-avatar" src={avatar} alt="" aria-hidden="true" /> : <Home />}今日</button><button type="button" className={`nav-button${activeIndex === 1 ? ' is-active' : ''}`} aria-current={activeIndex === 1 ? 'page' : undefined} onClick={go('/timetable')}><CalendarDays />课程表</button><button type="button" className={`nav-button${activeIndex === 2 ? ' is-active' : ''}`} aria-current={activeIndex === 2 ? 'page' : undefined} onClick={go('/grades')}><GraduationCap />分析</button><button type="button" className={`nav-button${activeIndex === 3 ? ' is-active' : ''}`} aria-current={activeIndex === 3 ? 'page' : undefined} onClick={go('/settings')}><SettingsIcon />设置</button></nav>;
 }
 

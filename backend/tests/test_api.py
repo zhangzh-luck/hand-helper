@@ -78,6 +78,27 @@ def test_api_auth_and_local_file_import():
         assert client.put(f"/api/v1/terms/{term_id}/start-date", headers=headers, json={"start_date": "2026-09-08"}).status_code == 422
 
 
+def test_delete_grades_is_scoped_to_one_term():
+    with TestClient(app) as client:
+        headers = login_headers(client)
+        first_term_id, preview = import_test_grades(client, headers)
+        other_preview = {
+            **preview,
+            "source_term_id": "2025-2026-2",
+            "grades": [{**preview["grades"][0], "source_grade_id": "other-term-grade"}],
+        }
+        other_import = client.post("/api/v1/grades/import-confirm", headers=headers, json=other_preview)
+        assert other_import.status_code == 200
+        other_term_id = other_import.json()["data"]["term_id"]
+
+        deleted = client.delete(f"/api/v1/grades?term_id={first_term_id}", headers=headers)
+        assert deleted.status_code == 200
+        assert deleted.json()["data"] == {"term_id": first_term_id, "grades_deleted": 1, "analyses_deleted": 0}
+        assert client.get(f"/api/v1/grades?term_id={first_term_id}", headers=headers).json()["data"] == []
+        assert len(client.get(f"/api/v1/grades?term_id={other_term_id}", headers=headers).json()["data"]) == 1
+        assert client.delete("/api/v1/grades", headers=headers).status_code == 422
+
+
 def test_custom_schedule_crud():
     with TestClient(app) as client:
         assert client.get("/api/v1/custom-schedules").status_code == 401

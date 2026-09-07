@@ -10,7 +10,8 @@ body,
 html[data-appearance="dark"],
 html[data-appearance="dark"] body,
 html[data-appearance="dark"] #root {
-  background:#09111f;
+  /* 与深色一级页渐变的起始色一致，iOS PWA 状态栏不会再显出黑色分界。 */
+  background:#101827;
 }
 
 /* 固定底部导航不应覆盖可滚动的课程时间轴。 */
@@ -34,6 +35,20 @@ html[data-appearance="dark"] #root {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+/* 详情弹层处于前景时，Safari 不能把纵向手势继续传给后方页面滚动容器。 */
+html[data-detail-sheet-open],
+html[data-detail-sheet-open] body {
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+html[data-detail-sheet-open] .page-route-stage > main {
+  overflow-y:hidden;
+}
+html[data-detail-sheet-open] .detail-sheet {
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
 }
 
 /* 主栏目切换使用轻量入场翻页：只渲染一份新页面，避免课程表大网格在手机上出现双层掉帧。 */
@@ -177,7 +192,8 @@ html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; borde
 .manual-import .secondary-button { background:#f1f5f9; color:#475569; }
 .import-status { display:grid; flex-basis:100%; gap:4px; padding-top:2px; }.import-status b { font-size:13px; color:#334155; }.import-status small { line-height:1.5; }.import-status.waiting_for_user b { color:#1d4ed8; }.import-status.page_not_ready b,.import-status.failed b,.import-status.timed_out b { color:#b91c1c; }.import-success { flex-basis:100%; margin:0; color:#15803d; font-size:13px; }
 
-.grade-card { width:100%; border:0; text-align:left; font:inherit; color:inherit; cursor:pointer; }
+.grade-card { width:100%; border:0; text-align:left; font:inherit; color:inherit; cursor:pointer; transform-origin:center; transition:opacity .18s ease,transform .2s ease; }
+.grade-card.is-detail-open { pointer-events:none; opacity:0; transform:scale(.96); }
 .week-course { border:0; text-align:left; font:inherit; cursor:pointer; }
 .sheet-mask { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; padding:22px; background:rgb(15 23 42 / 32%); backdrop-filter:blur(2px); }
 .sheet-mask-viewport { z-index:100; }
@@ -219,7 +235,50 @@ html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; borde
 .glass-nav { left:12px; right:12px; bottom:calc(10px + env(safe-area-inset-bottom)); width:auto; max-width:656px; min-height:64px; margin:auto; padding:5px; overflow:hidden; border:1px solid rgb(255 255 255 / 68%); border-radius:23px; background:rgb(226 232 240 / 54%); box-shadow:0 8px 26px rgb(15 23 42 / 14%),inset 0 1px rgb(255 255 255 / 80%); backdrop-filter:blur(20px) saturate(145%); }
 .glass-nav .nav-glass { position:absolute; inset:0; pointer-events:none; background:linear-gradient(125deg,rgb(255 255 255 / 42%),transparent 42%,rgb(255 255 255 / 20%)); }
 .glass-nav .nav-active-pill { position:absolute; z-index:0; top:5px; bottom:5px; left:5px; width:calc((100% - 10px) / 4); border-radius:17px; background:rgb(255 255 255 / 72%); box-shadow:0 3px 10px rgb(71 85 105 / 15%),inset 0 1px rgb(255 255 255 / 90%); transition:transform 460ms cubic-bezier(.2,.85,.25,1.18); will-change:transform; }
-.glass-nav a { position:relative; z-index:1; flex:1; min-width:0; padding:4px 0; border-radius:18px; transition:color 220ms ease,transform 260ms ease; }.glass-nav a.active { color:#2563eb; transform:translateY(-1px); }.glass-nav a.active svg { filter:drop-shadow(0 2px 3px rgb(37 99 235 / 25%)); }
+.glass-nav .nav-button { position:relative; z-index:1; display:grid; place-items:center; gap:3px; flex:1; min-width:0; padding:4px 0; border:0; border-radius:18px; background:transparent; color:inherit; font:inherit; font-size:12px; cursor:pointer; transition:color 220ms ease,transform 260ms ease; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }.glass-nav .nav-button.is-active { color:#2563eb; transform:translateY(-1px); }.glass-nav .nav-button.is-active svg { filter:drop-shadow(0 2px 3px rgb(37 99 235 / 25%)); }
+
+/* 独立安装的 iOS PWA 已保留 Home Indicator 安全区，无需再叠加 10px 浮动间距。 */
+@media (display-mode:standalone) {
+  .glass-nav { bottom:max(4px,calc(env(safe-area-inset-bottom) - 12px)); }
+  .page-route-stage { height:calc(100dvh - 60px - env(safe-area-inset-bottom)); }
+  .page-route-stage > main { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+}
+
+/* iPhone / iPad 会在小于 16px 的可编辑文本框聚焦时自动放大页面。
+   只提高实际编辑控件字号，保留标签、按钮与 Android 原生端的现有密度。 */
+@supports (-webkit-touch-callout:none) {
+  @media (max-width:700px) and (hover:none) and (pointer:coarse) {
+    /* 以高圆角模拟 iPhone 浮动 Tab Bar 的连续轮廓。 */
+    html:not(.capacitor-native) .glass-nav { border-radius:30px; }
+    html:not(.capacitor-native) .glass-nav .nav-active-pill,
+    html:not(.capacitor-native) .glass-nav .nav-button { border-radius:24px; }
+
+    html:not(.capacitor-native) input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+    html:not(.capacitor-native) textarea {
+      font-size:16px !important;
+    }
+  }
+
+  /* 独立安装的 iPhone PWA 使用接近系统 Dock 的悬浮比例。
+     内容区仍保留 Safe Area 留白，避免 Dock 覆盖可滚动内容。 */
+  @media (display-mode:standalone) and (max-width:700px) and (hover:none) and (pointer:coarse) {
+    html:not(.capacitor-native) .glass-nav {
+      right:20px;
+      bottom:20px;
+      left:20px;
+      min-height:60px;
+      padding:4px;
+      box-shadow:0 10px 24px rgb(15 23 42 / 16%),inset 0 1px rgb(255 255 255 / 84%);
+    }
+    html:not(.capacitor-native) .glass-nav .nav-active-pill {
+      top:4px;
+      bottom:4px;
+      left:4px;
+      border-radius:22px;
+    }
+    html:not(.capacitor-native) .glass-nav .nav-button { min-height:50px; }
+  }
+}
 
 .today-status { margin:10px 0 14px; padding:13px 15px; border-radius:14px; background:#e8f1ff; color:#1d4ed8; }
 .current-course { outline:2px solid #60a5fa; box-shadow:0 0 0 4px #dbeafe; }
@@ -242,6 +301,8 @@ html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; borde
 .file-import-button input { display:none; }.file-import small { line-height:1.5; }.file-import .import-success { margin:0; }
 .grade-import-actions { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin:0 0 12px; }
 .grade-import-actions > small,.grade-import-actions > .error { width:100%; margin:0; }
+.grade-delete-button { min-height:40px; padding:8px 12px; border:1px solid #fecdd3; border-radius:11px; background:#fff1f2; color:#be123c; font-size:13px; font-weight:650; cursor:pointer; }
+.grade-delete-button:hover { background:#ffe4e6; }
 .grade-import-term { display:grid; gap:5px; color:#64748b; font-size:13px; }
 .grade-import-term input { width:178px; min-height:40px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:11px; color:#1e293b; background:#fff; }
 html[data-appearance="dark"] .grade-import-term { color:#a8b7d0; }
@@ -249,7 +310,8 @@ html[data-appearance="dark"] .grade-import-term input { color:#e5eefc; backgroun
 html[data-appearance="dark"] .grade-import-actions > small { color:#9eb3cf; }
 html[data-appearance="dark"] .grade-import-actions .file-import-button,
 .grades-page-dark .grade-import-actions .file-import-button { border:1px solid #355779; background:#17304c; color:#bfdbfe; box-shadow:inset 0 1px rgb(255 255 255 / 7%); }
-@media(max-width:480px){.grade-import-actions{align-items:stretch}.grade-import-term{width:100%}.grade-import-term input{width:100%}.grade-import-actions .file-import-button{width:100%}}
+html[data-appearance="dark"] .grade-delete-button,.grades-page-dark .grade-delete-button { border-color:#7f1d3a; background:rgb(136 19 55 / 45%); color:#fecdd3; }
+@media(max-width:480px){.grade-import-actions{align-items:stretch}.grade-import-term{width:100%}.grade-import-term input{width:100%}.grade-import-actions .file-import-button,.grade-import-actions .grade-delete-button{width:100%}}
 .page-title { display:flex; align-items:center; gap:8px; }
 .page-title-icon { display:grid; flex:0 0 auto; place-items:center; width:30px; height:30px; border:1px solid rgb(191 219 254 / 75%); border-radius:10px; background:linear-gradient(135deg,#eff6ff,#e0ecff); color:#2563eb; box-shadow:inset 0 1px rgb(255 255 255 / 92%); }
 .collapsible-page-header { position:sticky; top:-12px; z-index:12; display:block; height:var(--timetable-header-height,60px); min-height:0; margin:0 0 10px; padding:0; overflow:visible; background:transparent; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; will-change:height; }
@@ -371,7 +433,7 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
   background:rgb(255 255 255 / 76%);
   filter:blur(4px);
 }
-.glass-nav a {
+.glass-nav .nav-button {
   z-index:2;
   min-height:52px;
   padding:5px 0 4px;
@@ -380,14 +442,14 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
   text-shadow:0 1px rgb(255 255 255 / 52%);
   transition:color 220ms ease, transform 280ms cubic-bezier(.2,.8,.2,1.1), filter 220ms ease;
 }
-.glass-nav a svg { transition:transform 300ms cubic-bezier(.2,.85,.22,1.2), filter 240ms ease; }
+.glass-nav .nav-button svg { transition:transform 300ms cubic-bezier(.2,.85,.22,1.2), filter 240ms ease; }
 .glass-nav .nav-home-avatar { width:22px; height:22px; border:1.5px solid rgb(148 163 184 / 62%); border-radius:50%; object-fit:cover; box-shadow:0 1px 3px rgb(15 23 42 / 14%); transition:transform 300ms cubic-bezier(.2,.85,.22,1.2), box-shadow 240ms ease; }
-.glass-nav a.active { transform:translateY(-1px); color:#1768ff; }
-.glass-nav a.active svg { transform:scale(1.06); filter:drop-shadow(0 2px 4px rgb(37 99 235 / 34%)); }
-.glass-nav a.active .nav-home-avatar { border-color:rgb(96 165 250 / 88%); box-shadow:0 2px 5px rgb(37 99 235 / 32%); transform:scale(1.06); }
-.glass-nav a:active { transform:scale(.94); }
+.glass-nav .nav-button.is-active { transform:translateY(-1px); color:#1768ff; }
+.glass-nav .nav-button.is-active svg { transform:scale(1.06); filter:drop-shadow(0 2px 4px rgb(37 99 235 / 34%)); }
+.glass-nav .nav-button.is-active .nav-home-avatar { border-color:rgb(96 165 250 / 88%); box-shadow:0 2px 5px rgb(37 99 235 / 32%); transform:scale(1.06); }
+.glass-nav .nav-button:active { transform:scale(.94); }
 @media(prefers-reduced-motion:reduce){
-  .glass-nav .nav-active-pill,.glass-nav a,.glass-nav a svg{transition:none}
+  .glass-nav .nav-active-pill,.glass-nav .nav-button,.glass-nav .nav-button svg{transition:none}
   .page-route-stage-forward,.page-route-stage-backward{animation:none}
 }
 
@@ -410,9 +472,9 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
   box-shadow:0 7px 16px rgb(0 0 0 / 28%),0 1px 2px rgb(0 0 0 / 24%),inset 0 1px rgb(255 255 255 / 10%),inset 0 -1px rgb(15 23 42 / 36%);
 }
 .glass-nav.nav-dark .nav-active-pill::after { background:rgb(191 219 254 / 16%); }
-.glass-nav.nav-dark a { color:#aebed3; text-shadow:0 1px rgb(0 0 0 / 42%); }
-.glass-nav.nav-dark a.active { color:#93c5fd; }
-.glass-nav.nav-dark a.active svg { filter:drop-shadow(0 2px 5px rgb(96 165 250 / 42%)); }
+.glass-nav.nav-dark .nav-button { color:#aebed3; text-shadow:0 1px rgb(0 0 0 / 42%); }
+.glass-nav.nav-dark .nav-button.is-active { color:#93c5fd; }
+.glass-nav.nav-dark .nav-button.is-active svg { filter:drop-shadow(0 2px 5px rgb(96 165 250 / 42%)); }
 .glass-nav.nav-dark .nav-home-avatar { border-color:rgb(191 219 254 / 58%); box-shadow:0 1px 4px rgb(0 0 0 / 30%); }
 
 /* 今日卡片使用“控制中心盖在主屏幕上”的真实磨砂逻辑：头像本身是背景，不额外染成蓝紫色。 */
@@ -494,8 +556,9 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
   font-weight:750;
   box-shadow:0 2px 5px rgb(37 99 235 / 12%), inset 0 1px rgb(255 255 255 / 86%);
 }
-.today-hero>.user-avatar { width:80px; height:80px; border-width:3px; }
-.avatar-preview-trigger { position:relative; z-index:2; flex:0 0 auto; min-height:0; padding:0; overflow:visible; border:0; border-radius:50%; background:transparent; box-shadow:none; cursor:zoom-in; }
+.today-hero>.user-avatar,.today-hero .avatar-preview-trigger .user-avatar { width:80px; height:80px; border-width:3px; border-radius:20px; }
+.avatar-preview-trigger { position:relative; z-index:2; flex:0 0 auto; min-height:0; padding:0; overflow:visible; border:0; border-radius:20px; background:transparent; box-shadow:none; cursor:zoom-in; transition:opacity .18s ease,transform .2s ease; }
+html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-events:none; opacity:0; transform:scale(.78); }
 .avatar-preview-trigger:hover .user-avatar { transform:scale(1.035); }
 .avatar-preview-trigger:focus-visible { outline:3px solid rgb(37 99 235 / 52%); outline-offset:5px; }
 .avatar-preview-trigger .user-avatar { transition:transform .18s ease, box-shadow .18s ease; }
@@ -506,7 +569,9 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
 .avatar-preview-sheet header button { display:grid; flex:0 0 auto; place-items:center; width:36px; height:36px; min-height:36px; padding:0; border-radius:50%; background:rgb(255 255 255 / 86%); color:#2563eb; box-shadow:0 2px 8px rgb(15 23 42 / 14%); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
 .avatar-preview-image-frame { display:grid; min-height:0; place-items:center; overflow:hidden; border:1px solid #e3ebf5; border-radius:18px; background:#f1f5f9; }
 .avatar-preview-image-frame img { display:block; width:auto; max-width:100%; height:auto; max-height:calc(88dvh - 40px); object-fit:contain; }
-@media(max-width:390px){.today-hero>.user-avatar{width:72px;height:72px}}
+/* 头像是应用内私有展示内容：禁用 Safari 长按图片菜单、图片拖拽与文本选择。 */
+.user-avatar img,.avatar-preview-image-frame img,.nav-home-avatar { -webkit-touch-callout:none; -webkit-user-drag:none; -webkit-user-select:none; user-select:none; }
+@media(max-width:390px){.today-hero>.user-avatar,.today-hero .avatar-preview-trigger .user-avatar{width:72px;height:72px}}
 
 /* 深色模式第一阶段：仅首页响应外观模式，其他模块保持原有浅色界面。 */
 .today-page.today-page-dark {
@@ -571,9 +636,13 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
   gap:3px;
   overflow:hidden;
   line-height:1.25;
+  transform-origin:center;
+  transition:opacity .18s ease,transform .2s ease;
 }
+.week-course.is-detail-open { pointer-events:none; opacity:0; transform:scale(.88); }
 .week-course b { font-size:12px; line-height:1.3; overflow-wrap:anywhere; word-break:break-word; }
 .week-course small { font-size:9px; line-height:1.3; overflow-wrap:anywhere; word-break:break-word; }
+@media(prefers-reduced-motion:reduce){.week-course,.grade-card{transition:none}}
 .week-course.course-color-violet { background:#f1e5ff; color:#7b22c7; }
 .week-calendar { overflow:hidden; }
 .week-caption { align-items:center; min-height:42px; padding:9px 12px 6px; }
@@ -1066,6 +1135,9 @@ html[data-appearance='dark'] .native-startup-spinner { border-color:#27364d; bor
 .grade-ai-result header small { color:#64748b; }
 .grade-ai-result header > span { display:flex; align-items:center; justify-content:flex-end; gap:9px; }
 .grade-ai-result header .secondary-button { min-height:34px; padding:6px 10px; font-size:.82rem; }
+.grade-ai-detail-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px; padding:0 0 12px; border-bottom:1px solid #dbe5f1; }
+.grade-ai-detail-meta small { color:#64748b; line-height:1.45; }
+.grade-ai-detail-meta .secondary-button { flex:0 0 auto; min-height:34px; margin:0; padding:6px 10px; font-size:.82rem; }
 .grade-ai-markdown { display:grid; gap:14px; color:#334155; line-height:1.75; }
 .grade-ai-markdown h2 { margin:4px 0 0; padding:0 0 7px; border-bottom:1px solid #dbe5f1; color:#1e3a5f; font-size:1rem; line-height:1.4; }
 .grade-ai-markdown p { margin:0; }
@@ -1106,7 +1178,8 @@ html[data-appearance='dark'] .grade-ai-buttons button:not(.secondary-button),
 .grades-page-dark .grade-ai-buttons button:not(.secondary-button) { border-color:#3b82f6; background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#eff6ff; }
 html[data-appearance='dark'] .grade-ai-actions small,
 html[data-appearance='dark'] .grade-ai-result header small,
-html[data-appearance='dark'] .grade-ai-history header small { color:#9eb3cf; }
+html[data-appearance='dark'] .grade-ai-history header small,
+.sheet-mask-dark .grade-ai-detail-meta small { color:#9eb3cf; }
 /* 分析结果本身也是 card，不能只给正文换色，否则深色模式会留下浅色的大底。 */
 html[data-appearance='dark'] .grade-ai-result,
 .grades-page-dark .grade-ai-result {
@@ -1123,6 +1196,8 @@ html[data-appearance='dark'] .grade-ai-result .secondary-button,
   background:#263449;
   color:#c7d4e7;
 }
+ .sheet-mask-dark .grade-ai-detail-meta { border-color:#304662; }
+ .sheet-mask-dark .grade-ai-detail-meta .secondary-button { border-color:rgb(148 163 184 / 16%); background:#263449; color:#c7d4e7; }
 html[data-appearance='dark'] .grade-ai-result .secondary-button:hover,
 .grades-page-dark .grade-ai-result .secondary-button:hover { background:#31435c; }
 html[data-appearance='dark'] .grade-ai-markdown { color:#dbe7f5; }
@@ -1258,7 +1333,7 @@ html[data-appearance='dark'] .settings-page-dark .ai-settings-actions .secondary
     border-radius:20px;
     transform:translateY(var(--nav-active-offset,0%));
   }
-  .glass-nav a {
+  .glass-nav .nav-button {
     display:flex;
     flex:1 1 0;
     align-items:center;
@@ -1270,8 +1345,8 @@ html[data-appearance='dark'] .settings-page-dark .ai-settings-actions .secondary
     font-size:14px;
     font-weight:600;
   }
-  .glass-nav a svg,.glass-nav .nav-home-avatar { width:21px; height:21px; }
-  .glass-nav a.active { transform:translateX(2px); }
+  .glass-nav .nav-button svg,.glass-nav .nav-home-avatar { width:21px; height:21px; }
+  .glass-nav .nav-button.is-active { transform:translateX(2px); }
 
   .page-route-stage > main.today-page { padding-top:34px; padding-bottom:34px; }
   .today-page { grid-template-columns:minmax(390px,.9fr) minmax(500px,1.35fr); min-height:100%; align-items:stretch; gap:30px; }

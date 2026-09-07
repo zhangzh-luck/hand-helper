@@ -6,7 +6,7 @@ Android 模块已从 Capacitor `BridgeActivity` 迁移为 Kotlin + Jetpack Compo
 
 - 应用名：航的助手
 - 包名：`com.zhangzh.hangassistant`
-- 当前原生预览版：`0.2.0-native-preview`（versionCode `2`）
+- 当前原生预览版：`0.2.0`（versionCode `3`）
 - 最低 SDK：23；编译与目标 SDK：35
 - 仅声明权限：`android.permission.INTERNET`
 - API 基地址：`https://portal.zhangzh.cc`（BuildConfig，不含秘密值）
