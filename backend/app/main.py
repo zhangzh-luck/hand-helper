@@ -11,11 +11,11 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
-from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, PeriodTime
+from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PeriodTime
 from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
 from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
@@ -53,7 +53,7 @@ async def lifespan(_app: FastAPI):
         if scheduler.running:
             scheduler.shutdown(wait=False)
         await engine.dispose()
-app=FastAPI(title="航的助手 · Hand Helper", version="0.1.0", lifespan=lifespan)
+app=FastAPI(title="航的助手 · Hand Helper", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"])
 
 PUBLIC_API_PATHS = {"/api/auth/login", "/api/v1/auth/login"}
@@ -407,6 +407,21 @@ async def grades(term_id:int|None=None, db:AsyncSession=Depends(get_db)):
     q=select(Grade).order_by(Grade.synced_at.desc());
     if term_id:q=q.where(Grade.term_id==term_id)
     return response([GradeOut.model_validate(x,from_attributes=True) for x in (await db.scalars(q)).all()])
+
+@app.delete("/api/v1/grades")
+async def delete_grades_for_term(term_id: int, db: AsyncSession = Depends(get_db)):
+    """只清空指定学期的成绩；学期本身和其它学期的数据均保留。"""
+    term = await db.get(AcademicTerm, term_id)
+    if term is None:
+        raise HTTPException(404, "学期不存在")
+    grades_result = await db.execute(delete(Grade).where(Grade.term_id == term_id))
+    analyses_result = await db.execute(delete(GradeAiAnalysis).where(GradeAiAnalysis.term_id == term_id))
+    await db.commit()
+    return response({
+        "term_id": term_id,
+        "grades_deleted": int(grades_result.rowcount or 0),
+        "analyses_deleted": int(analyses_result.rowcount or 0),
+    })
 @app.get("/api/v1/ai/settings")
 async def get_ai_settings(db: AsyncSession = Depends(get_db)):
     return response(setting_out(await db.get(AiProviderSetting, 1)))

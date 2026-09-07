@@ -16,12 +16,18 @@ describe('未登录路由', () => it('验证会话后展示登录页，不再保
 }));
 
 describe('底部导航', () => it('会话有效时显示四个主要页面', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true, data: { authenticated: true, username: 'admin' } }), { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const data = url.endsWith('/api/v1/auth/me') ? { authenticated: true, username: 'admin' } : [];
+    return new Response(JSON.stringify({ success: true, data }), { status: 200 });
+  }));
   const { container } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/timetable']}><App /></MemoryRouter></QueryClientProvider>);
-  expect(await screen.findByRole('link', { name: '今日' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '课程表' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '分析' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument();
+  const today = await screen.findByRole('button', { name: '今日' });
+  expect(today).toBeInTheDocument();
+  expect(today).not.toHaveAttribute('href');
+  expect(screen.getByRole('button', { name: '课程表' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '分析' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument();
   expect(container.querySelector('.page-route-stage-forward')).toBeInTheDocument();
 }));
 

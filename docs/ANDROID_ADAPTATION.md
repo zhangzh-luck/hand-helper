@@ -6,8 +6,8 @@ Web 端继续以 Vite 构建、Nginx 同源代理 `/api`；Android 使用 Capaci
 
 - 应用名：航的助手
 - 包名：`com.zhangzh.hangassistant`
-- Android `versionName`：`0.1.0`
-- Android `versionCode`：`1`
+- Android `versionName`：`0.2.0`
+- Android `versionCode`：`3`
 - 最低 SDK：23
 - 编译/目标 SDK：36
 - Android API：`https://portal.zhangzh.cc`（可用 `VITE_ANDROID_API_URL` 覆盖）
