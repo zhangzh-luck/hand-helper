@@ -2,10 +2,14 @@ package com.zhangzh.hangassistant
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.toHttpUrl
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.IOException
@@ -47,38 +51,55 @@ data class GradeSummary(
     val failedCourses: Int,
 )
 
-class HandHelperApi {
+class HandHelperApi(sessionStore: SecureSessionStore) {
+    private val cookieJar = SessionCookieJar(sessionStore)
     private val client = OkHttpClient.Builder()
+        .cookieJar(cookieJar)
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS)
         .build()
 
-    suspend fun login(username: String, password: String): Result<AuthTokens> = requestResult {
+    suspend fun login(username: String, password: String): Result<NativeSession> = requestResult {
+        cookieJar.clear()
         val payload = JSONObject().put("username", username).put("password", password)
         val request = Request.Builder()
             .url("${BuildConfig.HAND_HELPER_API_BASE_URL}/api/v1/auth/login")
+            .header("Origin", BuildConfig.HAND_HELPER_API_BASE_URL)
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        execute(request).let { root ->
-            val data = successfulData(root)
-            AuthTokens(data.getString("access_token"), data.getString("refresh_token"))
-        }
+        val data = successfulData(execute(request))
+        NativeSession(data.optString("username").ifBlank { username })
     }
 
-    suspend fun profile(accessToken: String): Result<AppProfile> = requestResult {
+    suspend fun logout(): Result<Unit> = requestResult {
+        val request = Request.Builder()
+            .url("${BuildConfig.HAND_HELPER_API_BASE_URL}/api/v1/auth/logout")
+            .header("Origin", BuildConfig.HAND_HELPER_API_BASE_URL)
+            .post("".toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        execute(request)
+        cookieJar.clear()
+    }
+
+    suspend fun profile(): Result<AppProfile> = requestResult {
         val request = Request.Builder()
             .url("${BuildConfig.HAND_HELPER_API_BASE_URL}/api/v1/profile")
-            .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
         execute(request).let { root -> AppProfile(successfulData(root).optString("display_name", "同学")) }
     }
 
-    suspend fun checkSession(accessToken: String): Result<Unit> = profile(accessToken).map { Unit }
+    suspend fun checkSession(): Result<Unit> = requestResult {
+        val request = Request.Builder()
+            .url("${BuildConfig.HAND_HELPER_API_BASE_URL}/api/v1/auth/me")
+            .get()
+            .build()
+        successfulData(execute(request))
+    }
 
-    suspend fun terms(accessToken: String): Result<List<AcademicTerm>> = requestResult {
-        val array = authenticatedData("/api/v1/terms", accessToken) as JSONArray
+    suspend fun terms(): Result<List<AcademicTerm>> = requestResult {
+        val array = authenticatedData("/api/v1/terms") as JSONArray
         buildList {
             for (index in 0 until array.length()) {
                 val item = array.getJSONObject(index)
@@ -94,8 +115,8 @@ class HandHelperApi {
         }
     }
 
-    suspend fun timetableWeek(accessToken: String, weekStart: String): Result<List<TimetableSession>> = requestResult {
-        val array = authenticatedData("/api/v1/timetable/week?week_start=$weekStart", accessToken) as JSONArray
+    suspend fun timetableWeek(weekStart: String): Result<List<TimetableSession>> = requestResult {
+        val array = authenticatedData("/api/v1/timetable/week?week_start=$weekStart") as JSONArray
         buildList {
             for (index in 0 until array.length()) {
                 val item = array.getJSONObject(index)
@@ -116,8 +137,8 @@ class HandHelperApi {
         }
     }
 
-    suspend fun grades(accessToken: String, termId: Int): Result<List<GradeItem>> = requestResult {
-        val array = authenticatedData("/api/v1/grades?term_id=$termId", accessToken) as JSONArray
+    suspend fun grades(termId: Int): Result<List<GradeItem>> = requestResult {
+        val array = authenticatedData("/api/v1/grades?term_id=$termId") as JSONArray
         buildList {
             for (index in 0 until array.length()) {
                 val item = array.getJSONObject(index)
@@ -137,8 +158,8 @@ class HandHelperApi {
         }
     }
 
-    suspend fun gradeSummary(accessToken: String, termId: Int): Result<GradeSummary> = requestResult {
-        val item = authenticatedData("/api/v1/grades/summary?term_id=$termId", accessToken) as JSONObject
+    suspend fun gradeSummary(termId: Int): Result<GradeSummary> = requestResult {
+        val item = authenticatedData("/api/v1/grades/summary?term_id=$termId") as JSONObject
         GradeSummary(
             totalCourses = item.optInt("total_courses"),
             earnedCredits = item.optDouble("earned_credits"),
@@ -151,7 +172,10 @@ class HandHelperApi {
     private fun execute(request: Request): JSONObject = client.newCall(request).execute().use { response ->
         val body = response.body?.string().orEmpty()
         val root = if (body.isBlank()) JSONObject() else JSONObject(body)
-        if (!response.isSuccessful) throw IOException(root.optJSONObject("error")?.optString("message") ?: "服务器请求失败（${response.code}）")
+        if (!response.isSuccessful) {
+            if (response.code == 401) cookieJar.clear()
+            throw IOException(root.optJSONObject("error")?.optString("message") ?: "服务器请求失败（${response.code}）")
+        }
         root
     }
 
@@ -162,10 +186,9 @@ class HandHelperApi {
         return root.optJSONObject("data") ?: throw IOException("服务器未返回有效数据")
     }
 
-    private fun authenticatedData(path: String, accessToken: String): Any {
+    private fun authenticatedData(path: String): Any {
         val request = Request.Builder()
             .url("${BuildConfig.HAND_HELPER_API_BASE_URL}$path")
-            .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
         val root = execute(request)
@@ -184,5 +207,38 @@ class HandHelperApi {
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+    }
+}
+
+/** CookieJar is deliberately host-scoped so this session is never sent to another host. */
+private class SessionCookieJar(private val sessionStore: SecureSessionStore) : CookieJar {
+    private val apiUrl: HttpUrl = BuildConfig.HAND_HELPER_API_BASE_URL.toHttpUrl()
+
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        if (url.host != apiUrl.host) return
+        cookies.firstOrNull { it.name == SESSION_COOKIE_NAME }?.let { cookie ->
+            sessionStore.saveSessionCookie(cookie.value)
+        }
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        if (url.host != apiUrl.host) return emptyList()
+        val value = sessionStore.sessionCookie() ?: return emptyList()
+        return listOf(
+            Cookie.Builder()
+                .name(SESSION_COOKIE_NAME)
+                .value(value)
+                .hostOnlyDomain(apiUrl.host)
+                .path("/")
+                .secure()
+                .httpOnly()
+                .build(),
+        )
+    }
+
+    fun clear() = sessionStore.clear()
+
+    private companion object {
+        const val SESSION_COOKIE_NAME = "hand_helper_session"
     }
 }

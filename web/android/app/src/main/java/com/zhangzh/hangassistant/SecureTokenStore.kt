@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-data class AuthTokens(val accessToken: String, val refreshToken: String)
+data class NativeSession(val username: String)
 
-/** Stores only the application's API tokens; account passwords are never persisted. */
-class SecureTokenStore(context: Context) {
+/**
+ * Persists only the opaque server-issued session cookie in Android Keystore-backed storage.
+ * The administrator password is never persisted; the cookie remains HttpOnly in browsers and
+ * is never exposed to WebView or JavaScript because this client is fully native.
+ */
+class SecureSessionStore(context: Context) {
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .build()
@@ -20,17 +24,22 @@ class SecureTokenStore(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
-    fun read(): AuthTokens? {
-        val access = preferences.getString("access_token", null)
-        val refresh = preferences.getString("refresh_token", null)
-        return if (access.isNullOrBlank() || refresh.isNullOrBlank()) null else AuthTokens(access, refresh)
+    fun read(): NativeSession? {
+        val cookie = preferences.getString("session_cookie", null)
+        val username = preferences.getString("username", null)
+        return if (cookie.isNullOrBlank() || username.isNullOrBlank()) null else NativeSession(username)
     }
 
-    fun save(tokens: AuthTokens) {
+    fun save(session: NativeSession) {
         preferences.edit()
-            .putString("access_token", tokens.accessToken)
-            .putString("refresh_token", tokens.refreshToken)
+            .putString("username", session.username)
             .apply()
+    }
+
+    fun sessionCookie(): String? = preferences.getString("session_cookie", null)
+
+    fun saveSessionCookie(value: String) {
+        preferences.edit().putString("session_cookie", value).apply()
     }
 
     fun clear() = preferences.edit().clear().apply()

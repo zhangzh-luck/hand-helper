@@ -98,7 +98,7 @@ function useResolvedAppearanceMode(mode: AppearanceMode): 'light' | 'dark' {
 
 function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   const queryClient = useQueryClient();
-  const { data = [], isLoading, error } = useQuery({ queryKey: ['sessions'], queryFn: () => api.sessions() });
+  const sessions = useQuery({ queryKey: ['sessions'], queryFn: () => api.sessions() });
   const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile });
   const now = new Date();
   const today = localDateKey(now);
@@ -118,16 +118,28 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
     mutationFn: api.deleteCustomSchedule,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['custom-schedules'] }),
   });
-  const items = data.filter((item) => item.session_date === today);
+  const items = (sessions.data ?? []).filter((item) => item.session_date === today);
   const name = profile.data?.display_name ?? '张自航';
-  const loading = isLoading || customSchedules.isLoading;
-  const pageError = error ?? customSchedules.error;
+  // 只在首次取得首页所需数据前显示整页加载态。后续失效刷新会保留已显示的主页，避免闪屏。
+  const loading = sessions.isLoading || profile.isLoading || customSchedules.isLoading;
+  const pageError = sessions.error ?? profile.error ?? customSchedules.error;
+  const retryPageData = () => { void Promise.all([sessions.refetch(), profile.refetch(), customSchedules.refetch()]); };
+  if (loading) return <TodayBackendLoading appearance={appearance} />;
+  if (pageError) return <TodayBackendLoadError appearance={appearance} error={pageError} onRetry={retryPageData} />;
   return <main className={`today-page${appearance === 'dark' ? ' today-page-dark' : ''}`}>
     <section className="today-hero">{profile.data?.avatar_data_url && <><div className="hero-avatar-background" aria-hidden="true" style={{ backgroundImage: `url(${profile.data.avatar_data_url})` }} /><div className="hero-avatar-overlay" aria-hidden="true" /></>}<div className="today-hero-content"><p className="today-kicker">今日 · {greetingForHour(now.getHours())}</p><h1>{name}</h1><p className="today-date">{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p></div>{profile.data?.avatar_data_url ? <button type="button" className="avatar-preview-trigger" aria-label={`预览${name}的头像`} onClick={() => setAvatarPreviewOpen(true)}><Avatar profile={profile.data} /></button> : <Avatar profile={profile.data} />}</section>
-    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2><button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{loading ? <p className="muted">正在读取本地缓存…</p> : pageError ? <p className="error">{String(pageError)}</p> : items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={(schedule) => { if (window.confirm(`确认删除“${schedule.title}”吗？`)) deleteSchedule.mutate(schedule.id); }} /> : <Empty text="今天没有课程或自定义安排，享受自由时间。" />}</section>
+    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2><button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={(schedule) => { if (window.confirm(`确认删除“${schedule.title}”吗？`)) deleteSchedule.mutate(schedule.id); }} /> : <Empty text="今天没有课程或自定义安排，享受自由时间。" />}</section>
     {editingSchedule && <CustomScheduleSheetV2 schedule={editingSchedule === 'new' ? undefined : editingSchedule} initialDate={today} pending={saveSchedule.isPending} error={saveSchedule.error} onClose={() => setEditingSchedule(null)} onSave={(payload) => saveSchedule.mutate(payload)} />}
     {avatarPreviewOpen && profile.data?.avatar_data_url && <AvatarPreviewSheet name={name} src={profile.data.avatar_data_url} dark={appearance === 'dark'} onClose={() => setAvatarPreviewOpen(false)} />}
   </main>;
+}
+
+function TodayBackendLoading({ appearance }: { appearance: 'light' | 'dark' }) {
+  return <main className={`today-loading-page${appearance === 'dark' ? ' today-loading-page-dark' : ''}`} aria-busy="true" aria-live="polite"><div className="today-loading-indicator"><span className="today-loading-spinner" aria-hidden="true" /><p>后台正在加载…</p></div></main>;
+}
+
+function TodayBackendLoadError({ appearance, error, onRetry }: { appearance: 'light' | 'dark'; error: Error; onRetry: () => void }) {
+  return <main className={`today-loading-page${appearance === 'dark' ? ' today-loading-page-dark' : ''}`}><section className="today-loading-error" role="alert"><b>首页加载失败</b><p>{error.message || '暂时无法读取后台数据。'}</p><button type="button" onClick={onRetry}>重新加载</button></section></main>;
 }
 
 function greetingForHour(hour: number) { if (hour < 10) return '早上好'; if (hour < 14) return '中午好'; if (hour < 18) return '下午好'; return '晚上好'; }
