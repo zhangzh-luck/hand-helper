@@ -91,7 +91,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             HandHelperTheme {
-                HandHelperApp(SecureTokenStore(applicationContext), HandHelperApi(), onExit = { finish() })
+                val sessionStore = remember { SecureSessionStore(applicationContext) }
+                HandHelperApp(sessionStore, HandHelperApi(sessionStore), onExit = { finish() })
             }
         }
     }
@@ -108,16 +109,28 @@ private fun HandHelperTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun HandHelperApp(tokenStore: SecureTokenStore, api: HandHelperApi, onExit: () -> Unit) {
+private fun HandHelperApp(sessionStore: SecureSessionStore, api: HandHelperApi, onExit: () -> Unit) {
+    val scope = rememberCoroutineScope()
     if (BuildConfig.HAND_HELPER_USE_LOCAL_PREVIEW) {
         PreviewShell(onExit)
         return
     }
-    var tokens by remember { mutableStateOf(tokenStore.read()) }
-    if (tokens == null) {
-        LoginScreen(api = api, onLoggedIn = { value -> tokenStore.save(value); tokens = value })
+    var session by remember { mutableStateOf(sessionStore.read()) }
+    if (session == null) {
+        LoginScreen(api = api, onLoggedIn = { value -> sessionStore.save(value); session = value })
     } else {
-        NativeShell(api = api, tokens = tokens!!, onLogout = { tokenStore.clear(); tokens = null }, onExit = onExit)
+        NativeShell(
+            api = api,
+            session = session!!,
+            onLogout = {
+                scope.launch {
+                    api.logout()
+                    sessionStore.clear()
+                    session = null
+                }
+            },
+            onExit = onExit,
+        )
     }
 }
 
@@ -190,7 +203,7 @@ private fun WebInspiredDock(selected: NativeDestination, onSelected: (NativeDest
 }
 
 @Composable
-private fun LoginScreen(api: HandHelperApi, onLoggedIn: (AuthTokens) -> Unit) {
+private fun LoginScreen(api: HandHelperApi, onLoggedIn: (NativeSession) -> Unit) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var loading by rememberSaveable { mutableStateOf(false) }
@@ -239,7 +252,7 @@ private enum class NativeDestination(val title: String) { TODAY("今日"), TIMET
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NativeShell(api: HandHelperApi, tokens: AuthTokens, onLogout: () -> Unit, onExit: () -> Unit) {
+private fun NativeShell(api: HandHelperApi, session: NativeSession, onLogout: () -> Unit, onExit: () -> Unit) {
     var destination by rememberSaveable { mutableStateOf(NativeDestination.TODAY) }
     var exitDialog by rememberSaveable { mutableStateOf(false) }
     // Bottom-navigation destinations are siblings: a system Back action must not silently switch tabs.
@@ -256,10 +269,10 @@ private fun NativeShell(api: HandHelperApi, tokens: AuthTokens, onLogout: () -> 
         bottomBar = { NativeNavigation(destination) { destination = it } },
     ) { padding ->
         when (destination) {
-            NativeDestination.TODAY -> TodayScreen(api, tokens.accessToken, padding)
-            NativeDestination.TIMETABLE -> TimetableScreen(api, tokens.accessToken, padding)
-            NativeDestination.GRADES -> GradesScreen(api, tokens.accessToken, padding)
-            NativeDestination.SETTINGS -> SettingsScreen(api, tokens.accessToken, padding, onLogout)
+            NativeDestination.TODAY -> TodayScreen(api, padding)
+            NativeDestination.TIMETABLE -> TimetableScreen(api, padding)
+            NativeDestination.GRADES -> GradesScreen(api, padding)
+            NativeDestination.SETTINGS -> SettingsScreen(api, session.username, padding, onLogout)
         }
     }
 }
@@ -280,7 +293,7 @@ private fun NativeNavigation(selected: NativeDestination, onSelected: (NativeDes
 }
 
 @Composable
-private fun TodayScreen(api: HandHelperApi, accessToken: String, padding: PaddingValues) {
+private fun TodayScreen(api: HandHelperApi, padding: PaddingValues) {
     var name by remember { mutableStateOf("同学") }
     var message by remember { mutableStateOf("正在连接个人服务…") }
     var loading by remember { mutableStateOf(true) }
@@ -289,7 +302,7 @@ private fun TodayScreen(api: HandHelperApi, accessToken: String, padding: Paddin
     }
     LaunchedEffect(loading) {
         if (loading) {
-            api.profile(accessToken).onSuccess { name = it.displayName; message = "服务连接正常" }.onFailure { message = "暂时无法读取个人资料：${it.message ?: "网络异常"}" }
+            api.profile().onSuccess { name = it.displayName; message = "服务连接正常" }.onFailure { message = "暂时无法读取个人资料：${it.message ?: "网络异常"}" }
             loading = false
         }
     }
@@ -316,7 +329,7 @@ private fun NativeInfoScreen(title: String, message: String, padding: PaddingVal
 }
 
 @Composable
-private fun TimetableScreen(api: HandHelperApi, accessToken: String, padding: PaddingValues) {
+private fun TimetableScreen(api: HandHelperApi, padding: PaddingValues) {
     var terms by remember { mutableStateOf<List<AcademicTerm>>(emptyList()) }
     var selectedTermId by rememberSaveable { mutableStateOf<Int?>(null) }
     var weekNumber by rememberSaveable { mutableStateOf(1) }
@@ -326,7 +339,7 @@ private fun TimetableScreen(api: HandHelperApi, accessToken: String, padding: Pa
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        api.terms(accessToken).onSuccess { loadedTerms ->
+        api.terms().onSuccess { loadedTerms ->
             terms = loadedTerms
             selectedTermId = loadedTerms.firstOrNull { it.isCurrent }?.id
                 ?: loadedTerms.lastOrNull { it.startDate != null }?.id
@@ -349,7 +362,7 @@ private fun TimetableScreen(api: HandHelperApi, accessToken: String, padding: Pa
         loadingSessions = true
         error = null
         val weekStart = shiftDate(firstMonday, (weekNumber - 1) * 7)
-        api.timetableWeek(accessToken, weekStart).onSuccess { loadedSessions ->
+        api.timetableWeek(weekStart).onSuccess { loadedSessions ->
             sessions = loadedSessions.filter { it.termId == term.id }
         }.onFailure { throwable ->
             sessions = emptyList()
@@ -454,7 +467,7 @@ private fun formatDateTitle(date: String): String {
 private fun formatClock(dateTime: String): String = dateTime.substringAfter('T', dateTime).take(5)
 
 @Composable
-private fun GradesScreen(api: HandHelperApi, accessToken: String, padding: PaddingValues) {
+private fun GradesScreen(api: HandHelperApi, padding: PaddingValues) {
     var terms by remember { mutableStateOf<List<AcademicTerm>>(emptyList()) }
     var selectedTermId by rememberSaveable { mutableStateOf<Int?>(null) }
     var grades by remember { mutableStateOf<List<GradeItem>>(emptyList()) }
@@ -464,7 +477,7 @@ private fun GradesScreen(api: HandHelperApi, accessToken: String, padding: Paddi
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        api.terms(accessToken).onSuccess { loadedTerms ->
+        api.terms().onSuccess { loadedTerms ->
             terms = loadedTerms
             selectedTermId = loadedTerms.firstOrNull { it.isCurrent }?.id
                 ?: loadedTerms.lastOrNull()?.id
@@ -475,8 +488,8 @@ private fun GradesScreen(api: HandHelperApi, accessToken: String, padding: Paddi
         val termId = selectedTermId ?: return@LaunchedEffect
         loadingGrades = true
         error = null
-        api.grades(accessToken, termId).onSuccess { grades = it }.onFailure { throwable -> error = throwable.message ?: "无法读取成绩" }
-        api.gradeSummary(accessToken, termId).onSuccess { summary = it }.onFailure { throwable -> if (error == null) error = throwable.message ?: "无法读取成绩汇总" }
+        api.grades(termId).onSuccess { grades = it }.onFailure { throwable -> error = throwable.message ?: "无法读取成绩" }
+        api.gradeSummary(termId).onSuccess { summary = it }.onFailure { throwable -> if (error == null) error = throwable.message ?: "无法读取成绩汇总" }
         loadingGrades = false
     }
 
@@ -543,12 +556,12 @@ private fun GradeCard(grade: GradeItem) {
 private fun Double.prettyNumber(): String = if (this % 1.0 == 0.0) toInt().toString() else String.format(Locale.US, "%.1f", this)
 
 @Composable
-private fun SettingsScreen(api: HandHelperApi, accessToken: String, padding: PaddingValues, onLogout: () -> Unit) {
+private fun SettingsScreen(api: HandHelperApi, username: String, padding: PaddingValues, onLogout: () -> Unit) {
     var health by remember { mutableStateOf("正在检查服务器…") }
-    LaunchedEffect(Unit) { api.checkSession(accessToken).onSuccess { health = "服务器连接正常" }.onFailure { health = "服务器不可用：${it.message ?: "网络异常"}" } }
+    LaunchedEffect(Unit) { api.checkSession().onSuccess { health = "服务器连接正常" }.onFailure { health = "服务器不可用：${it.message ?: "网络异常"}" } }
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ElevatedCard { Column(Modifier.fillMaxWidth().padding(20.dp)) { Text("服务器", style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(8.dp)); Text(health) } }
-        ElevatedCard { Column(Modifier.fillMaxWidth().padding(20.dp)) { Text("安全存储", style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(8.dp)); Text("登录令牌已使用 Android 加密存储；应用不会保存账号密码。") } }
+        ElevatedCard { Column(Modifier.fillMaxWidth().padding(20.dp)) { Text("账号安全", style = MaterialTheme.typography.titleLarge); Spacer(Modifier.height(8.dp)); Text("当前登录：$username"); Text("会话已使用 Android 加密存储；应用不会保存账号密码。") } }
         Button(onClick = onLogout) { Text("退出当前账号") }
     }
 }

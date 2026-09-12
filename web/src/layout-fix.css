@@ -1121,6 +1121,46 @@ html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-e
 html[data-appearance='dark'] .native-startup { background:#0f1728; color:#dbe7f5; }
 html[data-appearance='dark'] .native-startup-spinner { border-color:#27364d; border-top-color:#60a5fa; }
 
+/* 首页首次读取后台数据时不显示半成品内容；已有数据后的后台刷新则保持原页面。 */
+.today-loading-page {
+  display:grid;
+  min-height:100%;
+  place-items:center;
+  padding:24px 20px calc(104px + env(safe-area-inset-bottom));
+}
+.today-loading-indicator {
+  display:grid;
+  justify-items:center;
+  gap:13px;
+  color:#64748b;
+}
+.today-loading-indicator p { margin:0; font-size:15px; font-weight:600; letter-spacing:.02em; }
+.today-loading-spinner {
+  width:27px;
+  height:27px;
+  border:3px solid #dbeafe;
+  border-top-color:#2563eb;
+  border-radius:50%;
+  animation:native-startup-spin .75s linear infinite;
+}
+.today-loading-error {
+  display:grid;
+  width:min(100%,360px);
+  gap:10px;
+  padding:22px;
+  border:1px solid rgb(255 255 255 / 76%);
+  border-radius:var(--floating-dock-radius,23px);
+  background:rgb(255 255 255 / 72%);
+  box-shadow:0 12px 28px rgb(15 23 42 / 12%),inset 0 1px rgb(255 255 255 / 90%);
+  color:#172033;
+}
+.today-loading-error p { margin:0; color:#64748b; line-height:1.5; }
+.today-loading-error button { justify-self:start; margin-top:4px; }
+.today-loading-page-dark .today-loading-indicator { color:#aebed3; }
+.today-loading-page-dark .today-loading-spinner { border-color:#27364d; border-top-color:#60a5fa; }
+.today-loading-page-dark .today-loading-error { border-color:rgb(148 163 184 / 20%); background:linear-gradient(135deg,rgb(30 41 59 / 92%),rgb(20 29 45 / 88%)); box-shadow:0 12px 28px rgb(0 0 0 / 22%),inset 0 1px rgb(255 255 255 / 6%); color:#e7eefb; }
+.today-loading-page-dark .today-loading-error p { color:#aebed3; }
+
 /* PC 响应式布局：仅在桌面宽度启用。手机 / PWA / Capacitor 继续沿用上面的移动端布局。 */
 .glass-nav.four-nav .nav-active-pill { transform:translateX(var(--nav-active-offset,0%)); }
 
@@ -1406,5 +1446,21 @@ html[data-appearance='dark'] .grades-page-dark .grade-ai-buttons > button[type='
   background:linear-gradient(135deg,#173b72,#1b4e92);
   color:#eff6ff;
   box-shadow:0 8px 18px rgb(8 24 50 / 30%);
+}
+
+/* 首页两张主体卡沿用底部 Dock 的外轮廓；不同终端只需维护一处弧度。 */
+:root { --floating-dock-radius:23px; }
+.glass-nav,
+.today-page .today-hero,
+.today-page .today-content .empty { border-radius:var(--floating-dock-radius); }
+
+@media (min-width:1000px) {
+  :root { --floating-dock-radius:28px; }
+}
+
+@supports (-webkit-touch-callout:none) {
+  @media (max-width:700px) and (hover:none) and (pointer:coarse) {
+    :root { --floating-dock-radius:30px; }
+  }
 }
 
