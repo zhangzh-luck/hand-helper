@@ -1,10 +1,13 @@
 import asyncio
+import base64
+import io
 import os
 from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from argon2 import PasswordHasher, Type
+from PIL import Image
 
 # API 回归测试绝不读取开发者的 .env、账号或真实缓存。
 TEST_DB = Path(__file__).resolve().parents[1] / "data" / "test_api.db"
@@ -28,6 +31,12 @@ GRADE_HTML = """<html><body><table>
 <tr><th>课程编号</th><th>课程名称</th><th>课程性质</th><th>成绩</th><th>学分</th><th>绩点</th></tr>
 <tr><td>C001</td><td>离线成绩分析测试</td><td>必修</td><td>88</td><td>3</td><td>3.8</td></tr>
 </table></body></html>""".encode("utf-8")
+
+
+def avatar_data_url(width: int, height: int) -> str:
+    image_bytes = io.BytesIO()
+    Image.new("RGB", (width, height), "#2563eb").save(image_bytes, format="PNG")
+    return f"data:image/png;base64,{base64.b64encode(image_bytes.getvalue()).decode('ascii')}"
 
 
 def login_headers(client: TestClient) -> dict[str, str]:
@@ -60,8 +69,10 @@ def test_api_auth_and_local_file_import():
         headers = login_headers(client)
         assert client.get("/api/v1/auth/me").json()["data"] == {"authenticated": True, "username": "admin"}
         assert client.get("/api/v1/profile", headers=headers).json()["data"]["display_name"] == "张自航"
-        profile = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": "data:image/png;base64,aGVsbG8="})
+        profile = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(512, 512)})
         assert profile.json()["data"]["display_name"] == "测试同学"
+        non_square_avatar = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(640, 480)})
+        assert non_square_avatar.status_code == 422
         term_id, preview = import_test_grades(client, headers)
         grades = client.get(f"/api/v1/grades?term_id={term_id}", headers=headers).json()["data"]
         assert grades[0]["course_name"] == preview["grades"][0]["course_name"]
@@ -207,6 +218,19 @@ def test_ai_grade_analysis_is_encrypted_and_cached(monkeypatch):
         assert tested.status_code == 200
         assert tested.json()["data"]["message"] == "模型服务连接成功，尚未保存配置"
         assert client.get("/api/v1/ai/settings", headers=headers).json()["data"]["configured"] is False
+        legacy_saved = client.put(
+            "/api/v1/ai/settings",
+            headers=headers,
+            json={"provider": "APIKEY.FUN", "base_url": "https://api.apikey.fun/v1", "model": "model-b", "api_key": "test-api-key-1234"},
+        )
+        assert legacy_saved.status_code == 200
+        assert legacy_saved.json()["data"]["requires_apikey_fan_migration"] is True
+        migrated = client.post("/api/v1/ai/settings/migrate-apikey-fan", headers=headers)
+        assert migrated.status_code == 200
+        assert migrated.json()["data"]["provider"] == "APIKEY.FAN"
+        assert migrated.json()["data"]["base_url"] == "https://api.apikey.fan/v1"
+        assert migrated.json()["data"]["model"] == "model-b"
+        assert migrated.json()["data"]["requires_apikey_fan_migration"] is False
         saved = client.put(
             "/api/v1/ai/settings",
             headers=headers,
