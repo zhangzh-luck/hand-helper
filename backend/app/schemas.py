@@ -179,6 +179,7 @@ class AiProviderSettingOut(BaseModel):
     available_models: list[str] = Field(default_factory=list)
     models_synced_at: datetime | None = None
     is_enabled: bool = False
+    requires_apikey_fan_migration: bool = False
 
 
 class AiModelSelectionInput(BaseModel):

@@ -2,6 +2,7 @@ from __future__ import annotations
 import uuid
 import base64
 import binascii
+import io
 import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image, UnidentifiedImageError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, select
@@ -17,7 +19,7 @@ from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PeriodTime
 from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
-from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
+from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, migrate_legacy_apikey_fun_setting, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
 from app.services import import_grades, import_printed_timetable, period_times, rebuild_sessions, set_period_time, set_term_start_date
 from app.importers.academic_files import ImportParseError, RawGrade, parse_grade_file, parse_printed_timetable_xls, parse_week_expression
@@ -156,6 +158,24 @@ def validate_avatar_data_url(value: str | None) -> str | None:
         raise ValueError("头像文件格式无效") from None
     if not image_bytes or len(image_bytes) > 1_000_000:
         raise ValueError("头像图片需大于 0 且不超过 1 MB")
+    expected_formats = {
+        "data:image/png;base64,": "PNG",
+        "data:image/jpeg;base64,": "JPEG",
+        "data:image/webp;base64,": "WEBP",
+    }
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image_format = image.format
+            width, height = image.size
+            image.verify()
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError):
+        raise ValueError("头像文件格式无效") from None
+    if image_format != expected_formats[prefix]:
+        raise ValueError("头像文件格式与声明不一致")
+    if width != height:
+        raise ValueError("头像必须为 1:1 正方形图片")
+    if width > 1024:
+        raise ValueError("头像边长不能超过 1024 像素")
     return value
 @app.get("/api/v1/profile")
 async def get_profile(db: AsyncSession = Depends(get_db)):
@@ -447,6 +467,12 @@ async def ai_model_list(body: AiModelLookupInput):
 async def refresh_ai_model_list(db: AsyncSession = Depends(get_db)):
     try:
         return response(await refresh_saved_models(db))
+    except (AiConfigurationError, AiServiceError) as exc:
+        raise HTTPException(422, str(exc))
+@app.post("/api/v1/ai/settings/migrate-apikey-fan")
+async def migrate_apikey_fan_setting(db: AsyncSession = Depends(get_db)):
+    try:
+        return response(await migrate_legacy_apikey_fun_setting(db))
     except (AiConfigurationError, AiServiceError) as exc:
         raise HTTPException(422, str(exc))
 @app.patch("/api/v1/ai/settings/model")

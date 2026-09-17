@@ -25,6 +25,19 @@ class AiServiceError(RuntimeError):
     pass
 
 
+LEGACY_APIKEY_FUN_PROVIDER = "APIKEY.FUN"
+LEGACY_APIKEY_FUN_BASE_URL = "https://api.apikey.fun/v1"
+APIKEY_FAN_PROVIDER = "APIKEY.FAN"
+APIKEY_FAN_BASE_URL = "https://api.apikey.fan/v1"
+
+
+def _is_legacy_apikey_fun(setting: AiProviderSetting) -> bool:
+    return (
+        setting.provider.strip().upper() == LEGACY_APIKEY_FUN_PROVIDER
+        and setting.base_url.strip().rstrip("/").lower() == LEGACY_APIKEY_FUN_BASE_URL
+    )
+
+
 def _fernet() -> Fernet:
     key = get_settings().ai_credential_master_key.strip()
     if not key:
@@ -259,6 +272,7 @@ def setting_out(setting: AiProviderSetting | None) -> AiProviderSettingOut:
         available_models=_stored_models(setting),
         models_synced_at=setting.models_synced_at,
         is_enabled=setting.is_enabled,
+        requires_apikey_fan_migration=_is_legacy_apikey_fun(setting),
     )
 
 
@@ -295,6 +309,27 @@ async def refresh_saved_models(db: AsyncSession) -> AiProviderSettingOut:
     _store_models(setting, models)
     if setting.model not in models:
         setting.model = models[0]
+    await db.commit()
+    await db.refresh(setting)
+    return setting_out(setting)
+
+
+async def migrate_legacy_apikey_fun_setting(db: AsyncSession) -> AiProviderSettingOut:
+    """Safely move the retired APIKEY.FUN preset only after the new API accepts its saved key."""
+    setting = await db.get(AiProviderSetting, 1)
+    if setting is None or not setting.is_enabled:
+        raise AiConfigurationError("请先保存模型服务配置")
+    if not _is_legacy_apikey_fun(setting):
+        raise AiConfigurationError("当前配置不是需要迁移的 APIKEY.FUN 预设")
+    models = await _get_openai_compatible_models(
+        _models_endpoint(APIKEY_FAN_BASE_URL),
+        _decrypt_saved_api_key(setting),
+    )
+    setting.provider = APIKEY_FAN_PROVIDER
+    setting.base_url = APIKEY_FAN_BASE_URL
+    if setting.model not in models:
+        setting.model = models[0]
+    _store_models(setting, models)
     await db.commit()
     await db.refresh(setting)
     return setting_out(setting)
