@@ -261,6 +261,12 @@ html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; borde
   .page-route-stage > main { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
 }
 
+/* WKWebView 铺满屏幕后不会进入 standalone 媒体查询。Dock 只保留与 PWA
+   相同的视觉浮动距离；内容区仍沿用下方安全留白，因而不会被 Dock 覆盖。 */
+html.webview-native .glass-nav {
+  bottom:20px;
+}
+
 /* iPhone / iPad 会在小于 16px 的可编辑文本框聚焦时自动放大页面。
    只提高实际编辑控件字号，保留标签、按钮与 Android 原生端的现有密度。 */
 @supports (-webkit-touch-callout:none) {

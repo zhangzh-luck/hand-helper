@@ -12,6 +12,13 @@ struct WebContainerView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "handHelperNative")
+        // WKWebView 不会匹配 PWA 的 standalone display-mode。页面据此采用
+        // 原生容器专用的安全区布局，而不依赖 User-Agent 等不稳定的环境判断。
+        controller.addUserScript(WKUserScript(
+            source: "document.documentElement.classList.add('webview-native');",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
