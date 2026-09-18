@@ -3,9 +3,10 @@ import WebKit
 
 struct WebContainerView: UIViewRepresentable {
     let url: URL
+    let onLoadFailure: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(allowedHost: url.host)
+        Coordinator(allowedHost: url.host, onLoadFailure: onLoadFailure)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -27,9 +28,11 @@ struct WebContainerView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private let allowedHost: String?
+        private let onLoadFailure: (String) -> Void
 
-        init(allowedHost: String?) {
+        init(allowedHost: String?, onLoadFailure: @escaping (String) -> Void) {
             self.allowedHost = allowedHost
+            self.onLoadFailure = onLoadFailure
         }
 
         func userContentController(
@@ -49,10 +52,33 @@ struct WebContainerView: UIViewRepresentable {
                 targetURL.scheme == "https",
                 targetURL.host == allowedHost
             else {
+                reportFailure("应用只能打开已配置的安全服务地址。")
                 decisionHandler(.cancel)
                 return
             }
             decisionHandler(.allow)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation?,
+            withError error: Error
+        ) {
+            reportFailure("无法连接到服务，请检查网络或稍后重试。")
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFail navigation: WKNavigation?,
+            withError error: Error
+        ) {
+            reportFailure("页面加载中断，请重试。")
+        }
+
+        private func reportFailure(_ message: String) {
+            DispatchQueue.main.async { [onLoadFailure] in
+                onLoadFailure(message)
+            }
         }
     }
 }
