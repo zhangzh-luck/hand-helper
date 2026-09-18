@@ -50,6 +50,7 @@ html[data-appearance="dark"] #root {
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-top: calc(22px + env(safe-area-inset-top));
   padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
