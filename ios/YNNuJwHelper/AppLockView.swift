@@ -17,6 +17,7 @@ struct AppLockView: View {
                     WebContainerView(url: url) { message in
                         webLoadError = message
                     }
+                    .ignoresSafeArea()
                 }
             } else if unlocked {
                 ConfigurationErrorView()
