@@ -4,11 +4,20 @@ import SwiftUI
 struct AppLockView: View {
     @State private var unlocked = false
     @State private var authenticationFailed = false
+    @State private var webLoadError: String?
 
     var body: some View {
         Group {
             if unlocked, let url = AppConfiguration.webURL {
-                WebContainerView(url: url)
+                if let webLoadError {
+                    WebLoadErrorView(message: webLoadError) {
+                        self.webLoadError = nil
+                    }
+                } else {
+                    WebContainerView(url: url) { message in
+                        webLoadError = message
+                    }
+                }
             } else if unlocked {
                 ConfigurationErrorView()
             } else {
@@ -65,6 +74,23 @@ private struct ConfigurationErrorView: View {
             systemImage: "network.slash",
             description: Text("请在 Xcode 构建设置中设置 HAND_HELPER_WEB_URL 为你的 HTTPS 服务地址，然后重新构建应用。")
         )
+        .padding(24)
+    }
+}
+
+private struct WebLoadErrorView: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        ContentUnavailableView(
+            "无法打开航的助手",
+            systemImage: "wifi.exclamationmark",
+            description: Text(message)
+        ) {
+            Button("重试", action: retry)
+                .buttonStyle(.borderedProminent)
+        }
         .padding(24)
     }
 }

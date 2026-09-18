@@ -13,8 +13,9 @@ on:
           - ad-hoc
           - app-store-connect
       web_url:
-        description: 'HTTPS URL loaded by the app, e.g. https://your-domain.example'
+        description: 'HTTPS URL loaded by the app; keep the production address unless you are intentionally changing it.'
         required: true
+        default: 'https://portal.zhangzh.cc'
         type: string
 
 permissions:
