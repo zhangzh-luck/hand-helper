@@ -25,7 +25,7 @@ export async function updateNativeStatusBar(appearance: 'light' | 'dark') {
   if (!Capacitor.isNativePlatform()) return;
   const isDark = appearance === 'dark';
   await runOptionalNativeAction(() => StatusBar.setStyle({ style: isDark ? Style.Light : Style.Dark }));
-  await runOptionalNativeAction(() => StatusBar.setBackgroundColor({ color: isDark ? '#0f172a' : '#f4f7fb' }));
+  await runOptionalNativeAction(() => StatusBar.setBackgroundColor({ color: isDark ? '#000000' : '#f4f7fb' }));
 }
 
 /** Initializes Android-only behavior without changing browser/PWA behavior. */

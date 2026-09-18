@@ -986,12 +986,15 @@ function ConfirmDialog({ title, description, confirmLabel, pending, onCancel, on
 function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
 function Page({ title, children, action, icon, className, headerClassName, compactTitle, mainRef, headerRef }: { title: string; children: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode; className?: string; headerClassName?: string; compactTitle?: boolean; mainRef?: RefObject<HTMLElement>; headerRef?: RefObject<HTMLElement> }) { return <main ref={mainRef} className={className}><header ref={headerRef} className={headerClassName}>{compactTitle && icon && <span className="page-fixed-title-icon" aria-hidden="true">{icon}</span>}<h1 className="page-title">{!compactTitle && icon && <span className="page-title-icon" aria-hidden="true">{icon}</span>}{title}</h1>{compactTitle && <span className="page-title-compact" aria-hidden="true">{title}</span>}{action}</header>{children}</main>; }
 
-function Login({ onSuccess }: { onSuccess: () => void }) {
+function Login({ onSuccess, appearance, onToggleAppearance }: { onSuccess: () => void; appearance: 'light' | 'dark'; onToggleAppearance: () => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const login = useMutation({ mutationFn: () => api.login(username, password), onSuccess });
+  const AppearanceIcon = appearance === 'dark' ? Sun : Moon;
+  const appearanceLabel = appearance === 'dark' ? '切换为浅色模式' : '切换为深色模式';
   return <main className="login">
     <section className="login-card" aria-labelledby="login-title">
+      <button type="button" className="login-appearance-toggle" aria-label={appearanceLabel} title={appearanceLabel} onClick={onToggleAppearance}><AppearanceIcon size={18} aria-hidden="true" /></button>
       <div className="login-logo"><img src="/pwa-192.png" alt="航的助手" width="80" height="80" /></div>
       <h1 className="login-title" id="login-title">航的助手</h1>
       <p className="login-desc">输入管理员账号和密码以继续。</p>
@@ -1067,7 +1070,7 @@ export default function App() {
     document.documentElement.dataset.appearance = resolvedAppearanceMode;
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
       'content',
-      resolvedAppearanceMode === 'dark' ? '#101827' : '#f4f7fb',
+      resolvedAppearanceMode === 'dark' ? '#000000' : '#f4f7fb',
     );
     void updateNativeStatusBar(resolvedAppearanceMode);
   }, [resolvedAppearanceMode]);
@@ -1111,7 +1114,7 @@ export default function App() {
     };
   }, []);
   if (authState === 'checking') return <AuthGateLoading />;
-  if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
+  if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login appearance={resolvedAppearanceMode} onToggleAppearance={() => setAppearanceMode(resolvedAppearanceMode === 'dark' ? 'light' : 'dark')} onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
   if (location.pathname === '/login') return <Navigate to="/" replace />;
   return <div className="shell"><NativeStartupNotice /><NetworkNotice /><PrimaryRouteTransition appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={setAppearanceMode} layoutMode={layoutMode} onLayoutModeChange={setLayoutMode} /><BottomNav appearance={resolvedAppearanceMode} /></div>;
 }
