@@ -83,14 +83,16 @@ private struct WebLoadErrorView: View {
     let retry: () -> Void
 
     var body: some View {
-        ContentUnavailableView(
-            "无法打开航的助手",
-            systemImage: "wifi.exclamationmark",
-            description: Text(message)
-        ) {
+        VStack(spacing: 18) {
+            ContentUnavailableView(
+                "无法打开航的助手",
+                systemImage: "wifi.exclamationmark",
+                description: Text(message)
+            )
             Button("重试", action: retry)
                 .buttonStyle(.borderedProminent)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
     }
 }
