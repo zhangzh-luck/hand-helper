@@ -43,7 +43,7 @@ jobs:
           )
           unzip -l build/HandHelper-unsigned.ipa | grep -q 'Payload/YNNuJwHelper.app/Info.plist'
           ACTUAL_WEB_URL="$(/usr/libexec/PlistBuddy -c 'Print :HandHelperWebURL' "$APP_PATH/Info.plist")"
-          test "$ACTUAL_WEB_URL" = 'https://jw.zhangzh.cc'
+          test "$ACTUAL_WEB_URL" = 'https://portal.zhangzh.cc'
       - uses: actions/upload-artifact@v4
         with:
           name: Hand-Helper-unsigned-ipa-web-url-fixed
