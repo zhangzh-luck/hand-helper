@@ -13,6 +13,7 @@ class AppProfile(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     display_name: Mapped[str] = mapped_column(String(64), default="用户")
     avatar_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timetable_background_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class AppSession(Base):
     """Server-side session metadata; only an HMAC of the browser secret is stored."""
