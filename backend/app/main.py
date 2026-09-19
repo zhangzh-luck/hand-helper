@@ -144,7 +144,11 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 async def auth_me():
     return response(AuthMeOut(username=get_settings().admin_username))
 def profile_out(profile: AppProfile | None) -> AppProfileOut:
-    return AppProfileOut(display_name=profile.display_name if profile else "张自航", avatar_data_url=profile.avatar_data_url if profile else None)
+    return AppProfileOut(
+        display_name=profile.display_name if profile else "张自航",
+        avatar_data_url=profile.avatar_data_url if profile else None,
+        timetable_background_data_url=profile.timetable_background_data_url if profile else None,
+    )
 def validate_avatar_data_url(value: str | None) -> str | None:
     if value is None:
         return None
@@ -177,6 +181,39 @@ def validate_avatar_data_url(value: str | None) -> str | None:
     if width > 1024:
         raise ValueError("头像边长不能超过 1024 像素")
     return value
+
+def validate_timetable_background_data_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    prefixes = ("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,")
+    prefix = next((item for item in prefixes if value.startswith(item)), None)
+    if not prefix:
+        raise ValueError("课表背景仅支持 PNG、JPEG 或 WebP 图片")
+    try:
+        image_bytes = base64.b64decode(value[len(prefix):], validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("课表背景文件格式无效") from None
+    if not image_bytes or len(image_bytes) > 1_000_000:
+        raise ValueError("课表背景需大于 0 且不超过 1 MB")
+    expected_formats = {
+        "data:image/png;base64,": "PNG",
+        "data:image/jpeg;base64,": "JPEG",
+        "data:image/webp;base64,": "WEBP",
+    }
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image_format = image.format
+            width, height = image.size
+            image.verify()
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError):
+        raise ValueError("课表背景文件格式无效") from None
+    if image_format != expected_formats[prefix]:
+        raise ValueError("课表背景文件格式与声明不一致")
+    if width * 16 != height * 9:
+        raise ValueError("课表背景必须为 9:16 图片")
+    if width > 900 or height > 1600:
+        raise ValueError("课表背景尺寸不能超过 900 × 1600 像素")
+    return value
 @app.get("/api/v1/profile")
 async def get_profile(db: AsyncSession = Depends(get_db)):
     profile = await db.scalar(select(AppProfile).order_by(AppProfile.id).limit(1))
@@ -192,6 +229,11 @@ async def update_profile(body: AppProfileInput, db: AsyncSession = Depends(get_d
     if "avatar_data_url" in body.model_fields_set:
         try:
             profile.avatar_data_url = validate_avatar_data_url(body.avatar_data_url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+    if "timetable_background_data_url" in body.model_fields_set:
+        try:
+            profile.timetable_background_data_url = validate_timetable_background_data_url(body.timetable_background_data_url)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
     await db.commit()

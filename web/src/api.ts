@@ -92,8 +92,8 @@ export const api = {
   clearGradeAiAnalyses: () => request<{ deleted: number }>('/api/v1/grades/ai-analyses', { method: 'DELETE' }),
 };
 export type AuthMe = { authenticated: true; username: string };
-export type Profile = { display_name: string; avatar_data_url: string | null };
-export type ProfileUpdate = { display_name: string; avatar_data_url?: string | null };
+export type Profile = { display_name: string; avatar_data_url: string | null; timetable_background_data_url: string | null };
+export type ProfileUpdate = { display_name: string; avatar_data_url?: string | null; timetable_background_data_url?: string | null };
 export type Term = { id: number; source_term_id: string; display_name: string; start_date: string | null; is_current: boolean };
 export type PeriodTime = { period_number: number; start_time: string; end_time: string };
 export type Session = { id: number; course_name: string; course_code: string; session_date: string; start_datetime: string; end_datetime: string; classroom: string | null; teacher: string | null; week_expression: string | null; status: string; source?: 'IMPORTED' | 'MANUAL'; manual_course_id?: number | null; term_id?: number | null; weekday?: number | null; start_period?: number | null; end_period?: number | null };

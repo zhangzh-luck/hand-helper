@@ -71,6 +71,10 @@ def test_api_auth_and_local_file_import():
         assert client.get("/api/v1/profile", headers=headers).json()["data"]["display_name"] == "张自航"
         profile = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(512, 512)})
         assert profile.json()["data"]["display_name"] == "测试同学"
+        background = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "timetable_background_data_url": avatar_data_url(720, 1280)})
+        assert background.json()["data"]["timetable_background_data_url"] == avatar_data_url(720, 1280)
+        invalid_background = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "timetable_background_data_url": avatar_data_url(640, 480)})
+        assert invalid_background.status_code == 422
         non_square_avatar = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(640, 480)})
         assert non_square_avatar.status_code == 422
         term_id, preview = import_test_grades(client, headers)

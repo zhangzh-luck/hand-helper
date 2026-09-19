@@ -34,7 +34,8 @@ export async function initializeNativeRuntime() {
 
   document.documentElement.classList.add('capacitor-native');
   await runOptionalNativeAction(() => StatusBar.setOverlaysWebView({ overlay: false }));
-  await runOptionalNativeAction(() => Keyboard.setResizeMode({ mode: KeyboardResize.Body }));
+  const keyboardResizeMode = Capacitor.getPlatform() === 'ios' ? KeyboardResize.None : KeyboardResize.Body;
+  await runOptionalNativeAction(() => Keyboard.setResizeMode({ mode: keyboardResizeMode }));
   await updateNativeStatusBar(document.documentElement.dataset.appearance === 'dark' ? 'dark' : 'light');
 
   await runOptionalNativeAction(() => App.addListener('backButton', ({ canGoBack }) => {
