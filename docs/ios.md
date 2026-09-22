@@ -6,7 +6,7 @@
 
 1. 在 macOS 安装 Xcode 后，打开 `ios/YNNuJwHelper.xcodeproj`。
 2. 在 Target → Signing & Capabilities 中选择自己的 Team。
-3. 在 Target → Build Settings 中设置 `HAND_HELPER_WEB_SCHEME=https` 与 `HAND_HELPER_WEB_HOST`（例如 `portal.zhangzh.cc`）。
+3. 在 Target → Build Settings 中设置 `HAND_HELPER_WEB_SCHEME=https` 与 `HAND_HELPER_WEB_HOST`（例如 `hand.zhangzh.cc`）。
 4. 连接已开启开发者模式的 iPhone，选择设备后点击 Run，可安装调试版。
 5. 需要 IPA 时选择 Product → Archive → Distribute App，再选择 Development、Ad Hoc 或 App Store Connect / TestFlight。
 

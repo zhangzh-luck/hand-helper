@@ -10,7 +10,7 @@ Web 端继续以 Vite 构建、Nginx 同源代理 `/api`；Android 使用 Capaci
 - Android `versionCode`：`3`
 - 最低 SDK：23
 - 编译/目标 SDK：36
-- Android API：`https://portal.zhangzh.cc`（可用 `VITE_ANDROID_API_URL` 覆盖）
+- Android API：`https://hand.zhangzh.cc`（可用 `VITE_ANDROID_API_URL` 覆盖）
 
 ## 认证与网络
 

@@ -56,6 +56,12 @@ export async function upload<T>(path: string, file: File, fields: Record<string,
 const termQuery = (termId?: number) => termId ? `?term_id=${termId}` : '';
 export const api = {
   login: (username: string, password: string) => request<AuthMe>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  passkeyAuthenticationOptions: () => request<PasskeyAuthenticationOptions>('/api/v1/auth/passkey/options', { method: 'POST' }),
+  verifyPasskeyAuthentication: (payload: PasskeyVerificationInput) => request<AuthMe>('/api/v1/auth/passkey/verify', { method: 'POST', body: JSON.stringify(payload) }),
+  passkeyRegistrationOptions: (password: string, label: string) => request<PasskeyRegistrationOptions>('/api/v1/auth/passkey/registration/options', { method: 'POST', body: JSON.stringify({ password, label }) }),
+  verifyPasskeyRegistration: (payload: PasskeyVerificationInput) => request<PasskeyCredential>('/api/v1/auth/passkey/registration/verify', { method: 'POST', body: JSON.stringify(payload) }),
+  passkeys: () => request<PasskeyCredential[]>('/api/v1/auth/passkeys'),
+  deletePasskey: (credentialId: number, password: string) => request<{ deleted: boolean }>(`/api/v1/auth/passkeys/${credentialId}`, { method: 'DELETE', body: JSON.stringify({ password }) }),
   logout: () => request<{ logged_out: boolean }>('/api/v1/auth/logout', { method: 'POST' }),
   me: () => request<AuthMe>('/api/v1/auth/me'),
   profile: () => request<Profile>('/api/v1/profile'),
@@ -92,6 +98,17 @@ export const api = {
   clearGradeAiAnalyses: () => request<{ deleted: number }>('/api/v1/grades/ai-analyses', { method: 'DELETE' }),
 };
 export type AuthMe = { authenticated: true; username: string };
+export type PasskeyAuthenticationOptions = {
+  challenge_id: string;
+  public_key: Record<string, unknown>;
+};
+export type PasskeyRegistrationOptions = PasskeyAuthenticationOptions & { label: string };
+export type PasskeyVerificationInput = {
+  challenge_id: string;
+  credential: Record<string, unknown>;
+  label?: string;
+};
+export type PasskeyCredential = { id: number; label: string; device_type: string; backed_up: boolean; created_at: string; last_used_at: string | null };
 export type Profile = { display_name: string; avatar_data_url: string | null; timetable_background_data_url: string | null };
 export type ProfileUpdate = { display_name: string; avatar_data_url?: string | null; timetable_background_data_url?: string | null };
 export type Term = { id: number; source_term_id: string; display_name: string; start_date: string | null; is_current: boolean };
