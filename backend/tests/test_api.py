@@ -176,6 +176,32 @@ def test_single_owner_session_lifecycle_and_csrf():
         assert client.get("/api/v1/grades").status_code == 401
 
 
+def test_passkey_ceremonies_require_reauthentication_and_consume_challenges():
+    with TestClient(app) as client:
+        # Authentication options are public, but assertions use a short-lived,
+        # one-time server challenge and no credential identifier is exposed.
+        authentication = client.post("/api/v1/auth/passkey/options")
+        assert authentication.status_code == 200
+        authentication_data = authentication.json()["data"]
+        assert authentication_data["challenge_id"] and authentication_data["public_key"]["rpId"] == "localhost"
+        invalid_assertion = {"challenge_id": authentication_data["challenge_id"], "credential": {}}
+        assert client.post("/api/v1/auth/passkey/verify", json=invalid_assertion).status_code == 401
+        # A failed verification has still consumed the challenge, preventing replay.
+        assert client.post("/api/v1/auth/passkey/verify", json=invalid_assertion).status_code == 401
+
+        login_headers(client)
+        assert client.post("/api/v1/auth/passkey/registration/options", json={"password": "wrong", "label": "测试设备"}).status_code == 401
+        registration = client.post("/api/v1/auth/passkey/registration/options", json={"password": "change-me", "label": "测试设备"})
+        assert registration.status_code == 200
+        registration_data = registration.json()["data"]
+        assert registration_data["label"] == "测试设备"
+        assert registration_data["public_key"]["rp"]["id"] == "localhost"
+        invalid_registration = {"challenge_id": registration_data["challenge_id"], "credential": {}}
+        assert client.post("/api/v1/auth/passkey/registration/verify", json=invalid_registration).status_code == 422
+        assert client.post("/api/v1/auth/passkey/registration/verify", json=invalid_registration).status_code == 422
+        assert client.get("/api/v1/auth/passkeys").json()["data"] == []
+
+
 def test_login_rate_limit_uses_ip_and_username():
     with TestClient(app) as client:
         for _ in range(5):

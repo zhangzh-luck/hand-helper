@@ -3,6 +3,7 @@ import uuid
 import base64
 import binascii
 import io
+import json
 import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -15,12 +16,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from webauthn.helpers import bytes_to_base64url
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
-from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PeriodTime
-from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
+from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PasskeyCredential, PeriodTime
+from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PasskeyCredentialOut, PasskeyDeleteRequest, PasskeyRegistrationOptionsRequest, PasskeyVerificationRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
 from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, migrate_legacy_apikey_fun_setting, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
+from app.passkeys import PasskeyError, authentication_options, consume_challenge, issue_challenge, owner_for, registration_options, verify_authentication, verify_registration
 from app.services import import_grades, import_printed_timetable, period_times, rebuild_sessions, set_period_time, set_term_start_date
 from app.importers.academic_files import ImportParseError, RawGrade, parse_grade_file, parse_printed_timetable_xls, parse_week_expression
 
@@ -58,10 +61,18 @@ async def lifespan(_app: FastAPI):
 app=FastAPI(title="航的助手 · Hand Helper", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"])
 
-PUBLIC_API_PATHS = {"/api/auth/login", "/api/v1/auth/login"}
+PUBLIC_API_PATHS = {
+    "/api/auth/login", "/api/v1/auth/login",
+    "/api/auth/passkey/options", "/api/v1/auth/passkey/options",
+    "/api/auth/passkey/verify", "/api/v1/auth/passkey/verify",
+}
 AUTH_RESPONSE_PATHS = {
     "/api/auth/login", "/api/v1/auth/login", "/api/auth/logout", "/api/v1/auth/logout",
     "/api/auth/me", "/api/v1/auth/me",
+    "/api/auth/passkey/options", "/api/v1/auth/passkey/options",
+    "/api/auth/passkey/verify", "/api/v1/auth/passkey/verify",
+    "/api/auth/passkey/registration/options", "/api/v1/auth/passkey/registration/options",
+    "/api/auth/passkey/registration/verify", "/api/v1/auth/passkey/registration/verify",
 }
 
 
@@ -101,6 +112,31 @@ async def validation_error_handler(request: Request, _exc: RequestValidationErro
 async def health(): return {"status":"ok"}
 
 
+def passkeys_settings():
+    settings = get_settings()
+    if not settings.webauthn_enabled:
+        raise HTTPException(404, "通行密钥登录尚未启用")
+    if not settings.webauthn_origin_list:
+        raise HTTPException(503, "通行密钥来源尚未配置")
+    return settings
+
+
+async def authenticated_response(db: AsyncSession) -> JSONResponse:
+    settings = get_settings()
+    raw_session_id = await create_session(db)
+    result = JSONResponse(content=response({"authenticated": True, "username": settings.admin_username}).model_dump(mode="json"))
+    result.set_cookie(
+        key=settings.session_cookie_name,
+        value=raw_session_id,
+        max_age=settings.session_max_age,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    return result
+
+
 @app.post("/api/auth/login", include_in_schema=False)
 @app.post("/api/v1/auth/login")
 async def app_login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
@@ -116,18 +152,110 @@ async def app_login(body: LoginRequest, request: Request, db: AsyncSession = Dep
         login_rate_limiter.record_failure(remote, username)
         raise HTTPException(401, "用户名或密码错误")
     login_rate_limiter.clear(remote, username)
-    raw_session_id = await create_session(db)
-    result = JSONResponse(content=response({"authenticated": True, "username": settings.admin_username}).model_dump(mode="json"))
-    result.set_cookie(
-        key=settings.session_cookie_name,
-        value=raw_session_id,
-        max_age=settings.session_max_age,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
+    return await authenticated_response(db)
+
+
+@app.post("/api/auth/passkey/options", include_in_schema=False)
+@app.post("/api/v1/auth/passkey/options")
+async def passkey_authentication_options(db: AsyncSession = Depends(get_db)):
+    settings = passkeys_settings()
+    challenge_id, challenge = await issue_challenge(db, "authentication", settings)
+    return response({"challenge_id": challenge_id, "public_key": authentication_options(settings=settings, challenge=challenge)})
+
+
+@app.post("/api/auth/passkey/verify", include_in_schema=False)
+@app.post("/api/v1/auth/passkey/verify")
+async def passkey_authentication_verify(body: PasskeyVerificationRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    settings = passkeys_settings()
+    remote = client_ip(request)
+    if not login_rate_limiter.allowed(remote, "passkey"):
+        raise HTTPException(429, "登录尝试过于频繁，请五分钟后再试")
+    try:
+        challenge = await consume_challenge(db, body.challenge_id, "authentication")
+        credential_id = body.credential.get("id")
+        if not isinstance(credential_id, str):
+            raise PasskeyError("通行密钥响应无效")
+        stored = await db.scalar(select(PasskeyCredential).where(PasskeyCredential.credential_id == credential_id))
+        owner = await owner_for(db)
+        response_payload = body.credential.get("response")
+        user_handle = response_payload.get("userHandle") if isinstance(response_payload, dict) else None
+        if stored is None or not isinstance(user_handle, str) or not secrets.compare_digest(user_handle, owner.user_handle):
+            raise PasskeyError("通行密钥不匹配")
+        verified = verify_authentication(credential=body.credential, expected_challenge=challenge, settings=settings, stored=stored)
+    except PasskeyError:
+        login_rate_limiter.record_failure(remote, "passkey")
+        raise HTTPException(401, "通行密钥验证失败，请重试") from None
+    stored.sign_count = verified.new_sign_count
+    stored.last_used_at = datetime.utcnow()
+    await db.commit()
+    login_rate_limiter.clear(remote, "passkey")
+    return await authenticated_response(db)
+
+
+@app.post("/api/auth/passkey/registration/options", include_in_schema=False)
+@app.post("/api/v1/auth/passkey/registration/options")
+async def passkey_registration_options(body: PasskeyRegistrationOptionsRequest, db: AsyncSession = Depends(get_db)):
+    settings = passkeys_settings()
+    if not verify_admin_password(body.password):
+        raise HTTPException(401, "当前密码错误")
+    owner = await owner_for(db)
+    credentials = list((await db.scalars(select(PasskeyCredential).order_by(PasskeyCredential.id))).all())
+    challenge_id, challenge = await issue_challenge(db, "registration", settings)
+    return response({
+        "challenge_id": challenge_id,
+        "public_key": registration_options(settings=settings, owner=owner, challenge=challenge, credentials=credentials),
+        "label": body.label.strip(),
+    })
+
+
+@app.post("/api/auth/passkey/registration/verify", include_in_schema=False)
+@app.post("/api/v1/auth/passkey/registration/verify")
+async def passkey_registration_verify(body: PasskeyVerificationRequest, db: AsyncSession = Depends(get_db)):
+    settings = passkeys_settings()
+    try:
+        challenge = await consume_challenge(db, body.challenge_id, "registration")
+        verified = verify_registration(credential=body.credential, expected_challenge=challenge, settings=settings)
+    except PasskeyError:
+        raise HTTPException(422, "通行密钥注册失败，请重试") from None
+    credential_id = verified.credential_id
+    credential_id_text = bytes_to_base64url(credential_id)
+    if await db.scalar(select(PasskeyCredential.id).where(PasskeyCredential.credential_id == credential_id_text)):
+        raise HTTPException(409, "该通行密钥已添加")
+    response_payload = body.credential.get("response")
+    transports = response_payload.get("transports", []) if isinstance(response_payload, dict) else []
+    if not isinstance(transports, list) or not all(isinstance(item, str) for item in transports):
+        transports = []
+    credential = PasskeyCredential(
+        credential_id=credential_id_text,
+        public_key=bytes_to_base64url(verified.credential_public_key),
+        sign_count=verified.sign_count,
+        transports_json=json.dumps(transports),
+        device_type=verified.credential_device_type.value,
+        backed_up=verified.credential_backed_up,
+        label=(body.label or "此设备").strip() or "此设备",
     )
-    return result
+    db.add(credential)
+    await db.commit()
+    await db.refresh(credential)
+    return response(PasskeyCredentialOut.model_validate(credential))
+
+
+@app.get("/api/v1/auth/passkeys")
+async def list_passkeys(db: AsyncSession = Depends(get_db)):
+    rows = list((await db.scalars(select(PasskeyCredential).order_by(PasskeyCredential.created_at.desc()))).all())
+    return response([PasskeyCredentialOut.model_validate(item) for item in rows])
+
+
+@app.delete("/api/v1/auth/passkeys/{credential_id}")
+async def delete_passkey(credential_id: int, body: PasskeyDeleteRequest, db: AsyncSession = Depends(get_db)):
+    if not verify_admin_password(body.password):
+        raise HTTPException(401, "当前密码错误")
+    credential = await db.get(PasskeyCredential, credential_id)
+    if credential is None:
+        raise HTTPException(404, "通行密钥不存在")
+    await db.delete(credential)
+    await db.commit()
+    return response({"deleted": True})
 
 
 @app.post("/api/auth/logout", include_in_schema=False)

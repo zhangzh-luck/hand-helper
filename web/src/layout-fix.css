@@ -13,6 +13,15 @@ html[data-appearance="dark"] #root {
   background:#000000;
 }
 
+/* 登录与会话校验期间不让根页面参与 iOS / WKWebView 的橡皮筋回弹。 */
+html[data-auth-screen],
+html[data-auth-screen] body,
+html[data-auth-screen] #root {
+  height:100%;
+  overflow:hidden;
+  overscroll-behavior-y:none;
+}
+
 /* 固定底部导航不应覆盖可滚动的课程时间轴。 */
 .shell {
   height: 100dvh;
@@ -31,6 +40,27 @@ html[data-appearance="dark"] #root {
 .shell select,
 .shell [contenteditable="true"],
 .grade-ai-markdown {
+  -webkit-touch-callout:default;
+  -webkit-user-select:text;
+  user-select:text;
+}
+
+/* 普通界面保持 App 式长按行为；编辑控件与可复制的报告正文不受影响。 */
+.shell img,
+.login-native-page,
+.login-native-page * {
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+.shell img,
+.login-native-page img {
+  -webkit-user-drag:none;
+}
+.login-native-page input,
+.login-native-page textarea,
+.login-native-page select,
+.login-native-page [contenteditable="true"] {
   -webkit-touch-callout:default;
   -webkit-user-select:text;
   user-select:text;
@@ -268,6 +298,8 @@ html[data-appearance="dark"] .auth-loading-spinner { border-color:#454952; borde
 .detail-sheet { width:min(560px,100%); max-height:78dvh; overflow-y:auto; padding:12px 22px 28px; border-radius:24px; background:#fff; box-shadow:0 16px 42px rgb(15 23 42 / 24%); }
 .sheet-handle { display:none; }
 .detail-sheet header { align-items:flex-start; gap:12px; margin-bottom:16px; }.detail-sheet h2 { min-width:0; margin:0; flex:1; font-size:22px; line-height:1.35; overflow-wrap:anywhere; }.detail-sheet header button { flex:0 0 auto; align-self:flex-start; min-width:64px; padding:8px 10px; font-size:13px; white-space:nowrap; }
+.detail-sheet-visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }
+.detail-sheet-with-eyebrow { padding-top:16px; }.detail-sheet-with-eyebrow header { align-items:center; margin-bottom:14px; }.detail-sheet-with-eyebrow .detail-sheet-heading { display:grid; flex:1; min-width:0; gap:3px; }.detail-sheet-with-eyebrow .detail-sheet-heading > small { color:#71829a; font-size:12px; font-weight:700; line-height:1.2; letter-spacing:.02em; }.detail-sheet-with-eyebrow h2 { font-size:24px; line-height:1.28; letter-spacing:-.02em; }.detail-sheet-with-eyebrow header .sheet-close-icon { flex-basis:40px; width:40px; min-width:40px; height:40px; min-height:40px; max-height:40px; margin-top:2px; }.detail-sheet-list-title header { align-items:flex-start; margin-bottom:10px; }.detail-sheet-list-title .detail-sheet-heading { display:flex; min-height:40px; align-items:center; }.detail-sheet-list-title .detail-sheet-heading > small { font-size:13px; }
 .detail-sheet p { display:grid; gap:4px; padding:12px 0; margin:0; border-bottom:1px solid #e9eef5; }.detail-sheet p span { font-size:16px; color:#172033; }
 .icon-detail-list { overflow:hidden; border:1px solid rgb(15 23 42 / 6%); border-radius:16px; background:#f5f7fb; }
 .icon-detail-row { display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:10px; min-height:58px; padding:10px 14px; border-bottom:1px solid rgb(15 23 42 / 8%); }
@@ -930,6 +962,27 @@ html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-e
 .account-logout-row small,.account-logout-row>svg { color:#c3263f; }
 .account-logout-row:active { background:rgb(255 228 230 / 72%); }
 .account-logout-row:disabled { cursor:default; opacity:.55; }
+.passkey-settings-section { margin-top:2px; }
+.passkey-credential-row { display:flex; min-height:68px; align-items:center; justify-content:space-between; gap:12px; padding:11px 15px; }
+.passkey-credential-row + .passkey-credential-row { border-top:1px solid rgb(15 23 42 / 8%); }
+.passkey-credential-row > span { display:grid; min-width:0; gap:4px; }
+.passkey-credential-row b { color:#172033; font-size:15px; line-height:1.3; }
+.passkey-credential-row small { color:#64748b; font-size:12px; line-height:1.4; }
+.passkey-credential-row button,.passkey-add-button { flex:0 0 auto; border:0; border-radius:10px; background:transparent; color:#d92d20; font:600 13px/1 inherit; cursor:pointer; }
+.passkey-add-button { min-height:42px; padding:0 14px; justify-self:start; border:1px solid rgb(37 99 235 / 20%); background:#eff6ff; color:#2563eb; }
+.passkey-form { display:grid; gap:10px; padding:14px; border:1px solid rgb(37 99 235 / 16%); border-radius:16px; background:rgb(239 246 255 / 58%); }
+.passkey-form > label { display:grid; gap:6px; color:#52647c; font-size:12px; font-weight:600; }
+.passkey-form input { width:100%; min-height:42px; padding:0 11px; border:1px solid rgb(15 23 42 / 12%); border-radius:11px; outline:0; background:#fff; color:#172033; font:400 15px/1.3 inherit; }
+.passkey-form input:focus { border-color:rgb(37 99 235 / 62%); box-shadow:0 0 0 3px rgb(37 99 235 / 11%); }
+.passkey-form p { margin:0; color:#64748b; font-size:12px; line-height:1.45; }
+.passkey-form > div { display:flex; justify-content:flex-end; gap:9px; }
+.passkey-form button { min-height:38px; padding:0 13px; border:0; border-radius:10px; background:#e2e8f0; color:#475569; font:600 13px/1 inherit; cursor:pointer; }
+.passkey-form button[type="submit"] { background:#2563eb; color:#fff; }
+.passkey-form button:disabled { cursor:wait; opacity:.6; }
+.passkey-revoke-form { border-color:rgb(255 69 58 / 20%); background:rgb(255 241 242 / 72%); }
+.passkey-revoke-form > b { color:#b42318; font-size:14px; }
+.passkey-revoke-form button[type="submit"] { background:#d92d20; }
+.account-settings-error { margin:0 2px; color:#d92d20; font-size:13px; line-height:1.4; }
 /* 个性化设置：个人资料在主页只保留可进入的设置行，编辑放入轻量 Sheet。 */
 .profile-settings-section { display:grid; gap:8px; margin-top:20px; }
 .profile-settings-section h2 { margin:0 4px; color:#52647c; font-size:13px; font-weight:600; line-height:1.3; }
@@ -956,11 +1009,11 @@ html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-e
 .data-import-settings-section { display:grid; gap:8px; }
 .data-import-settings-section h2 { margin:0 4px; color:#52647c; font-size:13px; font-weight:600; line-height:1.3; }
 .data-import-settings-group { overflow:hidden; border:1px solid rgb(15 23 42 / 7%); border-radius:18px; background:#fff; box-shadow:0 2px 10px rgb(15 23 42 / 4%); }
-.data-import-settings-row { display:flex; width:100%; min-height:66px; align-items:center; justify-content:space-between; gap:14px; border:0; border-radius:0; padding:12px 15px; background:transparent; color:#172033; font:inherit; text-align:left; }
+.data-import-settings-row { display:flex; width:100%; min-height:66px; align-items:center; justify-content:space-between; gap:14px; border:0; border-radius:0; padding:12px 15px; background:transparent; color:#172033; font:inherit; text-align:left; }.data-import-settings-row:first-child { border-radius:17px 17px 0 0; }.data-import-settings-row:last-child { border-radius:0 0 17px 17px; }
 .data-import-settings-row + .data-import-settings-row { border-top:1px solid rgb(15 23 42 / 8%); }
 .data-import-settings-row>span { display:grid; min-width:0; gap:4px; }.data-import-settings-row b { font-size:16px; line-height:1.3; }.data-import-settings-row small { color:#64748b; font-size:13px; line-height:1.4; }.data-import-settings-row>svg { flex:0 0 auto; color:#94a3b8; }
 button.data-import-settings-row { cursor:pointer; transition:background-color .16s ease; }.data-import-settings-row:active { background:rgb(0 0 0 / 4%); }button.data-import-settings-row:focus-visible { position:relative; z-index:1; box-shadow:inset 0 0 0 2px rgb(37 99 235 / 70%); }.data-import-settings-note { cursor:default; }
-.data-import-settings-file-row { position:relative; cursor:pointer; transition:background-color .16s ease; }.data-import-settings-file-row input { position:absolute; inset:0; width:100%; height:100%; margin:0; cursor:pointer; opacity:0; }.data-import-settings-file-row:focus-within { position:relative; z-index:1; box-shadow:inset 0 0 0 2px rgb(37 99 235 / 70%); }.data-import-settings-file-row:has(input:disabled) { cursor:not-allowed; opacity:.58; }.data-import-settings-file-row input:disabled { cursor:not-allowed; }
+.data-import-settings-file-row { position:relative; cursor:pointer; transition:background-color .16s ease; }.data-import-settings-file-row input { position:absolute; inset:0; width:100%; height:100%; margin:0; cursor:pointer; opacity:0; }.data-import-settings-file-row:focus-within { z-index:1; }.data-import-settings-file-row:focus-within::after { position:absolute; z-index:2; inset:0; box-sizing:border-box; border:2px solid rgb(37 99 235 / 70%); border-radius:inherit; content:""; pointer-events:none; }.data-import-settings-file-row:has(input:disabled) { cursor:not-allowed; opacity:.58; }.data-import-settings-file-row input:disabled { cursor:not-allowed; }
 .data-import-settings-trailing { display:flex !important; flex:0 0 auto; align-items:center; gap:3px; color:#64748b; font-size:15px; line-height:1.35; }.data-import-settings-trailing svg { color:#94a3b8; }
 .data-import-settings-term-input { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.45fr); min-height:56px; align-items:center; gap:12px; padding:9px 15px; color:#172033; font-size:16px; line-height:1.35; }.data-import-settings-row + .data-import-settings-term-input,.data-import-settings-term-input + .data-import-settings-row { border-top:1px solid rgb(15 23 42 / 8%); }.data-import-settings-term-input input { min-width:0; min-height:38px; border:1px solid rgb(15 23 42 / 10%); border-radius:10px; padding:7px 10px; background:#f8fafc; color:#172033; font:inherit; text-align:right; }.data-import-settings-term-input input::placeholder { color:#94a3b8; }
 .data-import-settings-footer,.data-import-settings-notice { margin:0 2px; font-size:13px; line-height:1.48; }.data-import-settings-footer { color:#64748b; }.data-import-settings-notice { color:#15803d; }
@@ -2342,4 +2395,118 @@ html[data-appearance='dark'] .today-page-dark .today-entry-card.current-course {
   outline-color:#0a84ff;
   box-shadow:0 0 0 4px rgb(10 132 255 / 18%),0 8px 22px rgb(0 0 0 / 24%),inset 0 1px rgb(255 255 255 / 5%);
 }
+
+/* 课程详情保留紧凑的右上关闭入口，并以标题层级平衡视觉重心。 */
+.detail-sheet-with-eyebrow header .sheet-close-icon {
+  flex-basis:40px;
+  width:40px;
+  min-width:40px;
+  height:40px;
+  min-height:40px;
+  max-height:40px;
+}
+html[data-appearance='dark'] .detail-sheet-with-eyebrow .detail-sheet-heading > small {
+  color:#a1a1a6;
+}
+
+/* 登录页作为应用启动入口：使用与首页、设置分组一致的系统蓝和轻玻璃材质，避免桌面网页登录卡片感。 */
+.login.login-native-page {
+  position:relative;
+  display:block;
+  min-height:100dvh;
+  overflow:hidden;
+  isolation:isolate;
+  padding:0;
+  background:linear-gradient(180deg,#f9fbff 0%,#f3f7fc 51%,#edf3f9 100%);
+}
+.login-native-glow { position:absolute; z-index:-1; width:340px; height:340px; border-radius:999px; filter:blur(72px); pointer-events:none; }
+.login-native-glow-top { top:-178px; left:-150px; background:rgb(10 132 255 / 22%); }
+.login-native-glow-bottom { right:-172px; bottom:-154px; background:rgb(91 111 255 / 15%); }
+.login-native-shell { display:flex; flex-direction:column; width:100%; max-width:480px; min-height:100dvh; margin:0 auto; padding:max(calc(env(safe-area-inset-top) + 16px),30px) 22px max(calc(env(safe-area-inset-bottom) + 24px),34px); }
+.login-native-topbar { display:flex; justify-content:flex-end; min-height:42px; }
+.login.login-native-page .login-appearance-toggle { position:static; display:grid; width:40px; min-width:40px; height:40px; min-height:40px; padding:0; place-items:center; border:1px solid rgb(15 23 42 / 7%); border-radius:50%; background:rgb(255 255 255 / 58%); color:#007aff; box-shadow:inset 0 1px rgb(255 255 255 / 80%),0 4px 14px rgb(15 23 42 / 7%); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+.login.login-native-page .login-appearance-toggle:active { background:rgb(10 132 255 / 12%); transform:scale(.94); }
+.login-native-brand { position:static; display:flex; width:100%; max-width:none; align-self:stretch; flex-direction:column; align-items:center; justify-content:flex-start; gap:19px; margin:0; padding:37px 8px 0; transform:none; text-align:center; }
+.login.login-native-page .login-logo { display:grid; width:76px; height:76px; margin:0; overflow:hidden; place-items:center; border:1px solid rgb(255 255 255 / 86%); border-radius:22px; background:linear-gradient(145deg,rgb(255 255 255 / 96%),rgb(219 235 255 / 92%)); box-shadow:0 16px 36px rgb(37 99 235 / 17%),inset 0 1px rgb(255 255 255 / 86%); }
+.login.login-native-page .login-logo img { width:100%; height:100%; border-radius:inherit; object-fit:cover; clip-path:none; }
+.login-native-brand>div:last-child { display:flex; flex-direction:column; align-items:center; gap:7px; }
+.login-native-brand p { margin:0; color:#3974bf; font-size:13px; font-weight:750; line-height:1.3; letter-spacing:.045em; }
+.login-native-brand h1 { margin:0; color:#172033; font-size:30px; font-weight:760; line-height:1.16; letter-spacing:-.035em; }
+.login.login-native-page .login-native-form { display:grid; gap:16px; margin:60px 0 0; }
+.login-native-fields { overflow:hidden; border:1px solid rgb(15 23 42 / 7%); border-radius:19px; background:rgb(255 255 255 / 76%); box-shadow:0 8px 24px rgb(15 23 42 / 6%),inset 0 1px rgb(255 255 255 / 82%); backdrop-filter:blur(12px) saturate(135%); -webkit-backdrop-filter:blur(12px) saturate(135%); }
+.login-native-field { display:flex; height:60px; align-items:center; padding:0 13px; }
+.login-native-field-icon { display:grid; flex:0 0 auto; width:26px; height:26px; margin-right:12px; place-items:center; color:#6b7d96; }
+.login-native-field input { flex:1; width:100%; min-width:0; height:100%; padding:0; border:0; outline:0; background:transparent; color:#172033; font-family:inherit; font-size:16px; line-height:1.3; letter-spacing:-.01em; caret-color:#007aff; }
+.login-native-field input::placeholder { color:#94a3b8; }
+/* iOS / WKWebView 会给钥匙串自动填充附加黄色底色；覆盖它但保留
+   autocomplete 语义，让整行继续呈现为同一块玻璃输入卡片。 */
+.login-native-field input:-webkit-autofill,
+.login-native-field input:-webkit-autofill:hover,
+.login-native-field input:-webkit-autofill:focus,
+.login-native-field input:-webkit-autofill:active {
+  -webkit-text-fill-color:#172033;
+  caret-color:#007aff;
+  -webkit-box-shadow:0 0 0 1000px rgb(255 255 255 / 76%) inset;
+  box-shadow:0 0 0 1000px rgb(255 255 255 / 76%) inset;
+  transition:background-color 9999s ease-out 0s;
+}
+.login-native-divider { height:1px; margin-left:51px; background:rgb(15 23 42 / 8%); }
+.login.login-native-page .login-password-toggle { display:grid; flex:0 0 38px; width:38px; height:38px; min-height:38px; margin-left:6px; padding:0; place-items:center; border:0; border-radius:50%; background:transparent; color:#71829a; box-shadow:none; }
+.login.login-native-page .login-password-toggle:active { background:rgb(15 23 42 / 6%); color:#007aff; transform:scale(.94); }
+.login.login-native-page .login-error { margin:0; padding:11px 13px; border:1px solid rgb(255 69 58 / 16%); border-radius:13px; background:rgb(255 69 58 / 8%); color:#d92d20; font-size:13px; line-height:1.45; text-align:left; }
+.login.login-native-page .login-btn.login-native-submit { display:grid; width:100%; min-height:56px; margin:0; padding:0 18px; place-items:center; border:0; border-radius:18px; background:#0a84ff; color:#fff; box-shadow:0 10px 22px rgb(10 132 255 / 25%),inset 0 1px rgb(255 255 255 / 18%); font-size:17px; font-weight:700; letter-spacing:-.01em; transition:transform .14s ease,background-color .14s ease,opacity .14s ease; }
+.login.login-native-page .login-btn.login-native-submit:active:not(:disabled) { transform:scale(.985); background:#0077e6; opacity:1; }
+.login.login-native-page .login-btn.login-native-submit:disabled { cursor:wait; opacity:.7; }
+.login.login-native-page .login-auth-divider { display:flex; align-items:center; gap:10px; min-height:14px; color:#94a3b8; font-size:12px; line-height:1; }
+.login.login-native-page .login-auth-divider::before,.login.login-native-page .login-auth-divider::after { height:1px; flex:1; content:""; background:rgb(100 116 139 / 16%); }
+.login.login-native-page .login-passkey-button { display:flex; width:100%; min-height:52px; align-items:center; justify-content:center; gap:9px; margin:0; padding:0 18px; border:1px solid rgb(100 116 139 / 22%); border-radius:17px; background:rgb(226 232 240 / 48%); color:#94a3b8; box-shadow:inset 0 1px rgb(255 255 255 / 58%); font:650 15px/1 inherit; }
+.login.login-native-page .login-passkey-button:not(:disabled) { border-color:rgb(10 132 255 / 26%); background:rgb(239 246 255 / 82%); color:#1677e8; box-shadow:inset 0 1px rgb(255 255 255 / 76%),0 7px 17px rgb(10 132 255 / 9%); cursor:pointer; }
+.login.login-native-page .login-passkey-button:active:not(:disabled) { transform:scale(.985); background:#e5f1ff; }
+.login.login-native-page .login-passkey-button:disabled { cursor:not-allowed; opacity:1; }
+.login-native-spinner { width:20px; height:20px; border:2px solid rgb(255 255 255 / 36%); border-top-color:#fff; border-radius:50%; animation:auth-loading-spin .7s linear infinite; }
+.login-native-checking-shell { align-items:center; justify-content:center; }
+.login-native-checking-status { display:grid; justify-items:center; gap:18px; margin-top:-6vh; text-align:center; }
+.login-native-checking-status p { margin:0; color:#6b7d96; font-size:14px; font-weight:600; letter-spacing:.01em; }
+.login-native-checking-spinner { width:21px; height:21px; border:2px solid rgb(10 132 255 / 18%); border-top-color:#0a84ff; border-radius:50%; animation:auth-loading-spin .7s linear infinite; }
+.login-native-footer { margin-top:auto; padding-top:32px; color:#94a3b8; font-size:12px; line-height:1.45; text-align:center; }
+html[data-appearance='dark'] .login.login-native-page { background:linear-gradient(180deg,#080a0f 0%,#10141b 50%,#07080b 100%); }
+html[data-appearance='dark'] .login-native-glow-top { background:rgb(10 132 255 / 17%); }
+html[data-appearance='dark'] .login-native-glow-bottom { background:rgb(96 86 210 / 13%); }
+html[data-appearance='dark'] .login.login-native-page .login-appearance-toggle { border-color:rgb(255 255 255 / 10%); background:rgb(255 255 255 / 7%); color:#69adff; box-shadow:inset 0 1px rgb(255 255 255 / 10%),0 5px 16px rgb(0 0 0 / 20%); }
+html[data-appearance='dark'] .login.login-native-page .login-appearance-toggle:active { background:rgb(255 255 255 / 13%); }
+html[data-appearance='dark'] .login.login-native-page .login-logo { border-color:rgb(255 255 255 / 13%); background:linear-gradient(145deg,#222a37,#151a22); box-shadow:0 16px 38px rgb(0 0 0 / 35%),inset 0 1px rgb(255 255 255 / 8%); }
+html[data-appearance='dark'] .login-native-brand p { color:#69adff; }
+html[data-appearance='dark'] .login-native-brand h1 { color:#f5f5f7; }
+html[data-appearance='dark'] .login-native-fields { border-color:rgb(255 255 255 / 9%); background:rgb(28 28 30 / 76%); box-shadow:0 10px 26px rgb(0 0 0 / 28%),inset 0 1px rgb(255 255 255 / 6%); }
+html[data-appearance='dark'] .login-native-field-icon { color:#a1a1a6; }
+html[data-appearance='dark'] .login-native-field input { border-color:transparent; background:transparent; color:#f2f2f7; }
+html[data-appearance='dark'] .login-native-field input::placeholder { color:#636366; }
+html[data-appearance='dark'] .login-native-field input:-webkit-autofill,
+html[data-appearance='dark'] .login-native-field input:-webkit-autofill:hover,
+html[data-appearance='dark'] .login-native-field input:-webkit-autofill:focus,
+html[data-appearance='dark'] .login-native-field input:-webkit-autofill:active {
+  -webkit-text-fill-color:#f2f2f7;
+  caret-color:#69adff;
+  -webkit-box-shadow:0 0 0 1000px rgb(28 28 30 / 76%) inset;
+  box-shadow:0 0 0 1000px rgb(28 28 30 / 76%) inset;
+}
+html[data-appearance='dark'] .login-native-divider { background:rgb(255 255 255 / 8%); }
+html[data-appearance='dark'] .login.login-native-page .login-password-toggle { background:transparent; color:#a1a1a6; }
+html[data-appearance='dark'] .login.login-native-page .login-password-toggle:active { background:rgb(255 255 255 / 9%); color:#69adff; }
+html[data-appearance='dark'] .login.login-native-page .login-error { border-color:rgb(255 69 58 / 22%); background:rgb(255 69 58 / 12%); color:#ff6961; }
+html[data-appearance='dark'] .login.login-native-page .login-btn.login-native-submit { background:#0a84ff; color:#fff; box-shadow:0 10px 24px rgb(0 0 0 / 30%),inset 0 1px rgb(255 255 255 / 18%); }
+html[data-appearance='dark'] .login.login-native-page .login-auth-divider { color:#636366; }
+html[data-appearance='dark'] .login.login-native-page .login-auth-divider::before,html[data-appearance='dark'] .login.login-native-page .login-auth-divider::after { background:rgb(235 235 245 / 12%); }
+html[data-appearance='dark'] .login.login-native-page .login-passkey-button { border-color:rgb(235 235 245 / 12%); background:rgb(235 235 245 / 7%); color:#777b84; box-shadow:inset 0 1px rgb(255 255 255 / 4%); }
+html[data-appearance='dark'] .login.login-native-page .login-passkey-button:not(:disabled) { border-color:rgb(10 132 255 / 32%); background:rgb(10 132 255 / 13%); color:#69adff; }
+html[data-appearance='dark'] .passkey-credential-row b { color:#f2f2f7; }
+html[data-appearance='dark'] .passkey-credential-row small,.settings-page-dark .account-settings-error { color:#aebed3; }
+html[data-appearance='dark'] .passkey-add-button { border-color:rgb(10 132 255 / 28%); background:rgb(10 132 255 / 14%); color:#69adff; }
+html[data-appearance='dark'] .passkey-form { border-color:rgb(10 132 255 / 22%); background:rgb(10 132 255 / 9%); }
+html[data-appearance='dark'] .passkey-form > label,html[data-appearance='dark'] .passkey-form p { color:#aebed3; }
+html[data-appearance='dark'] .passkey-form input { border-color:rgb(255 255 255 / 12%); background:#151c28; color:#f2f2f7; }
+html[data-appearance='dark'] .login-native-checking-status p { color:#8e8e93; }
+html[data-appearance='dark'] .login-native-checking-spinner { border-color:rgb(10 132 255 / 22%); border-top-color:#69adff; }
+html[data-appearance='dark'] .login-native-footer { color:#636366; }
+@media (max-height:700px) { .login-native-shell { padding-top:max(calc(env(safe-area-inset-top) + 12px),20px); } .login-native-brand { gap:14px; padding-top:19px; } .login.login-native-page .login-logo { width:64px; height:64px; border-radius:19px; } .login-native-brand h1 { font-size:27px; } .login.login-native-page .login-native-form { margin-top:38px; } .login-native-footer { margin-top:28px; padding-top:0; } }
 

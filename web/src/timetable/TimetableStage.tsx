@@ -47,7 +47,7 @@ function CourseGrid({ sessions, periods, courseColors, pendingSlot, selectedSess
     <div className="timetable-v2-empty-layer">{cells.map(({ weekday, period }) => {
       const actualPeriod = period + offsetPeriod - 1;
       const isArmed = pendingSlot?.weekday === weekday && pendingSlot.startPeriod === actualPeriod;
-      return <button type="button" key={`${weekday}-${actualPeriod}`} className="timetable-v2-empty" style={{ gridColumn: weekday, gridRow: period }} disabled={!canAdd} onClick={() => isArmed ? onAddSlot(pendingSlot) : onSelectSlot({ weekday, startPeriod: actualPeriod, endPeriod: actualPeriod })} aria-label={canAdd ? (isArmed ? `星期${weekday}第${actualPeriod}节，确认添加课程` : `星期${weekday}第${actualPeriod}节空时段，点选后显示添加课程按钮`) : `星期${weekday}第${actualPeriod}节空时段，当前周不可添加课程`}>{isArmed && canAdd && <Plus size={19} aria-hidden="true" />}</button>;
+      return <button type="button" key={`${weekday}-${actualPeriod}`} className={`timetable-v2-empty${isArmed && canAdd ? ' is-armed' : ''}`} style={{ gridColumn: weekday, gridRow: period }} disabled={!canAdd} onClick={() => isArmed ? onAddSlot(pendingSlot) : onSelectSlot({ weekday, startPeriod: actualPeriod, endPeriod: actualPeriod })} aria-label={canAdd ? (isArmed ? `星期${weekday}第${actualPeriod}节，确认添加课程` : `星期${weekday}第${actualPeriod}节空时段，点选后显示添加课程按钮`) : `星期${weekday}第${actualPeriod}节空时段，当前周不可添加课程`}>{isArmed && canAdd && <Plus size={28} aria-hidden="true" />}</button>;
     })}</div>
     <div className="timetable-v2-course-layer">{sessions.map((session) => {
       const display = toTimetableDisplaySession(session, periods, courseColors);

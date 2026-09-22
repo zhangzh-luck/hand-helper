@@ -23,6 +23,38 @@ class AppSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+class PasskeyOwner(Base):
+    """Stable opaque WebAuthn user handle for this single-owner application."""
+    __tablename__ = "passkey_owner"
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    user_handle: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PasskeyCredential(Base):
+    __tablename__ = "passkey_credentials"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    credential_id: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
+    public_key: Mapped[str] = mapped_column(Text)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0)
+    transports_json: Mapped[str] = mapped_column(Text, default="[]")
+    device_type: Mapped[str] = mapped_column(String(32), default="single_device")
+    backed_up: Mapped[bool] = mapped_column(Boolean, default=False)
+    label: Mapped[str] = mapped_column(String(64), default="此设备")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PasskeyChallenge(Base):
+    __tablename__ = "passkey_challenges"
+    challenge_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    ceremony: Mapped[str] = mapped_column(String(32), index=True)
+    challenge: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class AcademicTerm(TimestampMixin, Base):
     __tablename__ = "academic_terms"
     id: Mapped[int] = mapped_column(primary_key=True)

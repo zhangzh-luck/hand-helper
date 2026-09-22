@@ -9,7 +9,7 @@ Android 模块已从 Capacitor `BridgeActivity` 迁移为 Kotlin + Jetpack Compo
 - 当前原生预览版：`0.2.0`（versionCode `3`）
 - 最低 SDK：23；编译与目标 SDK：35
 - 仅声明权限：`android.permission.INTERNET`
-- API 基地址：`https://portal.zhangzh.cc`（BuildConfig，不含秘密值）
+- API 基地址：`https://hand.zhangzh.cc`（BuildConfig，不含秘密值）
 - 当前构建：`HAND_HELPER_USE_LOCAL_PREVIEW=true`，页面不会发起 API 请求；`HandHelperApi` 仍保留为后续统一接入层。
 
 Web/PWA、iOS 工程与线上后端没有被此迁移修改。

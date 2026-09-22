@@ -19,6 +19,31 @@ class LoginRequest(BaseModel):
 class AuthMeOut(BaseModel):
     authenticated: bool = True
     username: str
+
+
+class PasskeyRegistrationOptionsRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
+    label: str = Field(default="此设备", min_length=1, max_length=64)
+
+
+class PasskeyVerificationRequest(BaseModel):
+    challenge_id: str = Field(min_length=16, max_length=128)
+    credential: dict[str, Any]
+    label: str | None = Field(default=None, max_length=64)
+
+
+class PasskeyCredentialOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    label: str
+    device_type: str
+    backed_up: bool
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class PasskeyDeleteRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
 class AppProfileOut(BaseModel):
     display_name: str
     avatar_data_url: str | None = None
