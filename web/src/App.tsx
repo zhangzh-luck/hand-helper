@@ -275,15 +275,6 @@ function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session
   return <><section className="today-status"><b>{status}</b></section><div className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <article className="card today-entry-card custom-schedule-card" key={`custom-${entry.schedule.id}`}><div className="custom-schedule-card-head"><small className="today-entry-kind">自定义安排</small><span><button type="button" aria-label={`编辑 ${entry.schedule.title}`} onClick={() => onEdit(entry.schedule)}><Pencil size={15} /></button><button type="button" aria-label={`删除 ${entry.schedule.title}`} onClick={() => onDelete(entry.schedule)}><Trash2 size={15} /></button></span></div><b>{entry.schedule.title}</b><span className="today-entry-time">{entry.schedule.scheduled_time}</span></article>)}</div></>;
 }
 
-function CustomScheduleSheet({ schedule, initialDate, pending, error, onClose, onSave }: { schedule?: CustomSchedule; initialDate: string; pending: boolean; error: Error | null; onClose: () => void; onSave: (payload: CustomScheduleInput) => void }) {
-  useModalOpenState();
-  const [title, setTitle] = useState(schedule?.title ?? '');
-  const [scheduledDate, setScheduledDate] = useState(schedule?.scheduled_date ?? initialDate);
-  const [scheduledTime, setScheduledTime] = useState(schedule?.scheduled_time ?? '09:00');
-  useEffect(() => { setTitle(schedule?.title ?? ''); setScheduledDate(schedule?.scheduled_date ?? initialDate); setScheduledTime(schedule?.scheduled_time ?? '09:00'); }, [schedule?.id, initialDate]);
-  return <div className="sheet-mask" role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet custom-schedule-sheet" role="dialog" aria-modal="true" aria-label={schedule ? '编辑安排' : '添加安排'} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><h2>{schedule ? '编辑安排' : '添加安排'}</h2><button type="button" className="sheet-close-icon" aria-label="关闭安排编辑" title="关闭" onClick={onClose} disabled={pending}><X size={20} /></button></header><form onSubmit={(event) => { event.preventDefault(); onSave({ title: title.trim(), scheduled_date: scheduledDate, scheduled_time: scheduledTime }); }}><label>安排事项<input aria-label="安排事项名称" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} required placeholder="例如：提交课程作业" /></label><div className="custom-schedule-time-fields"><label>日期<input aria-label="安排日期" type="date" value={scheduledDate} onChange={(event) => setScheduledDate(event.target.value)} required /></label><label>时间<input aria-label="安排时间" type="time" value={scheduledTime} onChange={(event) => setScheduledTime(event.target.value)} required /></label></div><small>安排会在所选日期的“今日安排”中显示；时间仅用于当天排序，不会触发系统通知。</small><div className="custom-schedule-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={pending}>取消</button><button type="submit" disabled={pending || !title.trim()}>{pending ? '保存中…' : '保存安排'}</button></div>{error && <p className="error">{error.message}</p>}</form></section></div>;
-}
-
 function formatScheduleDate(value: string) {
   const [year, month, day] = value.split('-');
   return year && month && day ? `${year}年${Number(month)}月${Number(day)}日` : value;
@@ -301,17 +292,6 @@ function CustomScheduleSheetV2({ schedule, initialDate, pending, error, onClose,
   const dirty = title.trim() !== initialTitle || scheduledDate !== initialScheduledDate || scheduledTime !== initialScheduledTime;
   const valid = Boolean(title.trim()) && scheduledDate >= initialDate;
   return <div className="sheet-mask" role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet custom-schedule-sheet" role="dialog" aria-modal="true" aria-label={schedule ? '编辑安排' : '添加安排'} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><h2>{schedule ? '编辑安排' : '添加安排'}</h2><button type="button" className="sheet-close-icon" aria-label="关闭安排编辑" title="关闭" onClick={onClose} disabled={pending}><X size={20} /></button></header><form onSubmit={(event) => { event.preventDefault(); if (!valid || !dirty) return; onSave({ title: title.trim(), scheduled_date: scheduledDate, scheduled_time: scheduledTime }); }}><div className="custom-schedule-settings-group"><label className="custom-schedule-settings-row custom-schedule-title-row"><span className="custom-schedule-settings-label">安排事项</span><input aria-label="安排事项名称" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} required placeholder="例如：提交课程作业" /></label><label className="custom-schedule-settings-row custom-schedule-native-row"><span className="custom-schedule-settings-label">日期</span><span className="custom-schedule-settings-value">{formatScheduleDate(scheduledDate)}<ChevronRight size={18} aria-hidden="true" /></span><input aria-label="安排日期" type="date" min={initialDate} value={scheduledDate} onChange={(event) => setScheduledDate(event.target.value)} required /></label><label className="custom-schedule-settings-row custom-schedule-native-row"><span className="custom-schedule-settings-label">时间</span><span className="custom-schedule-settings-value">{scheduledTime}<ChevronRight size={18} aria-hidden="true" /></span><input aria-label="安排时间" type="time" value={scheduledTime} onChange={(event) => setScheduledTime(event.target.value)} required /></label></div><small className="custom-schedule-footer">只能添加今天及以后的安排；时间仅用于当天排序，不会触发系统通知。</small><button type="submit" className="custom-schedule-save" disabled={pending || !valid || !dirty}>{pending ? '保存中…' : '保存安排'}</button>{error && <p className="error">{error.message}</p>}</form></section></div>;
-}
-
-function TermPicker({ terms, selected, onChange, disabled = false }: {
-  terms: Term[] | undefined; selected: string; onChange: (value: string) => void; disabled?: boolean;
-}) {
-  return <div className="term-picker">
-    <select aria-label="选择学期" value={selected} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
-      <option value="">选择学期</option>
-      {terms?.map((term) => <option key={term.source_term_id} value={term.source_term_id}>{term.display_name}</option>)}
-    </select>
-  </div>;
 }
 
 function GradeImportSheet({ preview, pending, error, onClose, onConfirm }: { preview: GradeImportPreview; pending: boolean; error: Error | null; onClose: () => void; onConfirm: (preview: GradeImportPreview) => void }) {
@@ -1131,9 +1111,10 @@ function Login({ onSuccess, appearance, onToggleAppearance }: { onSuccess: () =>
         <div className="login-auth-divider" aria-hidden="true"><span>或</span></div>
         <button className="login-passkey-button" type="button" disabled={unsupportedPasskey || login.isPending || passkeyLogin.isPending} onClick={() => passkeyLogin.mutate()} aria-describedby="login-passkey-hint"><KeyRound size={19} aria-hidden="true" /><span>{passkeyLogin.isPending ? '正在验证…' : '通过通行密钥登录'}</span></button>
         <span id="login-passkey-hint" className="sr-only">{unsupportedPasskey ? '当前浏览器或安全上下文不支持通行密钥' : '使用已添加的通行密钥登录'}</span>
+        {unsupportedPasskey && <p className="login-passkey-unavailable" role="status">当前应用环境暂不支持通行密钥，请使用 HTTPS 网页版登录。</p>}
         {(login.error || passkeyLogin.error) && <div className="login-error" role="alert">{login.error?.message ?? passkeyLogin.error?.message}</div>}
       </form>
-      <footer className="login-native-footer">仅供本人使用 · 登录信息仅用于本次身份验证</footer>
+      <footer className="login-native-footer"><span>© 2026 航的助手</span><span aria-hidden="true">·</span><a href="https://github.com/zhangzh-luck" target="_blank" rel="noreferrer" aria-label="GitHub 用户名 zhangzh-luck"><img src="/github-icons8.png" alt="" width="16" height="16" aria-hidden="true" /><span>GitHub @zhangzh-luck</span></a></footer>
     </section>
   </main>;
 }

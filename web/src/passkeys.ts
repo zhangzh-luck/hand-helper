@@ -1,5 +1,33 @@
 type JsonPublicKeyCredential = Record<string, unknown>;
 
+type PasskeyCeremony = 'create' | 'get';
+
+function localizedWebAuthnError(error: unknown, ceremony: PasskeyCeremony) {
+  const name = typeof error === 'object' && error !== null && 'name' in error && typeof error.name === 'string'
+    ? error.name
+    : '';
+  const action = ceremony === 'create' ? '创建通行密钥' : '通行密钥验证';
+
+  switch (name) {
+    case 'NotAllowedError':
+      return ceremony === 'create'
+        ? '已取消创建通行密钥；若非主动取消，说明当前应用环境尚未获系统授权。'
+        : '已取消通行密钥验证；若非主动取消，请使用 Safari 打开网页版登录。';
+    case 'NotSupportedError':
+      return '当前设备或应用环境不支持通行密钥。';
+    case 'SecurityError':
+      return '当前页面的安全配置不支持通行密钥，请使用 HTTPS 网页版。';
+    case 'InvalidStateError':
+      return ceremony === 'create'
+        ? '此设备的通行密钥状态异常，请稍后重试。'
+        : '通行密钥状态异常，请重新发起验证。';
+    case 'AbortError':
+      return `已取消${action}。`;
+    default:
+      return `${action}失败，请重试。`;
+  }
+}
+
 function base64urlToBuffer(value: string): ArrayBuffer {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
@@ -54,7 +82,12 @@ export function passkeySupported() {
 
 export async function createPasskeyCredential(options: JsonPublicKeyCredential) {
   if (!passkeySupported()) throw new Error('当前浏览器或安全上下文不支持通行密钥。请使用 HTTPS 或 http://localhost 打开应用。');
-  const credential = await navigator.credentials.create({ publicKey: publicKeyFromJson(options, 'create') as PublicKeyCredentialCreationOptions });
+  let credential: Credential | null;
+  try {
+    credential = await navigator.credentials.create({ publicKey: publicKeyFromJson(options, 'create') as PublicKeyCredentialCreationOptions });
+  } catch (error) {
+    throw new Error(localizedWebAuthnError(error, 'create'));
+  }
   if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAttestationResponse)) throw new Error('未创建通行密钥。');
   const response = credential.response;
   return publicCredentialPayload(credential, {
@@ -66,7 +99,12 @@ export async function createPasskeyCredential(options: JsonPublicKeyCredential) 
 
 export async function getPasskeyAssertion(options: JsonPublicKeyCredential) {
   if (!passkeySupported()) throw new Error('当前浏览器或安全上下文不支持通行密钥。请使用 HTTPS 或 http://localhost 打开应用。');
-  const credential = await navigator.credentials.get({ publicKey: publicKeyFromJson(options, 'get') as PublicKeyCredentialRequestOptions });
+  let credential: Credential | null;
+  try {
+    credential = await navigator.credentials.get({ publicKey: publicKeyFromJson(options, 'get') as PublicKeyCredentialRequestOptions });
+  } catch (error) {
+    throw new Error(localizedWebAuthnError(error, 'get'));
+  }
   if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAssertionResponse)) throw new Error('未使用通行密钥完成验证。');
   const response = credential.response;
   return publicCredentialPayload(credential, {
