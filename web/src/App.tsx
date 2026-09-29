@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -172,6 +172,7 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   const today = localDateKey(now);
   const customSchedules = useQuery({ queryKey: ['custom-schedules', today], queryFn: () => api.customSchedules(today) });
   const [editingSchedule, setEditingSchedule] = useState<CustomSchedule | 'new' | null>(null);
+  const [deletingSchedule, setDeletingSchedule] = useState<CustomSchedule | null>(null);
   const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
   useEffect(() => {
     if (avatarPreviewOpen) document.documentElement.dataset.avatarPreview = 'open';
@@ -184,7 +185,7 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   });
   const deleteSchedule = useMutation({
     mutationFn: api.deleteCustomSchedule,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['custom-schedules'] }),
+    onSuccess: () => { setDeletingSchedule(null); queryClient.invalidateQueries({ queryKey: ['custom-schedules'] }); },
   });
   const items = (sessions.data ?? []).filter((item) => item.session_date === today);
   const name = profile.data?.display_name ?? '张自航';
@@ -196,8 +197,9 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   if (pageError) return <TodayBackendLoadError appearance={appearance} error={pageError} onRetry={retryPageData} />;
   return <main className={`today-page${appearance === 'dark' ? ' today-page-dark' : ''}`}>
     <section className="today-hero">{profile.data?.avatar_data_url && <><div className="hero-avatar-background" aria-hidden="true" style={{ backgroundImage: `url(${profile.data.avatar_data_url})` }} /><div className="hero-avatar-overlay" aria-hidden="true" /></>}<div className="today-hero-content"><p className="today-kicker">今日 · {greetingForHour(now.getHours())}</p><h1>{name}</h1><p className="today-date">{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p></div>{profile.data?.avatar_data_url ? <button type="button" className="avatar-preview-trigger" aria-label={`预览${name}的头像`} onClick={() => setAvatarPreviewOpen(true)}><Avatar profile={profile.data} /></button> : <Avatar profile={profile.data} />}</section>
-    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2><button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={(schedule) => { if (window.confirm(`确认删除“${schedule.title}”吗？`)) deleteSchedule.mutate(schedule.id); }} /> : null}</section>
+    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2><button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={setDeletingSchedule} /> : null}</section>
     {editingSchedule && <ViewportSheetPortal><CustomScheduleSheetV2 schedule={editingSchedule === 'new' ? undefined : editingSchedule} initialDate={today} pending={saveSchedule.isPending} error={saveSchedule.error} onClose={() => setEditingSchedule(null)} onSave={(payload) => saveSchedule.mutate(payload)} /></ViewportSheetPortal>}
+    {deletingSchedule && <ViewportSheetPortal><ConfirmDialog title={`删除“${deletingSchedule.title}”？`} description="删除后无法恢复这项自定义安排。" confirmLabel="删除安排" pending={deleteSchedule.isPending} onCancel={() => setDeletingSchedule(null)} onConfirm={() => deleteSchedule.mutate(deletingSchedule.id)} /></ViewportSheetPortal>}
     {avatarPreviewOpen && profile.data?.avatar_data_url && <AvatarPreviewSheet name={name} src={profile.data.avatar_data_url} dark={appearance === 'dark'} onClose={() => setAvatarPreviewOpen(false)} />}
   </main>;
 }
@@ -263,8 +265,73 @@ function TimetableBackgroundCropSheet({ source, dark, onClose, onConfirm }: { so
   return createPortal(<div className={`sheet-mask sheet-mask-viewport avatar-crop-mask${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={processing ? undefined : onClose}><section className="avatar-crop-sheet timetable-background-crop-sheet" role="dialog" aria-modal="true" aria-label="裁切课表背景" onClick={(event) => event.stopPropagation()}><header><div><h2>裁切课表背景</h2><p>背景只显示在课程网格区域。固定为 9:16，可使用双指或滑条缩放，最大 3 倍。</p></div><button type="button" className="sheet-close-icon" aria-label="关闭裁切" title="关闭" onClick={onClose} disabled={processing}><X size={20} /></button></header><div className="avatar-crop-stage timetable-background-crop-stage"><Cropper image={source} crop={crop} zoom={zoom} aspect={9 / 16} cropShape="rect" showGrid onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_area, pixels) => setArea(pixels)} /></div><label className="avatar-zoom-control">缩放<input aria-label="课表背景缩放" type="range" min="1" max="3" step="0.01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label><div className="custom-schedule-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={processing}>取消</button><button type="button" disabled={processing || !area} onClick={() => { void confirmCrop(); }}>{processing ? '处理中…' : '确认裁切'}</button></div>{error && <p className="error">{error}</p>}</section></div>, document.body);
 }
 
+const CUSTOM_SCHEDULE_SWIPE_WIDTH = 168;
+const CUSTOM_SCHEDULE_SWIPE_THRESHOLD = 68;
+
+function SwipeableCustomScheduleCard({ schedule, open, onOpenChange, onEdit, onDelete }: { schedule: CustomSchedule; open: boolean; onOpenChange: (open: boolean) => void; onEdit: (schedule: CustomSchedule) => void; onDelete: (schedule: CustomSchedule) => void }) {
+  const gesture = useRef<{ pointerId: number; startX: number; startY: number; startOffset: number; lastOffset: number; axis: 'horizontal' | 'vertical' | null } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState(0);
+  const translateX = dragging ? dragOffset : open ? -CUSTOM_SCHEDULE_SWIPE_WIDTH : 0;
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse') return;
+    gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startOffset: open ? -CUSTOM_SCHEDULE_SWIPE_WIDTH : 0, lastOffset: open ? -CUSTOM_SCHEDULE_SWIPE_WIDTH : 0, axis: null };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentGesture = gesture.current;
+    if (!currentGesture || currentGesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - currentGesture.startX;
+    const deltaY = event.clientY - currentGesture.startY;
+    if (!currentGesture.axis) {
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 7) return;
+      currentGesture.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
+      if (currentGesture.axis === 'horizontal') setDragging(true);
+    }
+    if (currentGesture.axis !== 'horizontal') return;
+    event.preventDefault();
+    const offset = Math.max(-CUSTOM_SCHEDULE_SWIPE_WIDTH, Math.min(0, currentGesture.startOffset + deltaX));
+    currentGesture.lastOffset = offset;
+    setDragOffset(offset);
+  };
+  const finishGesture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentGesture = gesture.current;
+    if (!currentGesture || currentGesture.pointerId !== event.pointerId) return;
+    if (currentGesture.axis === 'horizontal') onOpenChange(currentGesture.lastOffset <= -CUSTOM_SCHEDULE_SWIPE_THRESHOLD);
+    setDragging(false);
+    gesture.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  return <article className={`custom-schedule-swipe${open ? ' is-open' : ''}`}>
+    <div className="custom-schedule-swipe-actions" aria-hidden={!open}>
+      <button type="button" className="custom-schedule-swipe-edit" tabIndex={open ? 0 : -1} onClick={() => { onOpenChange(false); onEdit(schedule); }}>编辑</button>
+      <button type="button" className="custom-schedule-swipe-delete" tabIndex={open ? 0 : -1} onClick={() => { onOpenChange(false); onDelete(schedule); }}>删除</button>
+    </div>
+    <div className={`card today-entry-card custom-schedule-card${dragging ? ' is-dragging' : ''}`} style={{ transform: `translate3d(${translateX}px,0,0)` }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishGesture} onPointerCancel={finishGesture}>
+      <div className="custom-schedule-card-head"><small className="today-entry-kind">自定义安排</small><span className="custom-schedule-desktop-actions"><button type="button" aria-label={`编辑 ${schedule.title}`} onClick={() => onEdit(schedule)}><Pencil size={15} /></button><button type="button" aria-label={`删除 ${schedule.title}`} onClick={() => onDelete(schedule)}><Trash2 size={15} /></button></span></div><b>{schedule.title}</b><span className="today-entry-time">{schedule.scheduled_time}</span>
+    </div>
+  </article>;
+}
+
 function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session[]; schedules: CustomSchedule[]; onEdit: (schedule: CustomSchedule) => void; onDelete: (schedule: CustomSchedule) => void }) {
   const now = Date.now();
+  const [openScheduleId, setOpenScheduleId] = useState<number | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (openScheduleId === null) return;
+    const timeline = timelineRef.current;
+    const scrollContainer = timeline?.closest('main');
+    const closeSwipeActions = () => setOpenScheduleId(null);
+    scrollContainer?.addEventListener('scroll', closeSwipeActions, { passive: true });
+    const closeWhenPressingOutside = (event: PointerEvent) => {
+      if (timeline && event.target instanceof Node && !timeline.contains(event.target)) closeSwipeActions();
+    };
+    document.addEventListener('pointerdown', closeWhenPressingOutside, true);
+    return () => {
+      scrollContainer?.removeEventListener('scroll', closeSwipeActions);
+      document.removeEventListener('pointerdown', closeWhenPressingOutside, true);
+    };
+  }, [openScheduleId]);
   const active = sessions.find((session) => new Date(session.start_datetime).getTime() <= now && now < new Date(session.end_datetime).getTime());
   const upcoming = sessions.find((session) => new Date(session.start_datetime).getTime() > now);
   const status = active ? `正在上 ${active.course_name}，距下课约 ${Math.ceil((new Date(active.end_datetime).getTime() - now) / 60000)} 分钟` : upcoming ? `下一节 ${upcoming.course_name}，${Math.ceil((new Date(upcoming.start_datetime).getTime() - now) / 60000)} 分钟后上课` : schedules.length ? `今天有 ${schedules.length} 项自定义安排` : '今天的课程已经结束';
@@ -272,7 +339,7 @@ function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session
     ...sessions.map((session) => ({ type: 'course' as const, sortTime: formatTime(session.start_datetime), session })),
     ...schedules.map((schedule) => ({ type: 'custom' as const, sortTime: schedule.scheduled_time, schedule })),
   ].sort((left, right) => left.sortTime.localeCompare(right.sortTime));
-  return <><section className="today-status"><b>{status}</b></section><div className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <article className="card today-entry-card custom-schedule-card" key={`custom-${entry.schedule.id}`}><div className="custom-schedule-card-head"><small className="today-entry-kind">自定义安排</small><span><button type="button" aria-label={`编辑 ${entry.schedule.title}`} onClick={() => onEdit(entry.schedule)}><Pencil size={15} /></button><button type="button" aria-label={`删除 ${entry.schedule.title}`} onClick={() => onDelete(entry.schedule)}><Trash2 size={15} /></button></span></div><b>{entry.schedule.title}</b><span className="today-entry-time">{entry.schedule.scheduled_time}</span></article>)}</div></>;
+  return <><section className="today-status"><b>{status}</b></section><div ref={timelineRef} className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <SwipeableCustomScheduleCard key={`custom-${entry.schedule.id}`} schedule={entry.schedule} open={openScheduleId === entry.schedule.id} onOpenChange={(open) => setOpenScheduleId(open ? entry.schedule.id : null)} onEdit={onEdit} onDelete={onDelete} />)}</div></>;
 }
 
 function formatScheduleDate(value: string) {
@@ -341,6 +408,7 @@ function Timetable({ appearance }: { appearance: 'light' | 'dark' }) {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [pendingSlot, setPendingSlot] = useState<TimetableSlot | null>(null);
   const [manualEditor, setManualEditor] = useState<{ courseId?: number; initial: ManualCourseInput } | null>(null);
+  const [deletingManualCourse, setDeletingManualCourse] = useState<Session | null>(null);
   const selected = termId || terms.data?.find((term) => term.is_current)?.source_term_id || terms.data?.find((term) => term.source_term_id === '2026-2027-1')?.source_term_id || '';
   const selectedTerm = terms.data?.find((term) => term.source_term_id === selected);
   const selectedWeekStart = mondayOf(weekAnchor);
@@ -370,6 +438,7 @@ function Timetable({ appearance }: { appearance: 'light' | 'dark' }) {
     mutationFn: api.deleteManualCourse,
     onSuccess: async () => {
       setSelectedSession(null);
+      setDeletingManualCourse(null);
       await queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
@@ -380,8 +449,9 @@ function Timetable({ appearance }: { appearance: 'light' | 'dark' }) {
     </header>
 {terms.isLoading ? <p className="muted timetable-fullscreen-notice">正在读取本地学期列表…</p> : terms.data?.length === 0 ? <div className="timetable-fullscreen-notice"><Empty text="请在“设置 → 数据与导入”中导入教务系统打印的课程表文件。" /></div> : <TimetableStage sessions={sessions.data ?? []} term={selectedTerm} periods={periods.data ?? DEFAULT_PERIODS} anchor={weekAnchor} todayKey={localDateKey(new Date())} courseColors={selectedTerm && sessions.data ? resolveCourseColorMap(selectedTerm, sessions.data) : courseColors} selectedSessionId={selectedSession?.id ?? null} pendingSlot={pendingSlot} onWeekChange={setWeekAnchor} onSelect={(session) => { setPendingSlot(null); setSelectedSession(session); }} onSelectSlot={setPendingSlot} onAddSlot={(slot) => { if (!selectedTerm) return; setManualEditor({ initial: { term_id: selectedTerm.id, course_name: '', week_expression: `${Math.max(1, Math.floor((mondayOf(weekAnchor).getTime() - mondayOf(dateFromKey(selectedTerm.start_date ?? localDateKey(weekAnchor))).getTime()) / 604800000) + 1)}周`, weekday: slot.weekday, start_period: slot.startPeriod, end_period: slot.endPeriod, classroom: '', teacher: '' } }); }} timetableBackground={profile.data?.timetable_background_data_url ?? null} />}
     {terms.error && <p className="error">读取本地课表失败：{String(terms.error)}</p>}
-    {selectedSession && <DetailSheet title={selectedSession.course_name} eyebrow="课程详情" showTitle={false} className="detail-sheet-with-eyebrow detail-sheet-list-title" dark={appearance === 'dark'} showHandle={false} onClose={() => setSelectedSession(null)}><div className="icon-detail-list"><IconDetailRow icon={<BookOpen size={20} />} label="课程名称" value={selectedSession.course_name} /><IconDetailRow icon={<Clock3 size={20} />} label="上课时间" value={`${selectedSession.session_date} ${formatTime(selectedSession.start_datetime)}—${formatTime(selectedSession.end_datetime)}`} /><IconDetailRow icon={<MapPin size={20} />} label="教室" value={selectedSession.classroom ?? '未提供'} /><IconDetailRow icon={<UserRound size={20} />} label="教师" value={selectedSession.teacher ?? '未提供'} /><IconDetailRow icon={<CalendarDays size={20} />} label="周次" value={selectedSession.week_expression ?? '未提供'} /></div>{selectedSession.source === 'MANUAL' && selectedSession.manual_course_id && <div className="manual-course-detail-actions"><small>手动添加课程</small><span><button type="button" onClick={() => { if (!selectedTerm) return; setSelectedSession(null); setManualEditor({ courseId: selectedSession.manual_course_id!, initial: { term_id: selectedSession.term_id ?? selectedTerm.id, course_name: selectedSession.course_name, teacher: selectedSession.teacher, classroom: selectedSession.classroom, weekday: selectedSession.weekday ?? (new Date(`${selectedSession.session_date}T12:00:00`).getDay() || 7), start_period: selectedSession.start_period ?? 1, end_period: selectedSession.end_period ?? 1, week_expression: selectedSession.week_expression ?? '' } }); }}>编辑</button><button type="button" className="danger-button" onClick={() => { if (window.confirm(`确认删除手动课程“${selectedSession.course_name}”吗？`)) deleteManualCourse.mutate(selectedSession.manual_course_id!); }}>删除</button></span></div>}</DetailSheet>}
+    {selectedSession && <DetailSheet title={selectedSession.course_name} eyebrow="课程详情" showTitle={false} className="detail-sheet-with-eyebrow detail-sheet-list-title" dark={appearance === 'dark'} showHandle={false} onClose={() => setSelectedSession(null)}><div className="icon-detail-list"><IconDetailRow icon={<BookOpen size={20} />} label="课程名称" value={selectedSession.course_name} /><IconDetailRow icon={<Clock3 size={20} />} label="上课时间" value={`${selectedSession.session_date} ${formatTime(selectedSession.start_datetime)}—${formatTime(selectedSession.end_datetime)}`} /><IconDetailRow icon={<MapPin size={20} />} label="教室" value={selectedSession.classroom ?? '未提供'} /><IconDetailRow icon={<UserRound size={20} />} label="教师" value={selectedSession.teacher ?? '未提供'} /><IconDetailRow icon={<CalendarDays size={20} />} label="周次" value={selectedSession.week_expression ?? '未提供'} /></div>{selectedSession.source === 'MANUAL' && selectedSession.manual_course_id && <div className="manual-course-detail-actions"><small>手动添加课程</small><span><button type="button" onClick={() => { if (!selectedTerm) return; setSelectedSession(null); setManualEditor({ courseId: selectedSession.manual_course_id!, initial: { term_id: selectedSession.term_id ?? selectedTerm.id, course_name: selectedSession.course_name, teacher: selectedSession.teacher, classroom: selectedSession.classroom, weekday: selectedSession.weekday ?? (new Date(`${selectedSession.session_date}T12:00:00`).getDay() || 7), start_period: selectedSession.start_period ?? 1, end_period: selectedSession.end_period ?? 1, week_expression: selectedSession.week_expression ?? '' } }); }}>编辑</button><button type="button" className="danger-button" onClick={() => setDeletingManualCourse(selectedSession)}>删除</button></span></div>}</DetailSheet>}
     {manualEditor && <ManualCourseSheetV2 initial={manualEditor.initial} periods={periods.data ?? DEFAULT_PERIODS} pending={saveManualCourse.isPending} error={saveManualCourse.error} editing={Boolean(manualEditor.courseId)} dark={appearance === 'dark'} onClose={() => setManualEditor(null)} onSave={(payload) => saveManualCourse.mutate({ courseId: manualEditor.courseId, payload })} />}
+    {deletingManualCourse?.manual_course_id && <ViewportSheetPortal><ConfirmDialog title={`删除“${deletingManualCourse.course_name}”？`} description="删除后无法恢复这门手动添加的课程。" confirmLabel="删除课程" pending={deleteManualCourse.isPending} onCancel={() => setDeletingManualCourse(null)} onConfirm={() => deleteManualCourse.mutate(deletingManualCourse.manual_course_id!)} /></ViewportSheetPortal>}
   </main>;
 }
 
@@ -480,6 +550,7 @@ function AiAnalysisSettings({ dark = false }: { dark?: boolean }) {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelLookupNotice, setModelLookupNotice] = useState<string | null>(null);
   const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   useEffect(() => {
     if (!settings.data?.configured) return;
     setProvider(settings.data.provider ?? 'APIKEY.FAN');
@@ -541,7 +612,7 @@ function AiAnalysisSettings({ dark = false }: { dark?: boolean }) {
     onSuccess: (result) => setConnectionNotice(`${result.message}（${result.model}）`),
     onError: () => setConnectionNotice(null),
   });
-  const clear = useMutation({ mutationFn: api.clearAiSettings, onSuccess: async () => { setApiKey(''); setConnectionNotice(null); await queryClient.invalidateQueries({ queryKey: ['ai-settings'] }); } });
+  const clear = useMutation({ mutationFn: api.clearAiSettings, onSuccess: async () => { setApiKey(''); setConnectionNotice(null); setClearConfirmOpen(false); await queryClient.invalidateQueries({ queryKey: ['ai-settings'] }); } });
   const lookupIncomplete = !provider.trim() || !baseUrl.trim() || apiKey.length < 8;
   const incomplete = lookupIncomplete || !model.trim();
   const savedModels = settings.data?.available_models ?? [];
@@ -587,9 +658,9 @@ function AiAnalysisSettings({ dark = false }: { dark?: boolean }) {
       <button type="button" className="ai-settings-row" disabled={lookupModels.isPending || refreshModels.isPending || (isSavedConfiguration && !isEditingSavedConfiguration ? false : lookupIncomplete)} onClick={getModels}><span className="ai-settings-label">获取模型列表</span><span className="ai-settings-value">{lookupModels.isPending || refreshModels.isPending ? '获取中…' : ''}<ChevronRight size={18} aria-hidden="true" /></span></button>
       <button type="button" className="ai-settings-row" disabled={testConnection.isPending || incomplete} onClick={() => testConnection.mutate()}><span className="ai-settings-label">测试当前配置</span><span className="ai-settings-value">{testConnection.isPending ? '测试中…' : ''}<ChevronRight size={18} aria-hidden="true" /></span></button>
     </div>{(modelLookupNotice || connectionNotice) && <div className="ai-settings-feedback" aria-live="polite">{modelLookupNotice && <p className="ai-settings-notice">{modelLookupNotice}</p>}{connectionNotice && <p className="ai-settings-notice">{connectionNotice}</p>}</div>}<p className="ai-settings-footer">{syncedLabel}</p><button className="ai-settings-save" type="submit" disabled={!dirty || save.isPending || incomplete}>{save.isPending ? '正在保存…' : '保存配置'}</button></section>
-    {isSavedConfiguration && <section className="ai-settings-section" aria-labelledby="ai-danger-heading"><h2 id="ai-danger-heading">危险操作</h2><div className="ai-settings-group"><button type="button" className="ai-settings-row ai-settings-destructive-row" disabled={clear.isPending} onClick={() => { if (window.confirm('确认清除已保存的模型服务配置吗？')) clear.mutate(); }}><span><b>清除模型服务配置</b><small>不会清除已导入的成绩或分析历史</small></span><ChevronRight size={18} aria-hidden="true" /></button></div></section>}
+    {isSavedConfiguration && <section className="ai-settings-section" aria-labelledby="ai-danger-heading"><h2 id="ai-danger-heading">危险操作</h2><div className="ai-settings-group"><button type="button" className="ai-settings-row ai-settings-destructive-row" disabled={clear.isPending} onClick={() => setClearConfirmOpen(true)}><span><b>清除模型服务配置</b><small>不会清除已导入的成绩或分析历史</small></span><ChevronRight size={18} aria-hidden="true" /></button></div></section>}
     {error && <p className="ai-settings-error" role="alert">{error}</p>}
-  </form>{editor && <AiSettingsTextSheet kind={editor} value={editor === 'provider' ? provider : editor === 'base-url' ? baseUrl : apiKey} configured={isSavedConfiguration} apiKeyHint={settings.data?.api_key_hint ?? null} dark={dark} onClose={() => setEditor(null)} onConfirm={(value) => { if (editor === 'provider') { setProvider(value); resetModelLookup(); } else if (editor === 'base-url') { setBaseUrl(value); resetModelLookup(); } else { setApiKey(value); resetModelLookup(); } setEditor(null); }} />}</>;
+  </form>{clearConfirmOpen && <ViewportSheetPortal><ConfirmDialog title="清除模型服务配置？" description="已保存的服务地址、模型和 API Key 配置将被移除，无法恢复。成绩与分析历史不会受影响。" confirmLabel="确认清除" pending={clear.isPending} onCancel={() => setClearConfirmOpen(false)} onConfirm={() => clear.mutate()} /></ViewportSheetPortal>}{editor && <AiSettingsTextSheet kind={editor} value={editor === 'provider' ? provider : editor === 'base-url' ? baseUrl : apiKey} configured={isSavedConfiguration} apiKeyHint={settings.data?.api_key_hint ?? null} dark={dark} onClose={() => setEditor(null)} onConfirm={(value) => { if (editor === 'provider') { setProvider(value); resetModelLookup(); } else if (editor === 'base-url') { setBaseUrl(value); resetModelLookup(); } else { setApiKey(value); resetModelLookup(); } setEditor(null); }} />}</>;
 }
 
 function AiSettingsTextSheet({ kind, value, configured, apiKeyHint, dark, onClose, onConfirm }: { kind: 'provider' | 'base-url' | 'api-key'; value: string; configured: boolean; apiKeyHint: string | null; dark: boolean; onClose: () => void; onConfirm: (value: string) => void }) {
@@ -644,55 +715,132 @@ function LayoutModeSelector({ mode, onChange }: { mode: LayoutMode; onChange: (m
   return <section className="card settings-card appearance-mode-card layout-mode-card"><b>页面布局</b><small>{mode === 'desktop' ? 'PC 页面仅在可用宽度足够时启用；窄屏会自动保持手机页面。' : '该偏好只保存在当前设备，不会影响其他设备。'}</small><div className="appearance-mode-switch" role="radiogroup" aria-label="页面布局"><span className="appearance-mode-indicator" style={{ transform: `translateX(${activeIndex * 100}%)` }} aria-hidden="true" />{options.map((option) => { const Icon = option.icon; const active = option.value === mode; return <button key={option.value} type="button" role="radio" aria-checked={active} className={active ? 'active' : ''} onClick={() => onChange(option.value)}><Icon size={17} />{option.label}</button>; })}</div></section>;
 }
 
+const PASSKEY_SWIPE_WIDTH = 84;
+const PASSKEY_SWIPE_THRESHOLD = 36;
+
+function SwipeablePasskeyCredentialRow({ credential, open, onOpenChange, onRemove }: { credential: PasskeyCredential; open: boolean; onOpenChange: (open: boolean) => void; onRemove: (credential: PasskeyCredential) => void }) {
+  const gesture = useRef<{ pointerId: number; startX: number; startY: number; startOffset: number; lastOffset: number; axis: 'horizontal' | 'vertical' | null } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState(0);
+  const translateX = dragging ? dragOffset : open ? -PASSKEY_SWIPE_WIDTH : 0;
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse') return;
+    gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startOffset: open ? -PASSKEY_SWIPE_WIDTH : 0, lastOffset: open ? -PASSKEY_SWIPE_WIDTH : 0, axis: null };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentGesture = gesture.current;
+    if (!currentGesture || currentGesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - currentGesture.startX;
+    const deltaY = event.clientY - currentGesture.startY;
+    if (!currentGesture.axis) {
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 7) return;
+      currentGesture.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
+      if (currentGesture.axis === 'horizontal') setDragging(true);
+    }
+    if (currentGesture.axis !== 'horizontal') return;
+    event.preventDefault();
+    const offset = Math.max(-PASSKEY_SWIPE_WIDTH, Math.min(0, currentGesture.startOffset + deltaX));
+    currentGesture.lastOffset = offset;
+    setDragOffset(offset);
+  };
+  const finishGesture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentGesture = gesture.current;
+    if (!currentGesture || currentGesture.pointerId !== event.pointerId) return;
+    if (currentGesture.axis === 'horizontal') onOpenChange(currentGesture.lastOffset <= -PASSKEY_SWIPE_THRESHOLD);
+    setDragging(false);
+    gesture.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  return <div className="passkey-swipe-row">
+    <div className="passkey-swipe-actions" aria-hidden={!open}><button type="button" tabIndex={open ? 0 : -1} onClick={() => { onOpenChange(false); onRemove(credential); }}>移除</button></div>
+    <div className={`passkey-credential-row${dragging ? ' is-dragging' : ''}`} style={{ transform: `translate3d(${translateX}px,0,0)` }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishGesture} onPointerCancel={finishGesture}>
+      <span><b>{credential.label}</b><small>{credential.device_type === 'multi_device' ? '可同步通行密钥' : '设备通行密钥'} · {credential.last_used_at ? `最近使用 ${new Date(credential.last_used_at).toLocaleDateString('zh-CN')}` : `添加于 ${new Date(credential.created_at).toLocaleDateString('zh-CN')}`}</small></span>
+      <button type="button" className="passkey-desktop-remove" onClick={() => onRemove(credential)}>移除</button>
+    </div>
+  </div>;
+}
+
+function PasskeyRegistrationSheet({ pending, error, onClose, onSubmit }: { pending: boolean; error: Error | null; onClose: () => void; onSubmit: (payload: { label: string; password: string }) => void }) {
+  useModalOpenState();
+  const [label, setLabel] = useState('此设备');
+  const [password, setPassword] = useState('');
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit({ label: label.trim() || '此设备', password });
+  };
+  return <ViewportSheetPortal><div className="sheet-mask sheet-mask-viewport passkey-registration-mask" role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet passkey-registration-sheet" role="dialog" aria-modal="true" aria-labelledby="passkey-registration-title" onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><div><h2 id="passkey-registration-title">添加通行密钥</h2><p>为这台设备创建可用于登录的通行密钥。</p></div><button type="button" className="sheet-close-icon" aria-label="关闭添加通行密钥" title="关闭" disabled={pending} onClick={onClose}><X size={20} /></button></header><form onSubmit={submit}><div className="passkey-registration-group"><label><span>设备名称</span><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={64} placeholder="例如：我的 iPhone" autoComplete="off" required /></label><label><span>当前密码</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label></div><p className="passkey-registration-note">为防止已解锁设备被他人绑定凭据，添加时需再次验证当前密码。</p>{error && <p className="passkey-registration-error" role="alert">{error.message}</p>}<div className="passkey-registration-actions"><button type="button" className="secondary-button" disabled={pending} onClick={onClose}>取消</button><button type="submit" disabled={pending}>{pending ? '正在验证…' : '继续并验证'}</button></div></form></section></div></ViewportSheetPortal>;
+}
+
+function PasskeyRemovalSheet({ credential, pending, error, onClose, onSubmit }: { credential: PasskeyCredential; pending: boolean; error: Error | null; onClose: () => void; onSubmit: (password: string) => void }) {
+  useModalOpenState();
+  const [password, setPassword] = useState('');
+  return <ViewportSheetPortal><div className="sheet-mask sheet-mask-viewport passkey-registration-mask" role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet passkey-registration-sheet passkey-removal-sheet" role="dialog" aria-modal="true" aria-labelledby="passkey-removal-title" onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><div><h2 id="passkey-removal-title">移除“{credential.label}”</h2><p>移除后，这台设备将不能再使用此通行密钥登录。</p></div><button type="button" className="sheet-close-icon" aria-label="关闭移除通行密钥" title="关闭" disabled={pending} onClick={onClose}><X size={20} /></button></header><form onSubmit={(event) => { event.preventDefault(); onSubmit(password); }}><div className="passkey-registration-group"><label><span>当前密码</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label></div><p className="passkey-registration-note">为保护账号安全，移除已登记的通行密钥前需要再次验证当前密码。</p>{error && <p className="passkey-registration-error" role="alert">{error.message}</p>}<div className="passkey-registration-actions"><button type="button" className="secondary-button" disabled={pending} onClick={onClose}>取消</button><button type="submit" className="passkey-removal-confirm" disabled={pending}>{pending ? '正在移除…' : '确认移除'}</button></div></form></section></div></ViewportSheetPortal>;
+}
+
 function PasskeySettings() {
   const queryClient = useQueryClient();
   const passkeys = useQuery({ queryKey: ['passkeys'], queryFn: api.passkeys });
-  const [adding, setAdding] = useState(false);
-  const [label, setLabel] = useState('此设备');
-  const [password, setPassword] = useState('');
+  const [registrationOpen, setRegistrationOpen] = useState(false);
   const [removing, setRemoving] = useState<PasskeyCredential | null>(null);
-  const [removePassword, setRemovePassword] = useState('');
+  const [openPasskeyId, setOpenPasskeyId] = useState<number | null>(null);
+  const passkeyGroupRef = useRef<HTMLDivElement>(null);
   const register = useMutation({
-    mutationFn: async () => {
-      const safeLabel = label.trim() || '此设备';
-      const options = await api.passkeyRegistrationOptions(password, safeLabel);
+    mutationFn: async ({ label, password }: { label: string; password: string }) => {
+      const options = await api.passkeyRegistrationOptions(password, label);
       const credential = await createPasskeyCredential(options.public_key);
-      return api.verifyPasskeyRegistration({ challenge_id: options.challenge_id, credential, label: safeLabel });
+      return api.verifyPasskeyRegistration({ challenge_id: options.challenge_id, credential, label });
     },
     onSuccess: async () => {
-      setPassword(''); setAdding(false); setLabel('此设备');
+      setRegistrationOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['passkeys'] });
     },
   });
   const revoke = useMutation({
-    mutationFn: () => api.deletePasskey(removing!.id, removePassword),
+    mutationFn: ({ id, password }: { id: number; password: string }) => api.deletePasskey(id, password),
     onSuccess: async () => {
-      setRemoving(null); setRemovePassword('');
+      setRemoving(null); setOpenPasskeyId(null);
       await queryClient.invalidateQueries({ queryKey: ['passkeys'] });
     },
   });
   const unsupported = !passkeySupported();
-  const error = passkeys.error?.message ?? register.error?.message ?? revoke.error?.message;
+  const error = passkeys.error?.message;
+  const beginRemoval = (credential: PasskeyCredential) => {
+    setOpenPasskeyId(null);
+    setRemoving(credential);
+    revoke.reset();
+  };
+  useEffect(() => {
+    if (openPasskeyId === null) return;
+    const group = passkeyGroupRef.current;
+    const scrollContainer = group?.closest('main');
+    const closeSwipeActions = () => setOpenPasskeyId(null);
+    scrollContainer?.addEventListener('scroll', closeSwipeActions, { passive: true });
+    const closeWhenPressingOutside = (event: PointerEvent) => {
+      if (group && event.target instanceof Node && !group.contains(event.target)) closeSwipeActions();
+    };
+    document.addEventListener('pointerdown', closeWhenPressingOutside, true);
+    return () => {
+      scrollContainer?.removeEventListener('scroll', closeSwipeActions);
+      document.removeEventListener('pointerdown', closeWhenPressingOutside, true);
+    };
+  }, [openPasskeyId]);
   return <section className="account-settings-section passkey-settings-section" aria-labelledby="passkey-settings-heading">
     <h2 id="passkey-settings-heading">通行密钥</h2>
-    <div className="account-settings-group passkey-settings-group">
-      {passkeys.isLoading ? <div className="account-authentication-row"><span><b>正在读取通行密钥…</b></span></div> : passkeys.data?.length ? passkeys.data.map((item) => <div className="passkey-credential-row" key={item.id}><span><b>{item.label}</b><small>{item.device_type === 'multi_device' ? '可同步通行密钥' : '设备通行密钥'} · {item.last_used_at ? `最近使用 ${new Date(item.last_used_at).toLocaleDateString('zh-CN')}` : `添加于 ${new Date(item.created_at).toLocaleDateString('zh-CN')}`}</small></span><button type="button" onClick={() => { setRemoving(item); setRemovePassword(''); revoke.reset(); }}>移除</button></div>) : <div className="account-authentication-row"><span><b>尚未添加通行密钥</b><small>添加后可使用设备生物识别或设备 PIN 登录。</small></span></div>}
+    <div ref={passkeyGroupRef} className="account-settings-group passkey-settings-group">
+      {passkeys.isLoading ? <div className="account-authentication-row"><span><b>正在读取通行密钥…</b></span></div> : passkeys.data?.length ? passkeys.data.map((item) => <SwipeablePasskeyCredentialRow key={item.id} credential={item} open={openPasskeyId === item.id} onOpenChange={(open) => setOpenPasskeyId(open ? item.id : null)} onRemove={beginRemoval} />) : <div className="account-authentication-row"><span><b>尚未添加通行密钥</b><small>添加后可使用设备生物识别或设备 PIN 登录。</small></span></div>}
+      <button type="button" className="passkey-add-row" disabled={unsupported} aria-describedby={unsupported ? 'passkey-support-hint' : undefined} onClick={() => { setOpenPasskeyId(null); register.reset(); setRegistrationOpen(true); }}><span><Plus size={18} aria-hidden="true" /><b>添加通行密钥</b></span></button>
     </div>
-    {unsupported ? <p className="account-settings-footer">当前环境不支持通行密钥；本地请使用 <code>http://localhost:5173</code>，正式环境需使用 HTTPS。</p> : !adding ? <button type="button" className="passkey-add-button" onClick={() => { setAdding(true); register.reset(); }}>添加通行密钥</button> : <form className="passkey-form" onSubmit={(event) => { event.preventDefault(); register.mutate(); }}>
-      <label><span>设备名称</span><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={64} placeholder="例如：我的 iPhone" autoComplete="off" required /></label>
-      <label><span>当前密码</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>
-      <p>为防止已解锁设备被他人绑定凭据，添加时需再次验证当前密码。</p>
-      <div><button type="button" onClick={() => { setAdding(false); setPassword(''); }}>取消</button><button type="submit" disabled={register.isPending}>{register.isPending ? '正在添加…' : '继续并验证'}</button></div>
-    </form>}
-    {removing && <form className="passkey-form passkey-revoke-form" onSubmit={(event) => { event.preventDefault(); revoke.mutate(); }}>
-      <b>移除“{removing.label}”</b><label><span>当前密码</span><input value={removePassword} onChange={(event) => setRemovePassword(event.target.value)} type="password" autoComplete="current-password" required /></label>
-      <div><button type="button" onClick={() => { setRemoving(null); setRemovePassword(''); }}>取消</button><button type="submit" disabled={revoke.isPending}>{revoke.isPending ? '正在移除…' : '确认移除'}</button></div>
-    </form>}
+    {unsupported && <p id="passkey-support-hint" className="account-settings-footer">当前环境不支持通行密钥；本地请使用 <code>http://localhost:5173</code>，正式环境需使用 HTTPS。</p>}
     {error && <p className="account-settings-error" role="alert">{error}</p>}
+    {registrationOpen && <PasskeyRegistrationSheet pending={register.isPending} error={register.error} onClose={() => { if (!register.isPending) setRegistrationOpen(false); }} onSubmit={(payload) => register.mutate(payload)} />}
+    {removing && <PasskeyRemovalSheet credential={removing} pending={revoke.isPending} error={revoke.error} onClose={() => { if (!revoke.isPending) setRemoving(null); }} onSubmit={(password) => revoke.mutate({ id: removing.id, password })} />}
   </section>;
 }
 
-function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChange, layoutMode, onLayoutModeChange }: { appearanceMode: AppearanceMode; resolvedAppearanceMode: 'light' | 'dark'; onAppearanceModeChange: (mode: AppearanceMode) => void; layoutMode: LayoutMode; onLayoutModeChange: (mode: LayoutMode) => void }) {
+type SettingsSection = 'account' | 'time' | 'personal' | 'data' | 'analysis' | 'about';
+
+function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChange, layoutMode, onLayoutModeChange, routeEntering }: { appearanceMode: AppearanceMode; resolvedAppearanceMode: 'light' | 'dark'; onAppearanceModeChange: (mode: AppearanceMode) => void; layoutMode: LayoutMode; onLayoutModeChange: (mode: LayoutMode) => void; routeEntering: boolean }) {
   const queryClient = useQueryClient();
   const location = useLocation();
   const { scrollRef: settingsScrollRef, headerRef: settingsHeaderRef } = useCollapsiblePageTitle();
@@ -702,7 +850,8 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
   const [selectedTermId, setSelectedTermId] = useState<number | null>(null);
   const [selectedPeriodNumber, setSelectedPeriodNumber] = useState<number | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<'account' | 'time' | 'personal' | 'data' | 'analysis' | 'about' | null>(() => (location.state as { settingsSection?: string } | null)?.settingsSection === 'data' ? 'data' : null);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(() => (location.state as { settingsSection?: string } | null)?.settingsSection === 'data' ? 'data' : null);
+  const [settingsTransitionDirection, setSettingsTransitionDirection] = useState<'forward' | 'backward'>('forward');
   const [displayName, setDisplayName] = useState('张自航');
   const [newAvatar, setNewAvatar] = useState<string | null | undefined>(undefined);
   const [avatarCropSource, setAvatarCropSource] = useState<string | null>(null);
@@ -762,6 +911,8 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       setAvatarError(imageError instanceof Error ? imageError.message : '无法读取该图片，请换一张后重试。');
     }
   };
+  const openSettingsSection = (section: SettingsSection) => { setSettingsTransitionDirection('forward'); setSettingsSection(section); };
+  const closeSettingsSection = () => { setSettingsTransitionDirection('backward'); setSettingsSection(null); };
   const sectionTitle = settingsSection === 'account' ? '账号安全' : settingsSection === 'time' ? '时间设置' : settingsSection === 'personal' ? '个性化设置' : settingsSection === 'data' ? '数据与导入' : settingsSection === 'analysis' ? '成绩分析设置' : settingsSection === 'about' ? '关于助手' : '设置';
   const accountTitleCollapsible = settingsSection === 'account';
   const sectionTitleCollapsible = Boolean(settingsSection);
@@ -769,41 +920,42 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
   const settingsPageClassName = `${accountTitleCollapsible ? 'account-settings-page ' : ''}${sectionTitleCollapsible ? 'settings-section-page ' : ''}${resolvedAppearanceMode === 'dark' ? 'settings-page-dark' : ''}`.trim();
   const displayedProfile: Profile = { display_name: displayName.trim() || '张自航', avatar_data_url: newAvatar === undefined ? profile.data?.avatar_data_url ?? null : newAvatar, timetable_background_data_url: newTimetableBackground === undefined ? profile.data?.timetable_background_data_url ?? null : newTimetableBackground };
   const profileDirty = profile.data ? displayName.trim() !== profile.data.display_name || newAvatar !== undefined || newTimetableBackground !== undefined : false;
-  return <Page title={sectionTitle} icon={accountTitleCollapsible ? <KeyRound size={20} /> : !settingsSection ? <SettingsIcon size={20} /> : undefined} action={settingsSection ? <button type="button" className="settings-back settings-back-ios" aria-label="返回设置" onClick={() => setSettingsSection(null)}><ChevronLeft size={18} />设置</button> : undefined} mainRef={settingsScrollRef} headerRef={settingsHeaderRef} className={settingsPageClassName} headerClassName={rootTitleCollapsible ? 'collapsible-page-header' : sectionTitleCollapsible ? 'collapsible-page-header settings-section-header settings-detail-header' : undefined} compactTitle={rootTitleCollapsible || sectionTitleCollapsible}>
+  return <Page title={sectionTitle} icon={accountTitleCollapsible ? <KeyRound size={20} /> : !settingsSection ? <SettingsIcon size={20} /> : undefined} action={settingsSection ? <button type="button" className="settings-back settings-back-ios" aria-label="返回设置" onClick={closeSettingsSection}><ChevronLeft size={18} />设置</button> : undefined} mainRef={settingsScrollRef} headerRef={settingsHeaderRef} className={settingsPageClassName} headerClassName={rootTitleCollapsible ? 'collapsible-page-header' : sectionTitleCollapsible ? 'collapsible-page-header settings-section-header settings-detail-header' : undefined} compactTitle={rootTitleCollapsible || sectionTitleCollapsible}>
     {settingsSection === 'personal' && <p className="settings-inline-note">自定义显示模式、页面布局和个人资料。</p>}
     {settingsSection === 'data' && <p className="settings-inline-note">课程表和成绩仅通过你主动选择的导出文件导入，并保存在本地缓存中。</p>}
-    {!settingsSection && <section className="settings-menu" aria-label="设置项目录">
+    {!settingsSection && <div className={settingsTransitionDirection === 'backward' ? 'settings-detail-stage settings-detail-stage-backward' : routeEntering ? 'settings-root-stage' : undefined}><section className="settings-menu" aria-label="设置项目录">
       <section className="settings-menu-group" aria-labelledby="settings-group-account">
         <h2 id="settings-group-account">账户</h2>
         <div className="settings-menu-group-list">
-          <button type="button" className="settings-menu-item" onClick={() => setSettingsSection('account')}><span><b><KeyRound size={18} />账号安全</b><small>密码、通行密钥与退出</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" className="settings-menu-item" onClick={() => openSettingsSection('account')}><span><b><KeyRound size={18} />账号安全</b><small>密码、通行密钥与退出</small></span><span aria-hidden="true">›</span></button>
         </div>
       </section>
       <section className="settings-menu-group" aria-labelledby="settings-group-preferences">
         <h2 id="settings-group-preferences">偏好设置</h2>
         <div className="settings-menu-group-list">
-          <button type="button" className="settings-menu-item" onClick={() => setSettingsSection('time')}><span><b><Clock3 size={18} />时间设置</b><small>学期第一周与节次时间</small></span><span aria-hidden="true">›</span></button>
-          <button type="button" className="settings-menu-item" onClick={() => setSettingsSection('personal')}><span><b><Palette size={18} />个性化设置</b><small>显示姓名与首页头像</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" className="settings-menu-item" onClick={() => openSettingsSection('time')}><span><b><Clock3 size={18} />时间设置</b><small>学期第一周与节次时间</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" className="settings-menu-item" onClick={() => openSettingsSection('personal')}><span><b><Palette size={18} />个性化设置</b><small>显示姓名与首页头像</small></span><span aria-hidden="true">›</span></button>
         </div>
       </section>
       <section className="settings-menu-group" aria-labelledby="settings-group-data">
         <h2 id="settings-group-data">数据与助手</h2>
         <div className="settings-menu-group-list">
-          <DataSettingsEntry onOpen={() => setSettingsSection('data')} />
-          <button type="button" className="settings-menu-item" onClick={() => setSettingsSection('analysis')}><span><b><GraduationCap size={18} />成绩分析设置</b><small>第三方模型服务与 API Key</small></span><span aria-hidden="true">›</span></button>
-          <button type="button" className="settings-menu-item" onClick={() => setSettingsSection('about')}><span><b><Info size={18} />关于助手</b><small>版本、数据保护与使用说明</small></span><span aria-hidden="true">›</span></button>
+          <DataSettingsEntry onOpen={() => openSettingsSection('data')} />
+          <button type="button" className="settings-menu-item" onClick={() => openSettingsSection('analysis')}><span><b><GraduationCap size={18} />成绩分析设置</b><small>第三方模型服务与 API Key</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" className="settings-menu-item" onClick={() => openSettingsSection('about')}><span><b><Info size={18} />关于助手</b><small>版本、数据保护与使用说明</small></span><span aria-hidden="true">›</span></button>
         </div>
       </section>
-    </section>}
+    </section></div>}
+    {settingsSection && <div key={`${settingsSection}-${settingsTransitionDirection}`} className={`settings-detail-stage settings-detail-stage-${settingsTransitionDirection}`}>
     {settingsSection === 'personal' && <><ProfileSettings profile={displayedProfile} dirty={profileDirty} pending={saveProfile.isPending} error={avatarError ?? saveProfile.error?.message ?? null} onOpenAvatar={() => setAvatarEditorOpen(true)} onOpenName={() => setNameEditorOpen(true)} onOpenTimetableBackground={() => setTimetableBackgroundEditorOpen(true)} onSave={() => saveProfile.mutate()} /><AppearanceModeSelector mode={appearanceMode} onChange={onAppearanceModeChange} /><LayoutModeSelector mode={layoutMode} onChange={onLayoutModeChange} /></>}
     {settingsSection === 'account' && <section className="account-settings-detail" aria-label="账号安全设置">
       <section className="account-settings-section" aria-labelledby="account-authentication-heading">
         <h2 id="account-authentication-heading">单用户认证</h2>
         <div className="account-settings-group">
-          <div className="account-authentication-row"><span><b>当前使用单用户认证</b><small>账号凭据由服务器环境配置管理</small></span></div>
+          <div className="account-authentication-row"><span><b>服务器环境认证</b><small>账号凭据由服务器环境配置管理</small></span></div>
         </div>
         <p className="account-settings-footer">本页不会展示或保存账号密码。</p>
-        <details className="account-deployment-note"><summary>部署说明</summary><p>管理员用户名通过 <code>ADMIN_USERNAME</code> 配置，密码哈希通过 <code>ADMIN_PASSWORD_HASH</code> 配置。修改密码后，请重新生成 Argon2id 哈希并更新服务器 <code>.env</code>，再重启后端。</p></details>
+        <details className="account-deployment-note"><summary><span>部署说明</span><ChevronRight size={18} aria-hidden="true" /></summary><div className="account-deployment-copy"><p>管理员用户名通过 <code>ADMIN_USERNAME</code> 配置，密码哈希通过 <code>ADMIN_PASSWORD_HASH</code> 配置。修改密码后，请重新生成 Argon2id 哈希并更新服务器 <code>.env</code>，再重启后端。</p></div></details>
       </section>
       <PasskeySettings />
       <section className="account-settings-section" aria-labelledby="account-action-heading">
@@ -816,7 +968,8 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
     {settingsSection === 'time' && <TimeSettings terms={terms.data} periods={periods.data} preferredTerm={preferredTerm} selectedTermId={selectedTermId} selectedPeriodNumber={selectedPeriodNumber} onSelectTerm={setSelectedTermId} onSelectPeriod={setSelectedPeriodNumber} onTermSaved={() => { queryClient.invalidateQueries({ queryKey: ['terms'] }); queryClient.invalidateQueries({ queryKey: ['sessions'] }); }} onPeriodSaved={() => { queryClient.invalidateQueries({ queryKey: ['period-times'] }); queryClient.invalidateQueries({ queryKey: ['sessions'] }); }} />}
     {settingsSection === 'data' && <DataImportSettings />}
     {settingsSection === 'analysis' && <><AiAnalysisSettings dark={resolvedAppearanceMode === 'dark'} /><AiAnalysisHistorySettings /></>}
-    {settingsSection === 'about' && <><section className="about-hero"><div className="about-mark"><img src="/pwa-192.png" alt="航的助手应用图标" /></div><div><small>Hand Helper</small><h2>航的助手</h2><span>v{APP_VERSION}</span></div></section><section className="card about-card"><div className="about-card-intro"><b>应用说明</b><small>为个人使用场景设计的课程表与成绩分析助手。课程和成绩由你主动上传导出文件后写入本地缓存。</small></div><div className="icon-detail-list about-detail-list"><IconDetailRow icon={<UserRound size={20} />} label="使用范围" value="仅供本人使用" /><IconDetailRow icon={<Database size={20} />} label="数据方式" value="本地导出文件解析" /></div></section><HelpCenter /><section className="card settings-card"><b>隐私与安全</b><small>登录令牌不会展示在页面或日志中。课程、成绩和头像数据仅保存在你配置的后端与本地缓存中；上传的原始教务文件仅用于当次解析。</small></section></>}
+    {settingsSection === 'about' && <><section className="about-hero"><div className="about-mark"><img src="/pwa-192.png" alt="航的助手应用图标" /></div><div><small>Hand Helper</small><h2>航的助手</h2><span>v{APP_VERSION}</span></div></section><section className="card about-card"><div className="about-card-intro"><b>应用说明</b><small>为个人使用场景设计的课程表与成绩分析助手。课程和成绩由你主动上传导出文件后写入本地缓存。</small></div><div className="icon-detail-list about-detail-list"><IconDetailRow icon={<UserRound size={20} />} label="使用范围" value="仅供本人使用" /><IconDetailRow icon={<Database size={20} />} label="数据方式" value="本地导出文件解析" /></div></section><HelpCenter /><section className="card settings-card"><b>隐私与安全</b><small>登录令牌不会展示在页面或日志中。课程、成绩和头像数据仅保存在你配置的后端与本地缓存中；上传的原始教务文件仅用于当次解析。</small></section><section className="card settings-card about-github-card"><a className="about-github-row" href="https://github.com/zhangzh-luck/hand-helper" target="_blank" rel="noreferrer" aria-label="在 GitHub 打开航的助手项目主页"><img src="/github-icons8.png" alt="" width="26" height="26" aria-hidden="true" /><span><b>GitHub 项目主页</b><small>查看源码、版本更新与问题反馈</small></span><ChevronRight size={18} aria-hidden="true" /></a></section></>}
+    </div>}
     {avatarCropSource && <AvatarCropSheet source={avatarCropSource} dark={resolvedAppearanceMode === 'dark'} onClose={() => setAvatarCropSource(null)} onConfirm={(avatar) => { setNewAvatar(avatar); setAvatarCropSource(null); setAvatarError(null); }} />}
     {avatarEditorOpen && <ProfileAvatarSheet profile={displayedProfile} dark={resolvedAppearanceMode === 'dark'} onClose={() => setAvatarEditorOpen(false)} onChoose={(file) => { setAvatarEditorOpen(false); void chooseAvatar(file); }} onRemove={() => { setNewAvatar(null); setAvatarEditorOpen(false); }} />}
     {nameEditorOpen && <ProfileNameSheet initialName={displayName} dark={resolvedAppearanceMode === 'dark'} onClose={() => setNameEditorOpen(false)} onConfirm={(name) => { setDisplayName(name); setNameEditorOpen(false); }} />}
@@ -1069,7 +1222,7 @@ function DetailSheet({ title, children, onClose, dark = false, showHandle = true
 }
 function ConfirmDialog({ title, description, confirmLabel, pending, onCancel, onConfirm }: { title: string; description: string; confirmLabel: string; pending: boolean; onCancel: () => void; onConfirm: () => void }) {
   useModalOpenState();
-  return <div className="sheet-mask" role="presentation" onClick={pending ? undefined : onCancel}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}><h2>{title}</h2><p>{description}</p><div><button type="button" className="secondary-button" disabled={pending} onClick={onCancel}>取消</button><button type="button" className="logout-button" disabled={pending} onClick={onConfirm}>{pending ? '正在退出…' : confirmLabel}</button></div></section></div>;
+  return <div className="sheet-mask confirm-mask" role="presentation" onClick={pending ? undefined : onCancel}><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-description" onClick={(event) => event.stopPropagation()}><div className="confirm-dialog-copy"><h2 id="confirm-dialog-title">{title}</h2><p id="confirm-dialog-description">{description}</p></div><div className="confirm-dialog-actions"><button type="button" className="confirm-dialog-destructive" disabled={pending} onClick={onConfirm}>{pending ? '正在处理…' : confirmLabel}</button><button type="button" className="confirm-dialog-cancel" disabled={pending} onClick={onCancel}>取消</button></div></section></div>;
 }
 function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
 function Page({ title, children, action, icon, className, headerClassName, compactTitle, mainRef, headerRef }: { title: string; children: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode; className?: string; headerClassName?: string; compactTitle?: boolean; mainRef?: RefObject<HTMLElement>; headerRef?: RefObject<HTMLElement> }) { return <main ref={mainRef} className={className}><header ref={headerRef} className={headerClassName}>{compactTitle && icon && <span className="page-fixed-title-icon" aria-hidden="true">{icon}</span>}<h1 className="page-title">{!compactTitle && icon && <span className="page-title-icon" aria-hidden="true">{icon}</span>}{title}</h1>{compactTitle && <span className="page-title-compact" aria-hidden="true">{title}</span>}{action}</header>{children}</main>; }
@@ -1158,6 +1311,7 @@ function PrimaryRouteTransition({ appearanceMode, resolvedAppearanceMode, onAppe
   const currentIndex = primaryRouteIndex(pathname);
   const previousIndex = primaryRouteIndex(previousPathname.current);
   const direction = currentIndex < previousIndex ? 'backward' : 'forward';
+  const routeEntering = pathname !== initialPathname.current;
 
   useEffect(() => {
     previousPathname.current = pathname;
@@ -1170,7 +1324,7 @@ function PrimaryRouteTransition({ appearanceMode, resolvedAppearanceMode, onAppe
       <Route path="/" element={<Today appearance={resolvedAppearanceMode} />} />
       <Route path="/timetable" element={<Timetable appearance={resolvedAppearanceMode} />} />
       <Route path="/grades" element={<Grades appearance={resolvedAppearanceMode} />} />
-      <Route path="/settings" element={<Settings appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={onAppearanceModeChange} layoutMode={layoutMode} onLayoutModeChange={onLayoutModeChange} />} />
+      <Route path="/settings" element={<Settings appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={onAppearanceModeChange} layoutMode={layoutMode} onLayoutModeChange={onLayoutModeChange} routeEntering={routeEntering} />} />
     </Routes>
   </div>;
 }
