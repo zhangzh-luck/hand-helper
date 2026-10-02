@@ -2,7 +2,11 @@
 import { apiBaseUrl } from './app-config';
 
 const API = apiBaseUrl();
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const UPLOAD_TIMEOUT_MS = 45_000;
 type Envelope<T> = { success: boolean; data: T; error?: { code: string; message: string } };
+export class ConnectionError extends Error {}
+export class UnauthorizedError extends Error {}
 
 async function readEnvelope<T>(response: Response, fallbackMessage: string): Promise<Envelope<T>> {
   const body = await response.text();
@@ -18,21 +22,46 @@ function notifyUnauthenticated() {
   window.dispatchEvent(new Event('hand-helper:unauthenticated'));
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = options.signal;
+  const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal?.aborted) abortFromUpstream();
+  else upstreamSignal?.addEventListener('abort', abortFromUpstream, { once: true });
+  const timer = window.setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), timeoutMs);
+  try {
+    return await fetch(input, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError') {
+      throw new Error('请求超时，请检查网络后重试。');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream);
+  }
+}
+
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     const headers = new Headers(options.headers);
     if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    response = await fetch(`${API}${path}`, {
+    response = await fetchWithTimeout(`${API}${path}`, {
       credentials: 'include',
       ...options,
       headers,
-    });
-  } catch {
-    throw new Error('无法连接服务器，请检查网络，随后刷新页面再试。');
+    }, DEFAULT_REQUEST_TIMEOUT_MS);
+  } catch (error) {
+    window.dispatchEvent(new Event('hand-helper:connection-failed'));
+    throw new ConnectionError(error instanceof Error && error.message.startsWith('请求超时') ? error.message : '无法连接服务器，请检查网络后重试。');
   }
+  window.dispatchEvent(new Event('hand-helper:connection-restored'));
   const payload = await readEnvelope<T>(response, '服务器响应异常');
-  if (response.status === 401) notifyUnauthenticated();
+  if (response.status === 401) {
+    notifyUnauthenticated();
+    throw new UnauthorizedError(payload.error?.message ?? '登录状态已失效');
+  }
   if (!response.ok || !payload.success) throw new Error(payload.error?.message ?? '请求失败');
   return payload.data;
 }
@@ -42,14 +71,19 @@ export async function upload<T>(path: string, file: File, fields: Record<string,
   form.append('file', file);
   let response: Response;
   try {
-    response = await fetch(`${API}${path}`, {
+    response = await fetchWithTimeout(`${API}${path}`, {
       method: 'POST', body: form, credentials: 'include',
-    });
-  } catch {
-    throw new Error('无法连接服务器，请检查网络，随后刷新页面再试。');
+    }, UPLOAD_TIMEOUT_MS);
+  } catch (error) {
+    window.dispatchEvent(new Event('hand-helper:connection-failed'));
+    throw new ConnectionError(error instanceof Error && error.message.startsWith('请求超时') ? error.message : '无法连接服务器，请检查网络后重试。');
   }
+  window.dispatchEvent(new Event('hand-helper:connection-restored'));
   const payload = await readEnvelope<T>(response, '上传服务响应异常');
-  if (response.status === 401) notifyUnauthenticated();
+  if (response.status === 401) {
+    notifyUnauthenticated();
+    throw new UnauthorizedError(payload.error?.message ?? '登录状态已失效');
+  }
   if (!response.ok || !payload.success) throw new Error(payload.error?.message ?? '上传失败');
   return payload.data;
 }

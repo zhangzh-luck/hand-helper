@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import UIKit
 
 struct WebContainerView: UIViewRepresentable {
     let url: URL
@@ -60,7 +61,12 @@ struct WebContainerView: UIViewRepresentable {
                 targetURL.scheme == "https",
                 targetURL.host == allowedHost
             else {
-                reportFailure("应用只能打开已配置的安全服务地址。")
+                // 仅用户主动点击的网页外链交给系统浏览器；重定向和未知协议不能离开受信任的站点。
+                if let targetURL = action.request.url,
+                   ["https", "http"].contains(targetURL.scheme?.lowercased() ?? ""),
+                   action.navigationType == .linkActivated {
+                    UIApplication.shared.open(targetURL)
+                }
                 decisionHandler(.cancel)
                 return
             }
@@ -72,6 +78,7 @@ struct WebContainerView: UIViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation?,
             withError error: Error
         ) {
+            if (error as NSError).code == NSURLErrorCancelled { return }
             reportFailure("无法连接到服务，请检查网络或稍后重试。")
         }
 
@@ -80,6 +87,7 @@ struct WebContainerView: UIViewRepresentable {
             didFail navigation: WKNavigation?,
             withError error: Error
         ) {
+            if (error as NSError).code == NSURLErrorCancelled { return }
             reportFailure("页面加载中断，请重试。")
         }
 
