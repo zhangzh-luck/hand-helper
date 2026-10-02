@@ -66,6 +66,7 @@ def test_api_auth_and_local_file_import():
     with TestClient(app) as client:
         assert client.get("/api/v1/grades").status_code == 401
         assert client.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"}).status_code == 401
+        assert client.post("/api/v1/auth/login", json={"username": "非ASCII用户", "password": "wrong"}).status_code == 401
         headers = login_headers(client)
         assert client.get("/api/v1/auth/me").json()["data"] == {"authenticated": True, "username": "admin"}
         assert client.get("/api/v1/profile", headers=headers).json()["data"]["display_name"] == "张自航"

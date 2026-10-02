@@ -148,7 +148,12 @@ async def app_login(body: LoginRequest, request: Request, db: AsyncSession = Dep
     # Always verify the configured hash, even for a wrong username, to keep the
     # public failure path uniform and avoid making account existence observable.
     valid_password = verify_admin_password(body.password)
-    if not secrets.compare_digest(username, settings.admin_username) or not valid_password:
+    # compare_digest() only accepts ASCII str values.  Compare UTF-8 bytes so a
+    # malformed/non-ASCII login name remains an ordinary 401 rather than 500.
+    username_matches = secrets.compare_digest(
+        username.encode("utf-8"), settings.admin_username.encode("utf-8")
+    )
+    if not username_matches or not valid_password:
         login_rate_limiter.record_failure(remote, username)
         raise HTTPException(401, "用户名或密码错误")
     login_rate_limiter.clear(remote, username)

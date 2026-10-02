@@ -6,7 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import Cropper, { type Area } from 'react-easy-crop';
 import { Award, BookOpen, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, Database, Eye, EyeOff, FileText, GraduationCap, Home, Info, KeyRound, LockKeyhole, MapPin, Monitor, Moon, Palette, Pencil, Plus, RotateCcw, Settings as SettingsIcon, Smartphone, Sparkles, Sun, Trash2, Upload, UserRound, X } from 'lucide-react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { api, AiProviderSettingInput, CustomSchedule, CustomScheduleInput, Grade, GradeAiAnalysis, GradeAiAnalysisHistory, GradeImportPreview, ManualCourseInput, PasskeyCredential, PeriodTime, Profile, ProfileUpdate, Session, Term } from './api';
+import { api, ConnectionError, UnauthorizedError, AiProviderSettingInput, CustomSchedule, CustomScheduleInput, Grade, GradeAiAnalysis, GradeAiAnalysisHistory, GradeImportPreview, ManualCourseInput, PasskeyCredential, PeriodTime, Profile, ProfileUpdate, Session, Term } from './api';
 import { updateNativeStatusBar } from './native-runtime';
 import { createPasskeyCredential, getPasskeyAssertion, passkeySupported } from './passkeys';
 import { TimetableStage } from './timetable/TimetableStage';
@@ -195,9 +195,10 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   const retryPageData = () => { void Promise.all([sessions.refetch(), profile.refetch(), customSchedules.refetch()]); };
   if (loading) return <TodayBackendLoading appearance={appearance} />;
   if (pageError) return <TodayBackendLoadError appearance={appearance} error={pageError} onRetry={retryPageData} />;
-  return <main className={`today-page${appearance === 'dark' ? ' today-page-dark' : ''}`}>
+  return <main className={`today-page${appearance === 'dark' ? ' today-page-dark' : ''}${profile.data?.timetable_background_data_url ? ' today-page-with-wallpaper' : ''}`}>
+    {profile.data?.timetable_background_data_url && <div className="today-wallpaper" aria-hidden="true" style={{ backgroundImage: `url("${profile.data.timetable_background_data_url}")` }} />}
     <section className="today-hero">{profile.data?.avatar_data_url && <><div className="hero-avatar-background" aria-hidden="true" style={{ backgroundImage: `url(${profile.data.avatar_data_url})` }} /><div className="hero-avatar-overlay" aria-hidden="true" /></>}<div className="today-hero-content"><p className="today-kicker">今日 · {greetingForHour(now.getHours())}</p><h1>{name}</h1><p className="today-date">{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p></div>{profile.data?.avatar_data_url ? <button type="button" className="avatar-preview-trigger" aria-label={`预览${name}的头像`} onClick={() => setAvatarPreviewOpen(true)}><Avatar profile={profile.data} /></button> : <Avatar profile={profile.data} />}</section>
-    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2><button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={setDeletingSchedule} /> : null}</section>
+    <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2>{Boolean(customSchedules.data?.length) && <span className="today-schedule-count">今天有 {customSchedules.data?.length} 项自定义安排</span>}<button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={setDeletingSchedule} /> : null}</section>
     {editingSchedule && <ViewportSheetPortal><CustomScheduleSheetV2 schedule={editingSchedule === 'new' ? undefined : editingSchedule} initialDate={today} pending={saveSchedule.isPending} error={saveSchedule.error} onClose={() => setEditingSchedule(null)} onSave={(payload) => saveSchedule.mutate(payload)} /></ViewportSheetPortal>}
     {deletingSchedule && <ViewportSheetPortal><ConfirmDialog title={`删除“${deletingSchedule.title}”？`} description="删除后无法恢复这项自定义安排。" confirmLabel="删除安排" pending={deleteSchedule.isPending} onCancel={() => setDeletingSchedule(null)} onConfirm={() => deleteSchedule.mutate(deletingSchedule.id)} /></ViewportSheetPortal>}
     {avatarPreviewOpen && profile.data?.avatar_data_url && <AvatarPreviewSheet name={name} src={profile.data.avatar_data_url} dark={appearance === 'dark'} onClose={() => setAvatarPreviewOpen(false)} />}
@@ -215,20 +216,16 @@ function TodayBackendLoadError({ appearance, error, onRetry }: { appearance: 'li
 function greetingForHour(hour: number) { if (hour < 10) return '早上好'; if (hour < 14) return '中午好'; if (hour < 18) return '下午好'; return '晚上好'; }
 function Avatar({ profile, className = '' }: { profile: Profile | undefined; className?: string }) { const name = profile?.display_name ?? '张自航'; return <div className={`user-avatar ${className}`}>{profile?.avatar_data_url ? <img src={profile.avatar_data_url} alt={`${name}的头像`} /> : <span>{name.slice(-1)}</span>}</div>; }
 function AvatarPreviewSheet({ name, src, dark, onClose }: { name: string; src: string; dark: boolean; onClose: () => void }) {
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [onClose]);
+  useModalOpenState(onClose);
   return createPortal(<div className={`sheet-mask sheet-mask-viewport avatar-preview-mask${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={onClose}><div className="avatar-preview-dialog" role="dialog" aria-modal="true" aria-label={`${name}的头像预览`} onClick={(event) => event.stopPropagation()}><section className="avatar-preview-sheet"><div className="sheet-handle" /><div className="avatar-preview-image-frame"><img src={src} alt={`${name}的头像大图`} /></div></section><button type="button" className="avatar-preview-dismiss" aria-label="关闭头像预览" title="关闭" onClick={onClose}><X size={20} /></button></div></div>, document.body);
 }
 
 function AvatarCropSheet({ source, dark, onClose, onConfirm }: { source: string; dark: boolean; onClose: () => void; onConfirm: (avatar: string) => void }) {
-  useModalOpenState();
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [area, setArea] = useState<Area | null>(null);
   const [processing, setProcessing] = useState(false);
+  useModalOpenState(onClose, processing);
   const [error, setError] = useState<string | null>(null);
   const confirmCrop = async () => {
     if (!area) return;
@@ -245,11 +242,11 @@ function AvatarCropSheet({ source, dark, onClose, onConfirm }: { source: string;
 }
 
 function TimetableBackgroundCropSheet({ source, dark, onClose, onConfirm }: { source: string; dark: boolean; onClose: () => void; onConfirm: (background: string) => void }) {
-  useModalOpenState();
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [area, setArea] = useState<Area | null>(null);
   const [processing, setProcessing] = useState(false);
+  useModalOpenState(onClose, processing);
   const [error, setError] = useState<string | null>(null);
   const confirmCrop = async () => {
     if (!area) return;
@@ -287,6 +284,7 @@ function SwipeableCustomScheduleCard({ schedule, open, onOpenChange, onEdit, onD
       if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 7) return;
       currentGesture.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
       if (currentGesture.axis === 'horizontal') setDragging(true);
+      else if (open) onOpenChange(false);
     }
     if (currentGesture.axis !== 'horizontal') return;
     event.preventDefault();
@@ -302,7 +300,7 @@ function SwipeableCustomScheduleCard({ schedule, open, onOpenChange, onEdit, onD
     gesture.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return <article className={`custom-schedule-swipe${open ? ' is-open' : ''}`}>
+  return <article className={`custom-schedule-swipe${open ? ' is-open' : ''}${dragging ? ' is-dragging' : ''}`} style={{ '--swipe-reveal': `${Math.max(0, -translateX)}px` } as CSSProperties}>
     <div className="custom-schedule-swipe-actions" aria-hidden={!open}>
       <button type="button" className="custom-schedule-swipe-edit" tabIndex={open ? 0 : -1} onClick={() => { onOpenChange(false); onEdit(schedule); }}>编辑</button>
       <button type="button" className="custom-schedule-swipe-delete" tabIndex={open ? 0 : -1} onClick={() => { onOpenChange(false); onDelete(schedule); }}>删除</button>
@@ -322,12 +320,14 @@ function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session
     const timeline = timelineRef.current;
     const scrollContainer = timeline?.closest('main');
     const closeSwipeActions = () => setOpenScheduleId(null);
+    timeline?.addEventListener('scroll', closeSwipeActions, { passive: true });
     scrollContainer?.addEventListener('scroll', closeSwipeActions, { passive: true });
     const closeWhenPressingOutside = (event: PointerEvent) => {
       if (timeline && event.target instanceof Node && !timeline.contains(event.target)) closeSwipeActions();
     };
     document.addEventListener('pointerdown', closeWhenPressingOutside, true);
     return () => {
+      timeline?.removeEventListener('scroll', closeSwipeActions);
       scrollContainer?.removeEventListener('scroll', closeSwipeActions);
       document.removeEventListener('pointerdown', closeWhenPressingOutside, true);
     };
@@ -339,7 +339,7 @@ function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session
     ...sessions.map((session) => ({ type: 'course' as const, sortTime: formatTime(session.start_datetime), session })),
     ...schedules.map((schedule) => ({ type: 'custom' as const, sortTime: schedule.scheduled_time, schedule })),
   ].sort((left, right) => left.sortTime.localeCompare(right.sortTime));
-  return <><section className="today-status"><b>{status}</b></section><div ref={timelineRef} className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <SwipeableCustomScheduleCard key={`custom-${entry.schedule.id}`} schedule={entry.schedule} open={openScheduleId === entry.schedule.id} onOpenChange={(open) => setOpenScheduleId(open ? entry.schedule.id : null)} onEdit={onEdit} onDelete={onDelete} />)}</div></>;
+  return <>{(active || upcoming || !schedules.length) && <section className="today-status"><b>{status}</b></section>}<div ref={timelineRef} className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <SwipeableCustomScheduleCard key={`custom-${entry.schedule.id}`} schedule={entry.schedule} open={openScheduleId === entry.schedule.id} onOpenChange={(open) => setOpenScheduleId(open ? entry.schedule.id : null)} onEdit={onEdit} onDelete={onDelete} />)}</div></>;
 }
 
 function formatScheduleDate(value: string) {
@@ -348,7 +348,7 @@ function formatScheduleDate(value: string) {
 }
 
 function CustomScheduleSheetV2({ schedule, initialDate, pending, error, onClose, onSave }: { schedule?: CustomSchedule; initialDate: string; pending: boolean; error: Error | null; onClose: () => void; onSave: (payload: CustomScheduleInput) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [title, setTitle] = useState(schedule?.title ?? '');
   const [scheduledDate, setScheduledDate] = useState(schedule?.scheduled_date ?? initialDate);
   const [scheduledTime, setScheduledTime] = useState(schedule?.scheduled_time ?? '09:00');
@@ -362,7 +362,7 @@ function CustomScheduleSheetV2({ schedule, initialDate, pending, error, onClose,
 }
 
 function GradeImportSheet({ preview, pending, error, onClose, onConfirm }: { preview: GradeImportPreview; pending: boolean; error: Error | null; onClose: () => void; onConfirm: (preview: GradeImportPreview) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [items, setItems] = useState(preview.grades);
   useEffect(() => setItems(preview.grades), [preview]);
   const updateItem = (index: number, key: 'course_name' | 'score' | 'credits' | 'grade_point', value: string) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'credits' || key === 'grade_point' ? (value.trim() ? Number(value) : null) : value } : item));
@@ -762,7 +762,7 @@ function SwipeablePasskeyCredentialRow({ credential, open, onOpenChange, onRemov
 }
 
 function PasskeyRegistrationSheet({ pending, error, onClose, onSubmit }: { pending: boolean; error: Error | null; onClose: () => void; onSubmit: (payload: { label: string; password: string }) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [label, setLabel] = useState('此设备');
   const [password, setPassword] = useState('');
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -773,7 +773,7 @@ function PasskeyRegistrationSheet({ pending, error, onClose, onSubmit }: { pendi
 }
 
 function PasskeyRemovalSheet({ credential, pending, error, onClose, onSubmit }: { credential: PasskeyCredential; pending: boolean; error: Error | null; onClose: () => void; onSubmit: (password: string) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [password, setPassword] = useState('');
   return <ViewportSheetPortal><div className="sheet-mask sheet-mask-viewport passkey-registration-mask" role="presentation" onClick={pending ? undefined : onClose}><section className="detail-sheet passkey-registration-sheet passkey-removal-sheet" role="dialog" aria-modal="true" aria-labelledby="passkey-removal-title" onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><header><div><h2 id="passkey-removal-title">移除“{credential.label}”</h2><p>移除后，这台设备将不能再使用此通行密钥登录。</p></div><button type="button" className="sheet-close-icon" aria-label="关闭移除通行密钥" title="关闭" disabled={pending} onClick={onClose}><X size={20} /></button></header><form onSubmit={(event) => { event.preventDefault(); onSubmit(password); }}><div className="passkey-registration-group"><label><span>当前密码</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label></div><p className="passkey-registration-note">为保护账号安全，移除已登记的通行密钥前需要再次验证当前密码。</p>{error && <p className="passkey-registration-error" role="alert">{error.message}</p>}<div className="passkey-registration-actions"><button type="button" className="secondary-button" disabled={pending} onClick={onClose}>取消</button><button type="submit" className="passkey-removal-confirm" disabled={pending}>{pending ? '正在移除…' : '确认移除'}</button></div></form></section></div></ViewportSheetPortal>;
 }
@@ -1099,7 +1099,7 @@ function PeriodTimeSettings({ periods, period, onSelectPeriod, onSaved }: { peri
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div><small>{label}</small><b>{value}</b></div>; }
 function ManualCourseSheet({ initial, periods, pending, error, editing, onClose, onSave }: { initial: ManualCourseInput; periods: PeriodTime[]; pending: boolean; error: Error | null; editing: boolean; onClose: () => void; onSave: (payload: ManualCourseInput) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [courseName, setCourseName] = useState(initial.course_name);
   const [weekExpression, setWeekExpression] = useState(initial.week_expression);
   const [weekday, setWeekday] = useState(initial.weekday);
@@ -1132,7 +1132,7 @@ function manualCourseWeekExpression(weeks: Iterable<number>) {
 }
 
 function ManualWeekPicker({ selected, onClose, onConfirm, dark = false }: { selected: Set<number>; onClose: () => void; onConfirm: (weeks: Set<number>) => void; dark?: boolean }) {
-  useModalOpenState();
+  useModalOpenState(onClose);
   const [draft, setDraft] = useState(() => new Set(selected));
   const [notice, setNotice] = useState<string | null>(null);
   const setPattern = (weeks: number[]) => { setDraft(new Set(weeks)); setNotice(null); };
@@ -1154,7 +1154,7 @@ function ManualWeekPicker({ selected, onClose, onConfirm, dark = false }: { sele
 }
 
 function ManualCourseSheetV2({ initial, periods, pending, error, editing, dark = false, onClose, onSave }: { initial: ManualCourseInput; periods: PeriodTime[]; pending: boolean; error: Error | null; editing: boolean; dark?: boolean; onClose: () => void; onSave: (payload: ManualCourseInput) => void }) {
-  useModalOpenState();
+  useModalOpenState(onClose, pending);
   const [courseName, setCourseName] = useState(initial.course_name);
   const [selectedWeeks, setSelectedWeeks] = useState(() => new Set(parseManualCourseWeeks(initial.week_expression)));
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
@@ -1193,19 +1193,73 @@ function ManualCourseTextSheet({ kind, value, dark, onClose, onConfirm }: { kind
   return <DetailSheet title={title} dark={dark} onClose={onClose}><form className="manual-course-text-editor" onSubmit={(event) => { event.preventDefault(); if (changed) onConfirm(normalizedValue); }}><label>{title}<input aria-label={title} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={255} autoFocus placeholder="可留空" /></label><small>可留空，保存课程时会一并写入。</small><div className="custom-schedule-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" disabled={!changed}>完成编辑</button></div></form></DetailSheet>;
 }
 
-let modalOpenCount = 0;
+let nextModalId = 0;
+const modalStack: number[] = [];
+const modalHistoryKey = '__handHelperModal';
+const modalSelector = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
 
-function useModalOpenState() {
+function useModalOpenState(onClose: () => void, pending = false) {
+  const id = useRef(++nextModalId).current;
+  const closeRef = useRef(onClose);
+  const pendingRef = useRef(pending);
+  closeRef.current = onClose;
+  pendingRef.current = pending;
   useEffect(() => {
-    modalOpenCount += 1;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modalStack.push(id);
     document.documentElement.dataset.modalOpen = 'true';
-    return () => {
-      modalOpenCount = Math.max(0, modalOpenCount - 1);
-      if (!modalOpenCount) {
-        delete document.documentElement.dataset.modalOpen;
+    const top = () => modalStack[modalStack.length - 1] === id;
+    const dialog = () => [...document.querySelectorAll<HTMLElement>(modalSelector)].at(-1);
+    const focusTimer = window.setTimeout(() => {
+      if (!top()) return;
+      const current = dialog();
+      if (!current || current.contains(document.activeElement)) return;
+      current.tabIndex = -1;
+      (current.querySelector<HTMLElement>('[autofocus]') ?? current.querySelector<HTMLElement>(focusableSelector) ?? current).focus({ preventScroll: true });
+    }, 0);
+    // 独立历史项使浏览器或 WebView 的返回手势先收起弹窗，不离开当前页面。
+    const historyTimer = window.setTimeout(() => {
+      const state = typeof window.history.state === 'object' && window.history.state !== null ? window.history.state : {};
+      window.history.pushState({ ...state, [modalHistoryKey]: id }, '');
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!top()) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!pendingRef.current) closeRef.current();
+        return;
       }
+      if (event.key !== 'Tab') return;
+      const current = dialog();
+      if (!current) return;
+      const items = [...current.querySelectorAll<HTMLElement>(focusableSelector)].filter((item) => item.getClientRects().length > 0);
+      if (!items.length) { event.preventDefault(); current.focus(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !current.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !current.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
     };
-  }, []);
+    const onPopState = () => {
+      if (!top() || window.history.state?.[modalHistoryKey] === id) return;
+      if (pendingRef.current) {
+        window.history.pushState({ ...(window.history.state ?? {}), [modalHistoryKey]: id }, '');
+      } else closeRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(historyTimer);
+      document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('popstate', onPopState);
+      const index = modalStack.lastIndexOf(id);
+      if (index >= 0) modalStack.splice(index, 1);
+      if (!modalStack.length) delete document.documentElement.dataset.modalOpen;
+      if (window.history.state?.[modalHistoryKey] === id) window.history.back();
+      window.setTimeout(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, 0);
+    };
+  }, [id]);
 }
 
 function ViewportSheetPortal({ children }: { children: React.ReactNode }) {
@@ -1217,11 +1271,11 @@ function IconDetailRow({ icon, label, value }: { icon: React.ReactNode; label: s
   return <div className="icon-detail-row"><span className="icon-detail-icon" aria-hidden="true">{icon}</span><span className="icon-detail-copy"><small>{label}</small><span>{value}</span></span></div>;
 }
 function DetailSheet({ title, children, onClose, dark = false, showHandle = true, eyebrow, showTitle = true, className = '' }: { title: string; children: React.ReactNode; onClose: () => void; dark?: boolean; showHandle?: boolean; eyebrow?: string; showTitle?: boolean; className?: string }) {
-  useModalOpenState();
+  useModalOpenState(onClose);
   return createPortal(<div className={`sheet-mask sheet-mask-viewport${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={onClose}><section className={`detail-sheet${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>{showHandle && <div className="sheet-handle" />}<header>{eyebrow ? <div className="detail-sheet-heading"><small>{eyebrow}</small>{showTitle ? <h2>{title}</h2> : <h2 className="detail-sheet-visually-hidden">{title}</h2>}</div> : <h2>{title}</h2>}<button type="button" className="sheet-close-icon" aria-label="关闭详情" title="关闭" onClick={onClose}><X size={20} /></button></header>{children}</section></div>, document.body);
 }
 function ConfirmDialog({ title, description, confirmLabel, pending, onCancel, onConfirm }: { title: string; description: string; confirmLabel: string; pending: boolean; onCancel: () => void; onConfirm: () => void }) {
-  useModalOpenState();
+  useModalOpenState(onCancel, pending);
   return <div className="sheet-mask confirm-mask" role="presentation" onClick={pending ? undefined : onCancel}><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-description" onClick={(event) => event.stopPropagation()}><div className="confirm-dialog-copy"><h2 id="confirm-dialog-title">{title}</h2><p id="confirm-dialog-description">{description}</p></div><div className="confirm-dialog-actions"><button type="button" className="confirm-dialog-destructive" disabled={pending} onClick={onConfirm}>{pending ? '正在处理…' : confirmLabel}</button><button type="button" className="confirm-dialog-cancel" disabled={pending} onClick={onCancel}>取消</button></div></section></div>;
 }
 function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
@@ -1287,6 +1341,19 @@ function AuthGateLoading() {
   </main>;
 }
 
+function AuthGateConnectionError({ onRetry }: { onRetry: () => void }) {
+  useAuthenticationViewportLock();
+  return <main className="login login-native-page" role="alert">
+    <section className="login-native-shell login-native-checking-shell">
+      <div className="login-native-checking-status">
+        <div className="login-logo"><img src="/pwa-192.png" alt="航的助手" width="76" height="76" /></div>
+        <p>暂时无法连接服务器，请检查网络后重试。</p>
+        <button type="button" className="login-btn auth-retry-button" onClick={onRetry}>重试连接</button>
+      </div>
+    </section>
+  </main>;
+}
+
 const PRIMARY_ROUTE_ORDER = ['/', '/timetable', '/grades', '/settings'];
 
 function primaryRouteIndex(pathname: string) {
@@ -1330,7 +1397,7 @@ function PrimaryRouteTransition({ appearanceMode, resolvedAppearanceMode, onAppe
 }
 
 export default function App() {
-  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
+  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated' | 'connection-error'>('checking');
   const navigate = useNavigate();
   const location = useLocation();
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(savedAppearanceMode);
@@ -1346,11 +1413,19 @@ export default function App() {
     );
     void updateNativeStatusBar(resolvedAppearanceMode);
   }, [resolvedAppearanceMode]);
+  const checkAuthentication = () => {
+    setAuthState('checking');
+    void api.me().then(() => setAuthState('authenticated')).catch((error: unknown) => {
+      setAuthState(error instanceof UnauthorizedError ? 'unauthenticated' : 'connection-error');
+    });
+  };
   useEffect(() => {
     let active = true;
     const markUnauthenticated = () => { if (active) setAuthState('unauthenticated'); };
     window.addEventListener('hand-helper:unauthenticated', markUnauthenticated);
-    void api.me().then(() => { if (active) setAuthState('authenticated'); }).catch(markUnauthenticated);
+    void api.me().then(() => { if (active) setAuthState('authenticated'); }).catch((error: unknown) => {
+      if (active) setAuthState(error instanceof UnauthorizedError ? 'unauthenticated' : 'connection-error');
+    });
     return () => { active = false; window.removeEventListener('hand-helper:unauthenticated', markUnauthenticated); };
   }, []);
   useEffect(() => {
@@ -1396,6 +1471,7 @@ export default function App() {
     };
   }, []);
   if (authState === 'checking') return <AuthGateLoading />;
+  if (authState === 'connection-error') return <AuthGateConnectionError onRetry={checkAuthentication} />;
   if (authState === 'unauthenticated') return <><NativeStartupNotice /><Routes><Route path="/login" element={<Login appearance={resolvedAppearanceMode} onToggleAppearance={() => setAppearanceMode(resolvedAppearanceMode === 'dark' ? 'light' : 'dark')} onSuccess={() => { setAuthState('authenticated'); navigate('/', { replace: true }); }} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></>;
   if (location.pathname === '/login') return <Navigate to="/" replace />;
   return <div className="shell"><NativeStartupNotice /><NetworkNotice /><PrimaryRouteTransition appearanceMode={appearanceMode} resolvedAppearanceMode={resolvedAppearanceMode} onAppearanceModeChange={setAppearanceMode} layoutMode={layoutMode} onLayoutModeChange={setLayoutMode} /><BottomNav appearance={resolvedAppearanceMode} /></div>;
@@ -1416,17 +1492,33 @@ function NativeStartupNotice() {
 
 function NetworkNotice() {
   const [online, setOnline] = useState(() => navigator.onLine);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const queryClient = useQueryClient();
   useEffect(() => {
     const markOnline = () => setOnline(true);
     const markOffline = () => setOnline(false);
+    const markFailed = () => setConnectionFailed(true);
+    const markRestored = () => setConnectionFailed(false);
     window.addEventListener('online', markOnline);
     window.addEventListener('offline', markOffline);
+    window.addEventListener('hand-helper:connection-failed', markFailed);
+    window.addEventListener('hand-helper:connection-restored', markRestored);
     return () => {
       window.removeEventListener('online', markOnline);
       window.removeEventListener('offline', markOffline);
+      window.removeEventListener('hand-helper:connection-failed', markFailed);
+      window.removeEventListener('hand-helper:connection-restored', markRestored);
     };
   }, []);
-  return online ? null : <div className="native-offline-banner" role="status">当前离线，已缓存的数据仍可查看。</div>;
+  if (online && !connectionFailed) return null;
+  const retry = async () => {
+    setRetrying(true);
+    try { await api.me(); await queryClient.invalidateQueries(); }
+    catch (error) { if (!(error instanceof ConnectionError)) setConnectionFailed(false); }
+    finally { setRetrying(false); }
+  };
+  return <div className="native-offline-banner" role="status"><span>{online ? '暂时无法连接服务器。' : '当前离线，操作暂不可用。'}</span><button type="button" disabled={!online || retrying} onClick={() => void retry()}>{retrying ? '连接中…' : '重试'}</button></div>;
 }
 
 function BottomNav({ appearance }: { appearance: 'light' | 'dark' }) {

@@ -129,7 +129,10 @@ html.capacitor-native body,
 html.capacitor-native #root { min-height:100%; background:#f4f7fb; }
 html.capacitor-native .shell { min-height:100dvh; }
 html.capacitor-native .page-route-stage > main { -webkit-overflow-scrolling:touch; }
-.native-offline-banner { position:fixed; z-index:40; top:8px; left:50%; max-width:calc(100% - 32px); padding:8px 12px; border-radius:999px; transform:translateX(-50%); background:#92400e; color:#fff; font-size:13px; box-shadow:0 4px 12px rgb(15 23 42 / 18%); }
+.native-offline-banner { position:fixed; z-index:40; top:calc(env(safe-area-inset-top, 0px) + 8px); left:50%; max-width:calc(100% - 32px); padding:8px 12px; border-radius:999px; transform:translateX(-50%); background:#92400e; color:#fff; font-size:13px; box-shadow:0 4px 12px rgb(15 23 42 / 18%); }
+.native-offline-banner { display:flex; align-items:center; gap:10px; white-space:nowrap; }
+.native-offline-banner button { border:0; border-radius:999px; padding:4px 9px; background:rgb(255 255 255 / 22%); color:inherit; font:inherit; font-weight:700; }
+.native-offline-banner button:disabled { opacity:.6; }
 html[data-appearance="dark"].capacitor-native,
 html[data-appearance="dark"].capacitor-native body,
 html[data-appearance="dark"].capacitor-native #root { background:#000000; }
@@ -521,6 +524,29 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
 .glass-nav.nav-dark .nav-home-avatar { border-color:rgb(255 255 255 / 42%); box-shadow:0 1px 4px rgb(0 0 0 / 30%); }
 
 /* 今日卡片使用“控制中心盖在主屏幕上”的真实磨砂逻辑：头像本身是背景，不额外染成蓝紫色。 */
+.today-page { position:relative; isolation:isolate; }
+.today-wallpaper {
+  display:none;
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background-position:center 45%;
+  background-size:cover;
+  opacity:.38;
+  filter:saturate(.88) brightness(1.06);
+  -webkit-mask-image:linear-gradient(to bottom,transparent 16%,#000 39%,#000 75%,transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 16%,#000 39%,#000 75%,transparent 100%);
+}
+.today-page > .today-hero,
+.today-page > .today-content { position:relative; z-index:1; }
+.today-page-dark .today-wallpaper { opacity:.3; filter:saturate(.72) brightness(.58); }
+@media (max-width:899px) {
+  html:not([data-layout='desktop']) .today-wallpaper { display:block; }
+}
+@media (min-width:900px) {
+  html[data-layout='mobile'] .today-wallpaper { display:block; }
+}
 .today-hero {
   min-height:158px;
   border:1px solid rgb(15 23 42 / 6%);
@@ -1125,7 +1151,11 @@ button.ai-settings-row { cursor:pointer; transition:background-color .16s ease; 
 .glass-nav.four-nav .nav-active-pill { top:var(--dock-inset); right:auto; bottom:var(--dock-inset); left:var(--dock-inset); width:calc((100% - var(--dock-inset) - var(--dock-inset)) / 4); height:auto; transform:translateX(var(--nav-active-offset,0%)); }
 /* 今日页：课程与个人安排合并展示，个人安排的时间只负责当天排序。 */
 .today-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.today-section-heading h2 { margin:0; }
+.today-section-heading h2 { flex:none; margin:0; white-space:nowrap; }
+.today-schedule-count { flex:0 1 auto; min-width:0; overflow:hidden; border:1px solid rgb(147 197 253 / 28%); border-radius:999px; padding:6px 9px; background:rgb(219 234 254 / 64%); color:#1d4ed8; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+.today-page-dark .today-schedule-count { border-color:rgb(105 173 255 / 22%); background:rgb(105 173 255 / 13%); color:#9bc3ff; }
+.today-section-heading .add-schedule-button { flex:none; margin-left:auto; }
+.today-section-heading + .stack { margin-top:12px; }
 .add-schedule-button { display:inline-flex; align-items:center; gap:4px; min-height:34px; padding:6px 9px; border:1px solid rgb(147 197 253 / 30%); border-radius:10px; background:rgb(219 234 254 / 46%); color:#2563eb; box-shadow:inset 0 1px rgb(255 255 255 / 52%); font-size:13px; white-space:nowrap; }
 .custom-schedule-card { gap:7px; border:1px solid #dbeafe; background:linear-gradient(135deg,#f8fbff,#eef5ff); }
 .custom-schedule-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -1138,7 +1168,9 @@ button.ai-settings-row { cursor:pointer; transition:background-color .16s ease; 
 .custom-schedule-card.is-dragging { transition:none; }
 @media (hover:none) and (pointer:coarse) {
   .custom-schedule-swipe { min-height:144px; overflow:hidden; border-radius:16px; touch-action:pan-y; -webkit-user-select:none; user-select:none; }
-  .custom-schedule-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; width:168px; overflow:hidden; border-radius:16px; }
+  .custom-schedule-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; width:168px; overflow:hidden; border-radius:16px; clip-path:inset(0 0 0 calc(168px - var(--swipe-reveal, 0px))); pointer-events:none; transition:clip-path 220ms cubic-bezier(.2,.78,.22,1); }
+  .custom-schedule-swipe.is-dragging .custom-schedule-swipe-actions { transition:none; }
+  .custom-schedule-swipe.is-open .custom-schedule-swipe-actions { pointer-events:auto; }
   .custom-schedule-swipe-actions button { width:84px; min-height:100%; border:0; border-radius:0; color:#fff; font:650 15px/1 inherit; }
   .custom-schedule-swipe-edit { background:#8e8e93; }
   .custom-schedule-swipe-delete { background:#ff3b30; }
@@ -2166,6 +2198,71 @@ html[data-appearance='dark'] .today-page-dark .today-entry-card.current-course {
   box-shadow:0 0 0 4px rgb(10 132 255 / 18%),0 8px 22px rgb(0 0 0 / 24%),inset 0 1px rgb(255 255 255 / 5%);
 }
 
+/* 只在窄屏且已设置壁纸时，让首页日程卡透出少量背景；文字本身保持不透明。 */
+@media (max-width:899px) {
+  html:not([data-layout='desktop']) .today-page-with-wallpaper .today-content .today-course-card {
+    border-color:rgb(255 255 255 / 68%);
+    background:linear-gradient(135deg,rgb(255 255 255 / 80%),rgb(247 250 255 / 70%));
+    box-shadow:0 8px 22px rgb(15 23 42 / 8%),inset 0 1px rgb(255 255 255 / 70%);
+    backdrop-filter:blur(12px) saturate(112%);
+    -webkit-backdrop-filter:blur(12px) saturate(112%);
+  }
+  html:not([data-layout='desktop']) .today-page-with-wallpaper .today-content .custom-schedule-card {
+    border-color:rgb(219 234 254 / 75%);
+    background:linear-gradient(135deg,rgb(248 251 255 / 78%),rgb(232 242 255 / 70%));
+    box-shadow:0 8px 22px rgb(15 23 42 / 8%),inset 0 1px rgb(255 255 255 / 70%);
+    backdrop-filter:blur(12px) saturate(112%);
+    -webkit-backdrop-filter:blur(12px) saturate(112%);
+  }
+  html[data-appearance='dark']:not([data-layout='desktop']) .today-page-with-wallpaper .today-content .today-entry-card.card {
+    border-color:rgb(255 255 255 / 13%);
+    background:rgb(20 20 22 / 76%);
+    box-shadow:0 8px 22px rgb(0 0 0 / 24%),inset 0 1px rgb(255 255 255 / 8%);
+  }
+  /* 手势移动或操作按钮露出时用实底，防止灰色／红色操作区从卡片背后透出。 */
+  html:not([data-layout='desktop']) .today-page-with-wallpaper .custom-schedule-swipe.is-open > .custom-schedule-card,
+  html:not([data-layout='desktop']) .today-page-with-wallpaper .custom-schedule-card.is-dragging {
+    background:linear-gradient(135deg,#f8fbff,#eef5ff);
+    backdrop-filter:none;
+    -webkit-backdrop-filter:none;
+  }
+  html[data-appearance='dark']:not([data-layout='desktop']) .today-page-with-wallpaper .custom-schedule-swipe.is-open > .custom-schedule-card,
+  html[data-appearance='dark']:not([data-layout='desktop']) .today-page-with-wallpaper .custom-schedule-card.is-dragging {
+    background:#141416;
+  }
+}
+
+/* 手机端首页保持欢迎区与壁纸静止，仅日程卡片列表在剩余空间内滚动。 */
+@media (max-width:899px) {
+  html:not([data-layout='desktop']) .page-route-stage > main.today-page {
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto minmax(0,1fr);
+    align-content:stretch;
+    overflow:hidden;
+    padding-bottom:14px;
+  }
+  html:not([data-layout='desktop']) .today-page > .today-hero { align-self:start; }
+  html:not([data-layout='desktop']) .today-page > .today-content {
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+  }
+  html:not([data-layout='desktop']) .today-page .today-section-heading,
+  html:not([data-layout='desktop']) .today-page .today-status { flex:none; }
+  html:not([data-layout='desktop']) .today-page .today-content .stack {
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    align-content:start;
+    grid-auto-rows:max-content;
+    overscroll-behavior-y:contain;
+    -webkit-overflow-scrolling:touch;
+    padding:2px 4px 12px;
+    margin-inline:-4px;
+  }
+}
+
 /* 课程详情保留紧凑的右上关闭入口，并以标题层级平衡视觉重心。 */
 .detail-sheet-with-eyebrow header .sheet-close-icon {
   flex-basis:40px;
@@ -2241,6 +2338,7 @@ html[data-appearance='dark'] .detail-sheet-with-eyebrow .detail-sheet-heading > 
 .login-native-checking-shell { align-items:center; justify-content:center; }
 .login-native-checking-status { display:grid; justify-items:center; gap:18px; margin-top:-6vh; text-align:center; }
 .login-native-checking-status p { margin:0; color:#6b7d96; font-size:14px; font-weight:600; letter-spacing:.01em; }
+.auth-retry-button { width:auto; min-width:130px; padding-inline:25px; }
 .login-native-checking-spinner { width:21px; height:21px; border:2px solid rgb(10 132 255 / 18%); border-top-color:#0a84ff; border-radius:50%; animation:auth-loading-spin .7s linear infinite; }
 .login-native-footer { display:flex; align-items:center; justify-content:center; gap:7px; margin-top:auto; padding-top:32px; color:#94a3b8; font-size:12px; line-height:1.45; text-align:center; transform:translateY(20px); }
 .login-native-footer a { display:inline-flex; align-items:center; gap:4px; color:inherit; text-decoration:none; }
