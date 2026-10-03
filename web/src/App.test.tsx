@@ -47,7 +47,7 @@ describe('首页安排摘要', () => it('自定义安排数量显示在标题和
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     const data = url.endsWith('/api/v1/auth/me') ? { authenticated: true, username: 'admin' }
-      : url.endsWith('/api/v1/profile') ? { display_name: '测试用户', avatar_data_url: null, timetable_background_data_url: null }
+      : url.endsWith('/api/v1/profile') ? { display_name: '测试用户', avatar_data_url: null, timetable_background_data_url: null, home_wallpaper_data_url: null }
       : url.includes('/api/v1/custom-schedules') ? [{ id: 1, title: '测试安排', scheduled_date: '2026-10-02', scheduled_time: '09:00' }]
       : [];
     return new Response(JSON.stringify({ success: true, data }), { status: 200 });
@@ -58,6 +58,21 @@ describe('首页安排摘要', () => it('自定义安排数量显示在标题和
   expect(heading).toContainElement(screen.getByRole('heading', { name: '今日安排' }));
   expect(heading).toContainElement(screen.getByRole('button', { name: '添加安排' }));
   expect(container.querySelector('.today-status')).toBeNull();
+}));
+
+describe('首页壁纸', () => it('只读取独立首页壁纸，不复用课表背景', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const data = url.endsWith('/api/v1/auth/me') ? { authenticated: true, username: 'admin' }
+      : url.endsWith('/api/v1/profile') ? { display_name: '测试用户', avatar_data_url: null, timetable_background_data_url: 'data:image/png;base64,COURSE', home_wallpaper_data_url: 'data:image/png;base64,HOME' }
+      : [];
+    return new Response(JSON.stringify({ success: true, data }), { status: 200 });
+  }));
+  const { container } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/']}><App /></MemoryRouter></QueryClientProvider>);
+  const wallpaper = await screen.findByText('测试用户');
+  expect(wallpaper.closest('.today-page')).toHaveClass('today-page-with-wallpaper');
+  expect(container.querySelector('.today-wallpaper')).toHaveStyle({ backgroundImage: 'url("data:image/png;base64,HOME")' });
+  expect(container.querySelector('.today-wallpaper')?.getAttribute('style')).not.toContain('COURSE');
 }));
 
 describe('学期周次跳转', () => it('开学前点击下一周会直接跳至开学周', () => {
