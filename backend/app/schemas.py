@@ -48,10 +48,12 @@ class AppProfileOut(BaseModel):
     display_name: str
     avatar_data_url: str | None = None
     timetable_background_data_url: str | None = None
+    home_wallpaper_data_url: str | None = None
 class AppProfileInput(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
     avatar_data_url: str | None = Field(default=None, max_length=1_400_000)
     timetable_background_data_url: str | None = Field(default=None, max_length=1_400_000)
+    home_wallpaper_data_url: str | None = Field(default=None, max_length=1_400_000)
 class TermOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

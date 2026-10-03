@@ -74,6 +74,14 @@ def test_api_auth_and_local_file_import():
         assert profile.json()["data"]["display_name"] == "测试同学"
         background = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "timetable_background_data_url": avatar_data_url(720, 1280)})
         assert background.json()["data"]["timetable_background_data_url"] == avatar_data_url(720, 1280)
+        home_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "home_wallpaper_data_url": avatar_data_url(720, 1280)})
+        assert home_wallpaper.json()["data"]["home_wallpaper_data_url"] == avatar_data_url(720, 1280)
+        assert home_wallpaper.json()["data"]["timetable_background_data_url"] == avatar_data_url(720, 1280)
+        removed_home_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "home_wallpaper_data_url": None})
+        assert removed_home_wallpaper.json()["data"]["home_wallpaper_data_url"] is None
+        assert removed_home_wallpaper.json()["data"]["timetable_background_data_url"] == avatar_data_url(720, 1280)
+        invalid_home_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "home_wallpaper_data_url": avatar_data_url(640, 480)})
+        assert invalid_home_wallpaper.status_code == 422
         invalid_background = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "timetable_background_data_url": avatar_data_url(640, 480)})
         assert invalid_background.status_code == 422
         non_square_avatar = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(640, 480)})

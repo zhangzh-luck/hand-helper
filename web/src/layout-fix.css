@@ -527,7 +527,8 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
 .today-page { position:relative; isolation:isolate; }
 .today-wallpaper {
   display:none;
-  position:absolute;
+  /* 锚定在固定高度的路由视口，不随 main 或日程列表的滚动坐标移动。 */
+  position:fixed;
   inset:0;
   z-index:0;
   pointer-events:none;
@@ -2239,6 +2240,7 @@ html[data-appearance='dark'] .today-page-dark .today-entry-card.current-course {
     grid-template-rows:auto minmax(0,1fr);
     align-content:stretch;
     overflow:hidden;
+    overscroll-behavior-y:none;
     padding-bottom:14px;
   }
   html:not([data-layout='desktop']) .today-page > .today-hero { align-self:start; }
@@ -2260,6 +2262,30 @@ html[data-appearance='dark'] .today-page-dark .today-entry-card.current-course {
     -webkit-overflow-scrolling:touch;
     padding:2px 4px 12px;
     margin-inline:-4px;
+  }
+}
+
+@media (min-width:900px) {
+  html[data-layout='mobile'] .page-route-stage > main.today-page {
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto minmax(0,1fr);
+    align-content:stretch;
+    overflow:hidden;
+    overscroll-behavior-y:none;
+    padding-bottom:14px;
+  }
+  html[data-layout='mobile'] .today-page > .today-content {
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+  }
+  html[data-layout='mobile'] .today-page .today-content .stack {
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior-y:contain;
+    -webkit-overflow-scrolling:touch;
   }
 }
 
