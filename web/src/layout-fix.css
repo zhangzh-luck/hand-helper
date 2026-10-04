@@ -541,7 +541,7 @@ html[data-appearance='dark'] .settings-page-dark .profile-upload-button { border
 }
 .today-page > .today-hero,
 .today-page > .today-content { position:relative; z-index:1; }
-.today-page-dark .today-wallpaper { opacity:.3; filter:saturate(.72) brightness(.58); }
+.today-page-dark .today-wallpaper { opacity:.52; filter:saturate(.88) brightness(.84); }
 @media (max-width:899px) {
   html:not([data-layout='desktop']) .today-wallpaper { display:block; }
 }
@@ -866,7 +866,8 @@ html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-e
 .passkey-registration-actions button:disabled { cursor:wait; opacity:.58; }
 @media (hover:none) and (pointer:coarse) {
   .passkey-swipe-row { min-height:68px; overflow:hidden; touch-action:pan-y; -webkit-user-select:none; user-select:none; }
-  .passkey-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; width:84px; }
+  .passkey-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; width:84px; opacity:0; pointer-events:none; transition:opacity 0s linear 220ms; }
+  .passkey-swipe-row.is-revealed .passkey-swipe-actions { opacity:1; pointer-events:auto; transition-delay:0s; }
   .passkey-swipe-actions button { width:84px; border:0; border-radius:0; background:#ff3b30; color:#fff; font:650 14px/1 inherit; }
   .passkey-swipe-actions button:active { filter:brightness(.9); }
   .passkey-swipe-row > .passkey-credential-row { position:relative; z-index:1; width:100%; margin:0; background:#fff; touch-action:pan-y; transition:transform 220ms cubic-bezier(.2,.78,.22,1); }
@@ -887,8 +888,11 @@ html[data-avatar-preview="open"] .today-hero .avatar-preview-trigger { pointer-e
 .profile-settings-trailing { display:flex; min-width:0; align-items:center; justify-content:flex-end; gap:5px; color:#94a3b8; }
 .user-avatar.profile-settings-avatar { width:42px; height:42px; border-width:2px; background:#e7efff; color:#2563eb; font-size:17px; box-shadow:0 3px 8px rgb(37 99 235 / 14%); }
 .profile-settings-name { max-width:60%; color:#64748b; font-size:15px; line-height:1.35; }.profile-settings-name::first-line { overflow-wrap:anywhere; }
-.profile-settings-save { width:100%; min-height:46px; margin-top:2px; border:1px solid transparent; border-radius:14px; background:#007aff; color:#fff; font-size:15px; font-weight:700; box-shadow:none; transition:background .18s ease,color .18s ease,box-shadow .18s ease,border-color .18s ease; }
-.profile-settings-save:disabled { cursor:not-allowed; border-color:rgb(203 213 225 / 68%); background:rgb(226 232 240 / 52%); color:#94a3b8; box-shadow:none; opacity:1; }
+.profile-settings-save { position:relative; width:100%; min-height:54px; margin:0; border:0; border-radius:0; background:transparent; color:#007aff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:none; transition:background-color .18s ease,color .18s ease; }
+.profile-settings-save::before { position:absolute; top:0; right:0; left:0; height:1px; background:rgb(15 23 42 / 8%); content:""; pointer-events:none; }
+.profile-settings-save:active:not(:disabled) { background:rgb(0 122 255 / 7%); }
+.profile-settings-save:focus-visible { position:relative; z-index:1; box-shadow:inset 0 0 0 2px rgb(37 99 235 / 70%); }
+.profile-settings-save:disabled { cursor:default; background:transparent; color:#94a3b8; opacity:1; }
 .profile-settings-footer,.profile-settings-error { margin:0 2px; font-size:13px; line-height:1.48; }.profile-settings-footer { color:#64748b; }.profile-settings-error { color:#c3263f; }
 .profile-avatar-editor { display:grid; justify-items:center; gap:13px; padding:4px 0 2px; }.user-avatar.profile-avatar-editor-preview { width:82px; height:82px; border-width:3px; background:#e7efff; color:#2563eb; font-size:30px; }.profile-avatar-picker,.profile-avatar-remove { display:flex; width:100%; min-height:46px; align-items:center; justify-content:center; border:1px solid rgb(37 99 235 / 14%); border-radius:14px; background:#e9f0ff; color:#2563eb; font-size:15px; font-weight:700; cursor:pointer; }.profile-avatar-picker input { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }.profile-avatar-remove { border-color:rgb(255 59 48 / 16%); background:rgb(255 241 242 / 78%); color:#ff3b30; }.profile-avatar-editor small { color:#64748b; font-size:12px; line-height:1.5; text-align:center; }
 .timetable-background-editor { display:grid; justify-items:center; gap:13px; padding:4px 0 2px; }
@@ -924,7 +928,11 @@ button.ai-settings-row { cursor:pointer; transition:background-color .16s ease; 
 .ai-history-settings-section { margin-top:28px; }
 .ai-history-settings-section > .ai-settings-footer { margin-bottom:2px; }
 .ai-settings-page-footer { margin:30px 2px 0; color:#64748b; font-size:13px; line-height:1.48; }
-.ai-settings-save { width:100%; min-height:46px; margin-top:2px; border:1px solid transparent; border-radius:14px; background:#007aff; color:#fff; font-size:15px; font-weight:700; box-shadow:none; }.ai-settings-save:disabled { cursor:not-allowed; border-color:rgb(203 213 225 / 68%); background:rgb(226 232 240 / 52%); color:#94a3b8; box-shadow:none; }
+.ai-settings-save,.time-settings-save { position:relative; display:grid; width:100%; min-height:54px; place-items:center; margin:0; border:0; border-radius:0; padding:10px 15px; background:transparent; color:#007aff; font-size:15px; font-weight:700; cursor:pointer; box-shadow:none; transition:background-color .18s ease,color .18s ease; }
+.settings-group-save-row::before { position:absolute; top:0; right:0; left:0; height:1px; background:rgb(15 23 42 / 8%); content:""; pointer-events:none; }
+.settings-group-save-row:active:not(:disabled) { background:rgb(0 122 255 / 7%); }
+.settings-group-save-row:focus-visible { z-index:1; box-shadow:inset 0 0 0 2px rgb(37 99 235 / 70%); }
+.settings-group-save-row:disabled { cursor:default; background:transparent; color:#94a3b8; opacity:1; }
 .ai-settings-section .ai-provider-migration-note { margin:2px 2px 0; }.ai-settings-section .ai-provider-migration-note button { width:100%; }.ai-text-editor { display:grid; gap:13px; padding:4px 0 2px; }.ai-text-editor label { display:grid; gap:7px; color:#475569; font-size:14px; font-weight:650; }.ai-text-editor input { width:100%; min-height:46px; border:1px solid #cbd5e1; border-radius:12px; padding:10px 12px; background:#fff; color:#172033; font:inherit; }.ai-text-editor small { color:#64748b; font-size:13px; line-height:1.45; }
 /* 时间设置沿用 iOS inset grouped list：原生控件覆盖整行，只保留设置项的视觉层级。 */
 .time-settings-detail { display:grid; gap:20px; }
@@ -943,8 +951,6 @@ button.ai-settings-row { cursor:pointer; transition:background-color .16s ease; 
 .time-settings-native-row:active { background:rgb(0 0 0 / 4%); }
 .time-settings-native-row:focus-within { z-index:1; box-shadow:inset 0 0 0 2px rgb(37 99 235 / 70%); }
 .time-settings-native-row select,.time-settings-native-row input { position:absolute; inset:0; z-index:1; width:100%; height:100%; margin:0; cursor:pointer; opacity:0; }
-.time-settings-save { width:100%; min-height:46px; margin-top:2px; border:1px solid transparent; border-radius:14px; background:#007aff; color:#fff; font-size:15px; font-weight:700; box-shadow:none; transition:background .18s ease,color .18s ease,box-shadow .18s ease,border-color .18s ease; }
-.time-settings-save:disabled { cursor:not-allowed; border-color:rgb(203 213 225 / 68%); background:rgb(226 232 240 / 52%); color:#94a3b8; box-shadow:none; opacity:1; }
 .time-settings-footer,.time-settings-error { margin:0 2px; font-size:13px; line-height:1.48; }
 .time-settings-footer { color:#64748b; }
 .time-settings-error { color:#c3263f; }
@@ -1028,7 +1034,10 @@ button.ai-settings-row { cursor:pointer; transition:background-color .16s ease; 
 .settings-page-dark .profile-settings-group { border-color:rgb(148 163 184 / 17%); background:linear-gradient(135deg,rgb(30 41 59 / 91%),rgb(20 29 45 / 88%)); box-shadow:0 8px 22px rgb(0 0 0 / 17%),inset 0 1px rgb(255 255 255 / 5%); }
 .settings-page-dark .profile-settings-row { color:#e7eefb; }.settings-page-dark .profile-settings-row + .profile-settings-row { border-top-color:rgb(148 163 184 / 16%); }.settings-page-dark .profile-settings-row:active { background:rgb(59 130 246 / 15%); }
 .settings-page-dark .profile-settings-trailing,.settings-page-dark .profile-settings-footer { color:#aebed3; }.settings-page-dark .user-avatar.profile-settings-avatar,.settings-page-dark .user-avatar.profile-avatar-editor-preview { border-color:rgb(96 165 250 / 26%); background:rgb(30 58 105 / 54%); color:#bfdbfe; }
-.settings-page-dark .profile-settings-save { border-color:#355779; background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#eff6ff; box-shadow:inset 0 1px rgb(255 255 255 / 16%),0 5px 12px rgb(0 0 0 / 18%); }.settings-page-dark .profile-settings-save:disabled { border-color:rgb(148 163 184 / 18%); background:rgb(51 65 85 / 58%); color:#71839c; box-shadow:inset 0 1px rgb(255 255 255 / 5%); }.settings-page-dark .profile-settings-error { color:#fda4af; }
+.settings-page-dark .profile-settings-save { background:transparent; color:#0a84ff; box-shadow:none; }
+.settings-page-dark .profile-settings-save:disabled { background:transparent; color:#8e8e93; box-shadow:none; }
+.settings-page-dark .profile-settings-save:active:not(:disabled) { background:rgb(255 255 255 / 6%); }
+.settings-page-dark .profile-settings-error { color:#fda4af; }
 .sheet-mask-dark .profile-avatar-picker { border-color:rgb(96 165 250 / 28%); background:rgb(30 58 105 / 54%); color:#bfdbfe; }.sheet-mask-dark .profile-avatar-remove { border-color:rgb(251 113 133 / 25%); background:rgb(136 19 55 / 34%); color:#fda4af; }.sheet-mask-dark .profile-avatar-editor small,.sheet-mask-dark .profile-name-editor small { color:#aebed3; }.sheet-mask-dark .profile-name-editor label { color:#c7d4e7; }.sheet-mask-dark .profile-name-editor input { border-color:rgb(148 163 184 / 28%); background:#0f1728; color:#e7eefb; color-scheme:dark; }
 .settings-page-dark .data-import-settings-section h2 { color:#aebed3; }.settings-page-dark .data-import-settings-group { border-color:rgb(148 163 184 / 17%); background:linear-gradient(135deg,rgb(30 41 59 / 91%),rgb(20 29 45 / 88%)); box-shadow:0 8px 22px rgb(0 0 0 / 17%),inset 0 1px rgb(255 255 255 / 5%); }.settings-page-dark .data-import-settings-row { color:#e7eefb; }.settings-page-dark .data-import-settings-row + .data-import-settings-row { border-top-color:rgb(148 163 184 / 16%); }.settings-page-dark .data-import-settings-row small { color:#aebed3; }.settings-page-dark .data-import-settings-row>svg { color:#71839c; }.settings-page-dark .data-import-settings-row:active { background:rgb(59 130 246 / 15%); }
 .settings-page-dark .ai-settings-section h2 { color:#aebed3; }.settings-page-dark .ai-settings-group { border-color:rgb(148 163 184 / 17%); background:linear-gradient(135deg,rgb(30 41 59 / 91%),rgb(20 29 45 / 88%)); box-shadow:0 8px 22px rgb(0 0 0 / 17%),inset 0 1px rgb(255 255 255 / 5%); }.settings-page-dark .ai-settings-row { color:#e7eefb; }.settings-page-dark .ai-settings-row + .ai-settings-row { border-top-color:rgb(148 163 184 / 16%); }.settings-page-dark .ai-settings-value,.settings-page-dark .ai-settings-footer,.settings-page-dark .ai-settings-page-footer,.settings-page-dark .ai-settings-row small { color:#aebed3; }.settings-page-dark .ai-settings-value svg,.settings-page-dark .ai-settings-row>svg { color:#71839c; }.settings-page-dark .ai-settings-row:active { background:rgb(59 130 246 / 15%); }.settings-page-dark .ai-settings-row:disabled,.settings-page-dark .ai-settings-row:disabled .ai-settings-value,.settings-page-dark .ai-settings-row:disabled .ai-settings-value svg { color:#71839c; }.settings-page-dark .ai-settings-save { border-color:#355779; background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#eff6ff; box-shadow:inset 0 1px rgb(255 255 255 / 16%),0 5px 12px rgb(0 0 0 / 18%); }.settings-page-dark .ai-settings-save:disabled { border-color:rgb(148 163 184 / 18%); background:rgb(51 65 85 / 58%); color:#71839c; box-shadow:inset 0 1px rgb(255 255 255 / 5%); }.settings-page-dark .ai-settings-destructive-row,.settings-page-dark .ai-settings-destructive-row b,.settings-page-dark .ai-settings-destructive-row small,.settings-page-dark .ai-settings-destructive-row>svg { color:#fda4af; }.settings-page-dark .ai-settings-destructive-row:active { background:rgb(136 19 55 / 38%) !important; }.settings-page-dark .ai-settings-notice { color:#86efac; }.settings-page-dark .ai-settings-error { color:#fda4af; }.sheet-mask-dark .ai-text-editor label { color:#c7d4e7; }.sheet-mask-dark .ai-text-editor small { color:#aebed3; }.sheet-mask-dark .ai-text-editor input { border-color:rgb(148 163 184 / 28%); background:#0f1728; color:#e7eefb; color-scheme:dark; }
@@ -1672,6 +1681,50 @@ html[data-appearance='dark'] .settings-page-dark .ai-settings-actions .secondary
 
   .page-route-stage > main.today-page { padding-top:34px; padding-bottom:34px; }
   .today-page { grid-template-columns:minmax(390px,.9fr) minmax(500px,1.35fr); min-height:100%; align-items:start; gap:30px; }
+  html:not([data-layout='mobile']) .page-route-stage > main.today-page-with-wallpaper {
+    --today-desktop-split:56%;
+    --today-desktop-boundary:var(--today-desktop-split);
+    background-color:#f7f9fc;
+  }
+  html:not([data-layout='mobile']) .today-page-with-wallpaper::before {
+    position:absolute;
+    z-index:0;
+    inset:0;
+    background:var(--home-wallpaper-image) center 38% / cover no-repeat;
+    filter:blur(24px) saturate(.82);
+    opacity:.62;
+    content:"";
+    pointer-events:none;
+  }
+  html:not([data-layout='mobile']) .today-page-with-wallpaper > .today-wallpaper {
+    display:block;
+    position:absolute;
+    z-index:1;
+    inset:0 0 0 calc(var(--today-desktop-boundary) - 60px);
+    background-position:center 42%;
+    background-size:cover;
+    background-repeat:no-repeat;
+    opacity:.92;
+    filter:none;
+    -webkit-mask-image:linear-gradient(to right,transparent,#000 60px);
+    mask-image:linear-gradient(to right,transparent,#000 60px);
+  }
+  html:not([data-layout='mobile']) .today-page-with-wallpaper::after {
+    position:absolute;
+    z-index:2;
+    inset:0;
+    background:linear-gradient(90deg,rgb(250 252 255 / 60%),rgb(250 252 255 / 32%) var(--today-desktop-boundary),rgb(250 252 255 / 8%));
+    content:"";
+    pointer-events:none;
+  }
+  html:not([data-layout='mobile']) .today-page-with-wallpaper > .today-hero,
+  html:not([data-layout='mobile']) .today-page-with-wallpaper > .today-content { z-index:3; }
+  html[data-appearance='dark']:not([data-layout='mobile']) .page-route-stage > main.today-page-with-wallpaper {
+    background-color:#111214;
+  }
+  html[data-appearance='dark']:not([data-layout='mobile']) .today-page-with-wallpaper::before { opacity:.48; filter:blur(24px) saturate(.8) brightness(.72); }
+  html[data-appearance='dark']:not([data-layout='mobile']) .today-page-with-wallpaper > .today-wallpaper { opacity:.78; filter:brightness(.78); }
+  html[data-appearance='dark']:not([data-layout='mobile']) .today-page-with-wallpaper::after { background:linear-gradient(90deg,rgb(13 14 17 / 82%),rgb(13 14 17 / 47%) var(--today-desktop-boundary),rgb(13 14 17 / 14%)); }
   .today-page .today-hero {
     min-height:0;
     height:auto;
@@ -1700,6 +1753,20 @@ html[data-appearance='dark'] .settings-page-dark .ai-settings-actions .secondary
   .account-settings-page .card,
   .settings-section-page .about-hero { width:100%; max-width:none; }
 
+}
+
+@media (min-width:1280px) {
+  html:not([data-layout='mobile']) .page-route-stage > main.today-page-with-wallpaper {
+    /* 栅格百分比按内容宽度计算；减去 38px 才能映射到整个面板的背景坐标。 */
+    --today-desktop-boundary:calc(var(--today-desktop-split) - 38px);
+    grid-template-columns:minmax(0,calc(var(--today-desktop-split) - 46px)) minmax(0,1fr);
+    column-gap:24px;
+  }
+}
+
+@media (min-width:900px) and (max-width:1279px) {
+  html:not([data-layout='mobile']) .today-page-with-wallpaper { grid-template-columns:minmax(0,1fr); }
+  html:not([data-layout='mobile']) .today-page-with-wallpaper > .today-hero { width:min(100%,560px); }
 }
 
 /* 覆盖桌面断点及通用按钮的浅色样式。 */
@@ -1809,6 +1876,7 @@ html[data-appearance='dark'] .settings-page-dark .profile-settings-row + .profil
 html[data-appearance='dark'] .settings-page-dark .data-import-settings-row + .data-import-settings-row,
 html[data-appearance='dark'] .settings-page-dark .ai-settings-row + .ai-settings-row,
 html[data-appearance='dark'] .settings-page-dark .time-settings-row + .time-settings-row { border-top-color:rgb(255 255 255 / 8%); }
+html[data-appearance='dark'] .settings-page-dark .profile-settings-save::before { background:rgb(235 235 245 / 16%); }
 html[data-appearance='dark'] .settings-page-dark .settings-menu-item small,
 html[data-appearance='dark'] .settings-page-dark .account-authentication-row small,
 html[data-appearance='dark'] .settings-page-dark .profile-settings-name,
@@ -1845,6 +1913,18 @@ html[data-appearance='dark'] .settings-page-dark .settings-detail-header > .sett
 html[data-appearance='dark'] .settings-page-dark .settings-detail-header > .settings-back.settings-back-ios:active { background:rgb(255 255 255 / 5%); color:#0a84ff; box-shadow:none; }
 html[data-appearance='dark'] .settings-page-dark .account-deployment-note code,
 html[data-appearance='dark'] .settings-page-dark .help-center code { background:rgb(10 132 255 / 12%); color:#69adff; }
+html[data-appearance='dark'] main.settings-page-dark details.account-deployment-note {
+  border-color:rgb(255 255 255 / 8%);
+  background:#141416;
+  color:#a1a1a6;
+  box-shadow:0 8px 22px rgb(0 0 0 / 22%),inset 0 1px rgb(255 255 255 / 5%);
+}
+html[data-appearance='dark'] main.settings-page-dark details.account-deployment-note > summary {
+  background:transparent;
+  color:#f2f2f7;
+}
+html[data-appearance='dark'] main.settings-page-dark details.account-deployment-note > summary > svg { color:#8e8e93; }
+html[data-appearance='dark'] main.settings-page-dark details.account-deployment-note .account-deployment-copy { border-top-color:rgb(255 255 255 / 8%); }
 html[data-appearance='dark'] .settings-page-dark .account-logout-row,
 html[data-appearance='dark'] .settings-page-dark .account-logout-row b,
 html[data-appearance='dark'] .settings-page-dark .account-logout-row>svg,
@@ -1875,13 +1955,11 @@ html[data-appearance='dark'] .settings-page-dark select {
   color-scheme:dark;
 }
 html[data-appearance='dark'] .settings-page-dark input::placeholder { color:#636366; }
-html[data-appearance='dark'] .settings-page-dark .time-settings-save,
-html[data-appearance='dark'] .settings-page-dark .profile-settings-save,
-html[data-appearance='dark'] .settings-page-dark .ai-settings-save,
 html[data-appearance='dark'] .settings-page-dark .profile-actions > button[type='submit'] { border-color:#0a84ff; background:#0a84ff; color:#fff; box-shadow:none; }
-html[data-appearance='dark'] .settings-page-dark .time-settings-save:disabled,
-html[data-appearance='dark'] .settings-page-dark .profile-settings-save:disabled,
-html[data-appearance='dark'] .settings-page-dark .ai-settings-save:disabled { border-color:rgb(255 255 255 / 10%); background:rgb(255 255 255 / 8%); color:#636366; box-shadow:none; }
+html[data-appearance='dark'] .settings-page-dark .settings-group-save-row { border:0; background:transparent; color:#0a84ff; box-shadow:none; }
+html[data-appearance='dark'] .settings-page-dark .settings-group-save-row::before { background:rgb(235 235 245 / 16%); }
+html[data-appearance='dark'] .settings-page-dark .settings-group-save-row:disabled { background:transparent; color:#8e8e93; opacity:1; }
+html[data-appearance='dark'] .settings-page-dark .settings-group-save-row:active:not(:disabled) { background:rgb(255 255 255 / 6%); }
 html[data-appearance='dark'] .settings-page-dark .secondary-button { border-color:rgb(255 255 255 / 10%); background:rgb(255 255 255 / 7%); color:#d1d1d6; }
 
 html[data-appearance='dark'] .settings-page-dark .ai-settings-card,
@@ -2407,7 +2485,16 @@ html[data-appearance='dark'] .passkey-swipe-row + .passkey-swipe-row,html[data-a
 html[data-appearance='dark'] .passkey-add-row { color:#69adff; }
 html[data-appearance='dark'] .passkey-add-row:active { background:rgb(10 132 255 / 12%); }
 html[data-appearance='dark'] .passkey-add-row:disabled { color:#777b84; }
-@media (hover:none) and (pointer:coarse) { html[data-appearance='dark'] .settings-page-dark .passkey-swipe-row > .passkey-credential-row { background:linear-gradient(135deg,rgb(30 41 59 / 91%),rgb(20 29 45 / 88%)); } html[data-appearance='dark'] .passkey-swipe-actions button { background:#ff453a; } }
+@media (hover:none) and (pointer:coarse) {
+  html[data-appearance='dark'] .settings-page-dark .passkey-swipe-row > .passkey-credential-row { background:#141416; }
+  html[data-appearance='dark'] .settings-page-dark .passkey-swipe-actions { background:#ff453a; }
+  html[data-appearance='dark'] .settings-page-dark .passkey-swipe-actions button {
+    background:#ff453a;
+    color:#fff;
+    -webkit-text-fill-color:#fff;
+    opacity:1;
+  }
+}
 html[data-appearance='dark'] .passkey-form { border-color:rgb(10 132 255 / 22%); background:rgb(10 132 255 / 9%); }
 html[data-appearance='dark'] .passkey-form > label,html[data-appearance='dark'] .passkey-form p { color:#aebed3; }
 html[data-appearance='dark'] .passkey-form input { border-color:rgb(255 255 255 / 12%); background:#151c28; color:#f2f2f7; }
