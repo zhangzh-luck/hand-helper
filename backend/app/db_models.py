@@ -15,6 +15,8 @@ class AppProfile(TimestampMixin, Base):
     avatar_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     timetable_background_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     home_wallpaper_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_wallpaper_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings_wallpaper_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class AppSession(Base):
     """Server-side session metadata; only an HMAC of the browser secret is stored."""
