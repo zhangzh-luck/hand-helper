@@ -282,6 +282,8 @@ def profile_out(profile: AppProfile | None) -> AppProfileOut:
         avatar_data_url=profile.avatar_data_url if profile else None,
         timetable_background_data_url=profile.timetable_background_data_url if profile else None,
         home_wallpaper_data_url=profile.home_wallpaper_data_url if profile else None,
+        analysis_wallpaper_data_url=profile.analysis_wallpaper_data_url if profile else None,
+        settings_wallpaper_data_url=profile.settings_wallpaper_data_url if profile else None,
     )
 def validate_avatar_data_url(value: str | None) -> str | None:
     if value is None:
@@ -373,6 +375,16 @@ async def update_profile(body: AppProfileInput, db: AsyncSession = Depends(get_d
     if "home_wallpaper_data_url" in body.model_fields_set:
         try:
             profile.home_wallpaper_data_url = validate_timetable_background_data_url(body.home_wallpaper_data_url, "首页壁纸")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+    if "analysis_wallpaper_data_url" in body.model_fields_set:
+        try:
+            profile.analysis_wallpaper_data_url = validate_timetable_background_data_url(body.analysis_wallpaper_data_url, "分析页壁纸")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+    if "settings_wallpaper_data_url" in body.model_fields_set:
+        try:
+            profile.settings_wallpaper_data_url = validate_timetable_background_data_url(body.settings_wallpaper_data_url, "设置页壁纸")
         except ValueError as exc:
             raise HTTPException(422, str(exc))
     await db.commit()

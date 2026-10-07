@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,6 +74,42 @@ describe('首页壁纸', () => it('只读取独立首页壁纸，不复用课表
   expect(container.querySelector('.today-wallpaper')).toHaveStyle({ backgroundImage: 'url("data:image/png;base64,HOME")' });
   expect(container.querySelector('.today-wallpaper')?.getAttribute('style')).not.toContain('COURSE');
 }));
+
+describe('分析与设置壁纸', () => {
+  const wallpaperFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const data = url.endsWith('/api/v1/auth/me') ? { authenticated: true, username: 'admin' }
+      : url.endsWith('/api/v1/profile') ? { display_name: '测试用户', avatar_data_url: null, timetable_background_data_url: null, home_wallpaper_data_url: null, analysis_wallpaper_data_url: 'data:image/png;base64,ANALYSIS', settings_wallpaper_data_url: 'data:image/png;base64,SETTINGS' }
+      : [];
+    return new Response(JSON.stringify({ success: true, data }), { status: 200 });
+  });
+
+  it('分析页只使用分析壁纸', async () => {
+    vi.stubGlobal('fetch', wallpaperFetch);
+    const { container } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/grades']}><App /></MemoryRouter></QueryClientProvider>);
+    await screen.findByRole('heading', { name: '成绩分析' });
+    await waitFor(() => expect(container.querySelector('.grades-page')).toHaveClass('page-with-personal-wallpaper'));
+    expect(document.querySelector('.secondary-page-wallpaper')).toHaveStyle({ backgroundImage: 'url("data:image/png;base64,ANALYSIS")' });
+  });
+
+  it('设置页只使用设置壁纸', async () => {
+    vi.stubGlobal('fetch', wallpaperFetch);
+    const { container } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/settings']}><App /></MemoryRouter></QueryClientProvider>);
+    await screen.findByRole('heading', { name: '设置' });
+    await waitFor(() => expect(container.querySelector('main.page-with-personal-wallpaper')).toBeInTheDocument());
+    expect(document.querySelector('.secondary-page-wallpaper')).toHaveStyle({ backgroundImage: 'url("data:image/png;base64,SETTINGS")' });
+    fireEvent.click(screen.getByRole('button', { name: /个性化设置/ }));
+    fireEvent.click(screen.getByRole('button', { name: /页面壁纸/ }));
+    expect(screen.getByRole('button', { name: /分析页壁纸/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /设置页壁纸/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /分析页壁纸/ }));
+    expect(screen.getByRole('dialog', { name: '分析页壁纸' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '页面壁纸' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭详情' }).at(-1)!);
+    expect(screen.queryByRole('dialog', { name: '分析页壁纸' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '页面壁纸' })).toBeInTheDocument();
+  });
+});
 
 describe('学期周次跳转', () => it('开学前点击下一周会直接跳至开学周', () => {
   const result = moveWeekInTerm(new Date('2026-07-14T12:00:00'), 1, { id: 1, source_term_id: '2026-2027-1', display_name: '2026-2027-1', start_date: '2026-09-07', is_current: false });

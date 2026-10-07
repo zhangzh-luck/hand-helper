@@ -197,6 +197,7 @@ function Today({ appearance }: { appearance: 'light' | 'dark' }) {
   if (pageError) return <TodayBackendLoadError appearance={appearance} error={pageError} onRetry={retryPageData} />;
   return <main className={`today-page${appearance === 'dark' ? ' today-page-dark' : ''}${profile.data?.home_wallpaper_data_url ? ' today-page-with-wallpaper' : ''}`} style={profile.data?.home_wallpaper_data_url ? { '--home-wallpaper-image': `url("${profile.data.home_wallpaper_data_url}")` } as CSSProperties : undefined}>
     {profile.data?.home_wallpaper_data_url && <div className="today-wallpaper" aria-hidden="true" style={{ backgroundImage: `url("${profile.data.home_wallpaper_data_url}")` }} />}
+    {profile.data?.home_wallpaper_data_url && createPortal(<div className="today-viewport-wallpaper" aria-hidden="true" style={{ backgroundImage: `url("${profile.data.home_wallpaper_data_url}")` }} />, document.body)}
     <section className="today-hero">{profile.data?.avatar_data_url && <><div className="hero-avatar-background" aria-hidden="true" style={{ backgroundImage: `url(${profile.data.avatar_data_url})` }} /><div className="hero-avatar-overlay" aria-hidden="true" /></>}<div className="today-hero-content"><p className="today-kicker">今日 · {greetingForHour(now.getHours())}</p><h1>{name}</h1><p className="today-date">{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p></div>{profile.data?.avatar_data_url ? <button type="button" className="avatar-preview-trigger" aria-label={`预览${name}的头像`} onClick={() => setAvatarPreviewOpen(true)}><Avatar profile={profile.data} /></button> : <Avatar profile={profile.data} />}</section>
     <section className="today-content"><div className="today-section-heading"><h2>今日安排</h2>{Boolean(customSchedules.data?.length) && <span className="today-schedule-count">今天有 {customSchedules.data?.length} 项自定义安排</span>}<button type="button" className="add-schedule-button" onClick={() => setEditingSchedule('new')}><Plus size={17} />添加安排</button></div>{items.length || customSchedules.data?.length ? <Timeline sessions={items} schedules={customSchedules.data ?? []} onEdit={setEditingSchedule} onDelete={setDeletingSchedule} /> : null}</section>
     {editingSchedule && <ViewportSheetPortal><CustomScheduleSheetV2 schedule={editingSchedule === 'new' ? undefined : editingSchedule} initialDate={today} pending={saveSchedule.isPending} error={saveSchedule.error} onClose={() => setEditingSchedule(null)} onSave={(payload) => saveSchedule.mutate(payload)} /></ViewportSheetPortal>}
@@ -241,8 +242,9 @@ function AvatarCropSheet({ source, dark, onClose, onConfirm }: { source: string;
   return createPortal(<div className={`sheet-mask sheet-mask-viewport avatar-crop-mask${dark ? ' sheet-mask-dark' : ''}`} role="presentation" onClick={processing ? undefined : onClose}><section className="avatar-crop-sheet" role="dialog" aria-modal="true" aria-label="裁剪头像" onClick={(event) => event.stopPropagation()}><header><div><h2>裁剪头像</h2><p>拖动图片调整位置，使用双指或滑条缩放。保存后将为 1:1 正方形头像。</p></div><button type="button" className="sheet-close-icon" aria-label="关闭裁剪" title="关闭" onClick={onClose} disabled={processing}><X size={20} /></button></header><div className="avatar-crop-stage"><Cropper image={source} crop={crop} zoom={zoom} aspect={1} cropShape="rect" showGrid onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_area, pixels) => setArea(pixels)} /></div><label className="avatar-zoom-control">缩放<input aria-label="头像缩放" type="range" min="1" max="3" step="0.01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label><div className="custom-schedule-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={processing}>取消</button><button type="button" disabled={processing || !area} onClick={() => { void confirmCrop(); }}>{processing ? '处理中…' : '确认裁剪'}</button></div>{error && <p className="error">{error}</p>}</section></div>, document.body);
 }
 
-function PortraitBackgroundCropSheet({ source, kind, dark, onClose, onConfirm }: { source: string; kind: 'home' | 'timetable'; dark: boolean; onClose: () => void; onConfirm: (background: string) => void }) {
-  const label = kind === 'home' ? '首页壁纸' : '课表背景';
+type PortraitBackgroundKind = 'home' | 'timetable' | 'analysis' | 'settings';
+function PortraitBackgroundCropSheet({ source, kind, dark, onClose, onConfirm }: { source: string; kind: PortraitBackgroundKind; dark: boolean; onClose: () => void; onConfirm: (background: string) => void }) {
+  const label = { home: '首页壁纸', timetable: '课表背景', analysis: '分析页壁纸', settings: '设置页壁纸' }[kind];
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [area, setArea] = useState<Area | null>(null);
@@ -340,7 +342,7 @@ function Timeline({ sessions, schedules, onEdit, onDelete }: { sessions: Session
     ...sessions.map((session) => ({ type: 'course' as const, sortTime: formatTime(session.start_datetime), session })),
     ...schedules.map((schedule) => ({ type: 'custom' as const, sortTime: schedule.scheduled_time, schedule })),
   ].sort((left, right) => left.sortTime.localeCompare(right.sortTime));
-  return <>{(active || upcoming || !schedules.length) && <section className="today-status"><b>{status}</b></section>}<div ref={timelineRef} className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <SwipeableCustomScheduleCard key={`custom-${entry.schedule.id}`} schedule={entry.schedule} open={openScheduleId === entry.schedule.id} onOpenChange={(open) => setOpenScheduleId(open ? entry.schedule.id : null)} onEdit={onEdit} onDelete={onDelete} />)}</div></>;
+  return <>{(active || upcoming || !schedules.length) && <section className={`today-status${!active && !upcoming ? ' today-status-complete' : ''}`}><b>{status}</b></section>}<div ref={timelineRef} className="stack">{entries.map((entry) => entry.type === 'course' ? <article className={`card today-entry-card today-course-card ${entry.session === active ? 'current-course' : ''}`} key={`course-${entry.session.id}`}><small className="today-entry-kind">课程</small><b>{entry.session.course_name}</b><span className="today-entry-time">{formatTime(entry.session.start_datetime)}—{formatTime(entry.session.end_datetime)}</span><small className="today-entry-meta">{entry.session.classroom ?? '教室待定'} · {entry.session.teacher ?? '教师待定'}</small></article> : <SwipeableCustomScheduleCard key={`custom-${entry.schedule.id}`} schedule={entry.schedule} open={openScheduleId === entry.schedule.id} onOpenChange={(open) => setOpenScheduleId(open ? entry.schedule.id : null)} onEdit={onEdit} onDelete={onDelete} />)}</div></>;
 }
 
 function formatScheduleDate(value: string) {
@@ -462,6 +464,7 @@ function AiAnalysisReport({ content }: { content: string }) {
 
 function Grades({ appearance }: { appearance: 'light' | 'dark' }) {
   const queryClient = useQueryClient();
+  const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile, staleTime: 5 * 60 * 1000 });
   const navigate = useNavigate();
   const { scrollRef: gradesScrollRef, headerRef: gradesHeaderRef } = useCollapsiblePageTitle();
   const { terms } = useTerms();
@@ -509,7 +512,7 @@ function Grades({ appearance }: { appearance: 'light' | 'dark' }) {
       ]);
     },
   });
-  return <Page title="成绩分析" icon={<GraduationCap size={20} />} mainRef={gradesScrollRef} headerRef={gradesHeaderRef} className={`grades-page${appearance === 'dark' ? ' grades-page-dark' : ''}`} headerClassName="collapsible-page-header" compactTitle>
+  return <Page title="成绩分析" icon={<GraduationCap size={20} />} mainRef={gradesScrollRef} headerRef={gradesHeaderRef} className={`grades-page${appearance === 'dark' ? ' grades-page-dark' : ''}`} wallpaper={profile.data?.analysis_wallpaper_data_url} headerClassName="collapsible-page-header" compactTitle>
     <section className="grade-import-actions" aria-label="当前学期">
       <div className="grade-import-group">
         <label className="grade-import-row grade-current-term-trigger">
@@ -864,16 +867,22 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
   const [timetableBackgroundCropSource, setTimetableBackgroundCropSource] = useState<string | null>(null);
   const [newHomeWallpaper, setNewHomeWallpaper] = useState<string | null | undefined>(undefined);
   const [homeWallpaperCropSource, setHomeWallpaperCropSource] = useState<string | null>(null);
+  const [newAnalysisWallpaper, setNewAnalysisWallpaper] = useState<string | null | undefined>(undefined);
+  const [newSettingsWallpaper, setNewSettingsWallpaper] = useState<string | null | undefined>(undefined);
+  const [pageWallpaperCropSource, setPageWallpaperCropSource] = useState<{ kind: 'analysis' | 'settings'; source: string } | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [nameEditorOpen, setNameEditorOpen] = useState(false);
   const [timetableBackgroundEditorOpen, setTimetableBackgroundEditorOpen] = useState(false);
   const [homeWallpaperEditorOpen, setHomeWallpaperEditorOpen] = useState(false);
+  const [pageWallpaperEditorOpen, setPageWallpaperEditorOpen] = useState<'analysis' | 'settings' | null>(null);
+  const [wallpaperMenuOpen, setWallpaperMenuOpen] = useState(false);
   const preferredTerm = terms.data?.find((term) => term.source_term_id === currentAcademicTermId()) ?? terms.data?.find((term) => term.is_current) ?? terms.data?.[0];
   useEffect(() => { if (profile.data) setDisplayName(profile.data.display_name); }, [profile.data]);
   useEffect(() => () => { if (avatarCropSource) URL.revokeObjectURL(avatarCropSource); }, [avatarCropSource]);
   useEffect(() => () => { if (timetableBackgroundCropSource) URL.revokeObjectURL(timetableBackgroundCropSource); }, [timetableBackgroundCropSource]);
   useEffect(() => () => { if (homeWallpaperCropSource) URL.revokeObjectURL(homeWallpaperCropSource); }, [homeWallpaperCropSource]);
+  useEffect(() => () => { if (pageWallpaperCropSource) URL.revokeObjectURL(pageWallpaperCropSource.source); }, [pageWallpaperCropSource]);
   const appLogout = useMutation({
     mutationFn: api.logout,
     onSettled: () => {
@@ -887,9 +896,11 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       if (newAvatar !== undefined) payload.avatar_data_url = newAvatar;
       if (newTimetableBackground !== undefined) payload.timetable_background_data_url = newTimetableBackground;
       if (newHomeWallpaper !== undefined) payload.home_wallpaper_data_url = newHomeWallpaper;
+      if (newAnalysisWallpaper !== undefined) payload.analysis_wallpaper_data_url = newAnalysisWallpaper;
+      if (newSettingsWallpaper !== undefined) payload.settings_wallpaper_data_url = newSettingsWallpaper;
       return api.updateProfile(payload);
     },
-    onSuccess: (updatedProfile) => { setDisplayName(updatedProfile.display_name); setNewAvatar(undefined); setNewTimetableBackground(undefined); setNewHomeWallpaper(undefined); setAvatarError(null); queryClient.setQueryData(['profile'], updatedProfile); queryClient.invalidateQueries({ queryKey: ['profile'] }); },
+    onSuccess: (updatedProfile) => { setDisplayName(updatedProfile.display_name); setNewAvatar(undefined); setNewTimetableBackground(undefined); setNewHomeWallpaper(undefined); setNewAnalysisWallpaper(undefined); setNewSettingsWallpaper(undefined); setAvatarError(null); queryClient.setQueryData(['profile'], updatedProfile); queryClient.invalidateQueries({ queryKey: ['profile'] }); },
   });
   const chooseAvatar = async (file: File | undefined) => {
     if (!file) return;
@@ -906,7 +917,7 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       setAvatarError(imageError instanceof Error ? imageError.message : '无法读取该图片，请换一张后重试。');
     }
   };
-  const choosePortraitBackground = async (file: File | undefined, kind: 'home' | 'timetable') => {
+  const choosePortraitBackground = async (file: File | undefined, kind: PortraitBackgroundKind) => {
     if (!file) return;
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setAvatarError('请选择 PNG、JPEG 或 WebP 格式的图片。'); return; }
     if (file.size > TIMETABLE_BACKGROUND_INPUT_MAX_BYTES) { setAvatarError('原图不能超过 5 MB。'); return; }
@@ -915,7 +926,8 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       const image = await loadImage(source);
       if (image.naturalWidth * image.naturalHeight > TIMETABLE_BACKGROUND_INPUT_MAX_PIXELS) throw new Error('原图像素不能超过 2500 万，请换一张图片。');
       if (kind === 'home') setHomeWallpaperCropSource(source);
-      else setTimetableBackgroundCropSource(source);
+      else if (kind === 'timetable') setTimetableBackgroundCropSource(source);
+      else setPageWallpaperCropSource({ kind, source });
       setAvatarError(null);
     } catch (imageError) {
       URL.revokeObjectURL(source);
@@ -931,9 +943,9 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
   const sectionTitleCollapsible = Boolean(settingsSection);
   const rootTitleCollapsible = !settingsSection;
   const settingsPageClassName = `${accountTitleCollapsible ? 'account-settings-page ' : ''}${sectionTitleCollapsible ? 'settings-section-page ' : ''}${resolvedAppearanceMode === 'dark' ? 'settings-page-dark' : ''}`.trim();
-  const displayedProfile: Profile = { display_name: displayName.trim() || '用户', avatar_data_url: newAvatar === undefined ? profile.data?.avatar_data_url ?? null : newAvatar, timetable_background_data_url: newTimetableBackground === undefined ? profile.data?.timetable_background_data_url ?? null : newTimetableBackground, home_wallpaper_data_url: newHomeWallpaper === undefined ? profile.data?.home_wallpaper_data_url ?? null : newHomeWallpaper };
-  const profileDirty = profile.data ? displayName.trim() !== profile.data.display_name || newAvatar !== undefined || newTimetableBackground !== undefined || newHomeWallpaper !== undefined : false;
-  return <Page title={sectionTitle} icon={accountTitleCollapsible ? <KeyRound size={20} /> : !settingsSection ? <SettingsIcon size={20} /> : undefined} action={settingsSection ? <button type="button" className="settings-back settings-back-ios" aria-label="返回设置" onClick={closeSettingsSection}><ChevronLeft size={18} />设置</button> : undefined} mainRef={settingsScrollRef} headerRef={settingsHeaderRef} className={settingsPageClassName} headerClassName={rootTitleCollapsible ? 'collapsible-page-header' : sectionTitleCollapsible ? 'collapsible-page-header settings-section-header settings-detail-header' : undefined} compactTitle={rootTitleCollapsible || sectionTitleCollapsible}>
+  const displayedProfile: Profile = { display_name: displayName.trim() || '用户', avatar_data_url: newAvatar === undefined ? profile.data?.avatar_data_url ?? null : newAvatar, timetable_background_data_url: newTimetableBackground === undefined ? profile.data?.timetable_background_data_url ?? null : newTimetableBackground, home_wallpaper_data_url: newHomeWallpaper === undefined ? profile.data?.home_wallpaper_data_url ?? null : newHomeWallpaper, analysis_wallpaper_data_url: newAnalysisWallpaper === undefined ? profile.data?.analysis_wallpaper_data_url ?? null : newAnalysisWallpaper, settings_wallpaper_data_url: newSettingsWallpaper === undefined ? profile.data?.settings_wallpaper_data_url ?? null : newSettingsWallpaper };
+  const profileDirty = profile.data ? displayName.trim() !== profile.data.display_name || newAvatar !== undefined || newTimetableBackground !== undefined || newHomeWallpaper !== undefined || newAnalysisWallpaper !== undefined || newSettingsWallpaper !== undefined : false;
+  return <Page title={sectionTitle} icon={accountTitleCollapsible ? <KeyRound size={20} /> : !settingsSection ? <SettingsIcon size={20} /> : undefined} action={settingsSection ? <button type="button" className="settings-back settings-back-ios" aria-label="返回设置" onClick={closeSettingsSection}><ChevronLeft size={18} />设置</button> : undefined} mainRef={settingsScrollRef} headerRef={settingsHeaderRef} className={settingsPageClassName} wallpaper={profile.data?.settings_wallpaper_data_url} headerClassName={rootTitleCollapsible ? 'collapsible-page-header' : sectionTitleCollapsible ? 'collapsible-page-header settings-section-header settings-detail-header' : undefined} compactTitle={rootTitleCollapsible || sectionTitleCollapsible}>
     {settingsSection === 'personal' && <p className="settings-inline-note">自定义显示模式、页面布局和个人资料。</p>}
     {settingsSection === 'data' && <p className="settings-inline-note">课程表和成绩仅通过你主动选择的导出文件导入，并保存在本地缓存中。</p>}
     {!settingsSection && <div className={settingsTransitionDirection === 'backward' ? 'settings-detail-stage settings-detail-stage-backward' : routeEntering ? 'settings-root-stage' : undefined}><section className="settings-menu" aria-label="设置项目录">
@@ -960,7 +972,7 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
       </section>
     </section></div>}
     {settingsSection && <div key={`${settingsSection}-${settingsTransitionDirection}`} className={`settings-detail-stage settings-detail-stage-${settingsTransitionDirection}`}>
-    {settingsSection === 'personal' && <><ProfileSettings profile={displayedProfile} dirty={profileDirty} pending={saveProfile.isPending} error={avatarError ?? saveProfile.error?.message ?? null} onOpenAvatar={() => setAvatarEditorOpen(true)} onOpenName={() => setNameEditorOpen(true)} onOpenHomeWallpaper={() => setHomeWallpaperEditorOpen(true)} onOpenTimetableBackground={() => setTimetableBackgroundEditorOpen(true)} onSave={() => saveProfile.mutate()} /><AppearanceModeSelector mode={appearanceMode} onChange={onAppearanceModeChange} /><LayoutModeSelector mode={layoutMode} onChange={onLayoutModeChange} /></>}
+    {settingsSection === 'personal' && <><ProfileSettings profile={displayedProfile} dirty={profileDirty} pending={saveProfile.isPending} error={avatarError ?? saveProfile.error?.message ?? null} onOpenAvatar={() => setAvatarEditorOpen(true)} onOpenName={() => setNameEditorOpen(true)} onOpenWallpaperMenu={() => setWallpaperMenuOpen(true)} onSave={() => saveProfile.mutate()} /><AppearanceModeSelector mode={appearanceMode} onChange={onAppearanceModeChange} /><LayoutModeSelector mode={layoutMode} onChange={onLayoutModeChange} /></>}
     {settingsSection === 'account' && <section className="account-settings-detail" aria-label="账号安全设置">
       <section className="account-settings-section" aria-labelledby="account-authentication-heading">
         <h2 id="account-authentication-heading">单用户认证</h2>
@@ -986,10 +998,13 @@ function Settings({ appearanceMode, resolvedAppearanceMode, onAppearanceModeChan
     {avatarCropSource && <AvatarCropSheet source={avatarCropSource} dark={resolvedAppearanceMode === 'dark'} onClose={() => setAvatarCropSource(null)} onConfirm={(avatar) => { setNewAvatar(avatar); setAvatarCropSource(null); setAvatarError(null); }} />}
     {avatarEditorOpen && <ProfileAvatarSheet profile={displayedProfile} dark={resolvedAppearanceMode === 'dark'} onClose={() => setAvatarEditorOpen(false)} onChoose={(file) => { setAvatarEditorOpen(false); void chooseAvatar(file); }} onRemove={() => { setNewAvatar(null); setAvatarEditorOpen(false); }} />}
     {nameEditorOpen && <ProfileNameSheet initialName={displayName} dark={resolvedAppearanceMode === 'dark'} onClose={() => setNameEditorOpen(false)} onConfirm={(name) => { setDisplayName(name); setNameEditorOpen(false); }} />}
+    {wallpaperMenuOpen && <WallpaperMenuSheet profile={displayedProfile} dark={resolvedAppearanceMode === 'dark'} onClose={() => setWallpaperMenuOpen(false)} onSelect={(kind) => { if (kind === 'home') setHomeWallpaperEditorOpen(true); else if (kind === 'timetable') setTimetableBackgroundEditorOpen(true); else setPageWallpaperEditorOpen(kind); }} />}
     {timetableBackgroundCropSource && <PortraitBackgroundCropSheet source={timetableBackgroundCropSource} kind="timetable" dark={resolvedAppearanceMode === 'dark'} onClose={() => setTimetableBackgroundCropSource(null)} onConfirm={(background) => { setNewTimetableBackground(background); setTimetableBackgroundCropSource(null); setAvatarError(null); }} />}
     {homeWallpaperCropSource && <PortraitBackgroundCropSheet source={homeWallpaperCropSource} kind="home" dark={resolvedAppearanceMode === 'dark'} onClose={() => setHomeWallpaperCropSource(null)} onConfirm={(background) => { setNewHomeWallpaper(background); setHomeWallpaperCropSource(null); setAvatarError(null); }} />}
+    {pageWallpaperCropSource && <PortraitBackgroundCropSheet source={pageWallpaperCropSource.source} kind={pageWallpaperCropSource.kind} dark={resolvedAppearanceMode === 'dark'} onClose={() => setPageWallpaperCropSource(null)} onConfirm={(background) => { if (pageWallpaperCropSource.kind === 'analysis') setNewAnalysisWallpaper(background); else setNewSettingsWallpaper(background); setPageWallpaperCropSource(null); setAvatarError(null); }} />}
     {timetableBackgroundEditorOpen && <TimetableBackgroundSheet background={displayedProfile.timetable_background_data_url} dark={resolvedAppearanceMode === 'dark'} onClose={() => setTimetableBackgroundEditorOpen(false)} onChoose={(file) => { setTimetableBackgroundEditorOpen(false); void chooseTimetableBackground(file); }} onRemove={() => { setNewTimetableBackground(null); setTimetableBackgroundEditorOpen(false); }} />}
     {homeWallpaperEditorOpen && <HomeWallpaperSheet background={displayedProfile.home_wallpaper_data_url} dark={resolvedAppearanceMode === 'dark'} onClose={() => setHomeWallpaperEditorOpen(false)} onChoose={(file) => { setHomeWallpaperEditorOpen(false); void chooseHomeWallpaper(file); }} onRemove={() => { setNewHomeWallpaper(null); setHomeWallpaperEditorOpen(false); }} />}
+    {pageWallpaperEditorOpen && <PageWallpaperSheet kind={pageWallpaperEditorOpen} background={pageWallpaperEditorOpen === 'analysis' ? displayedProfile.analysis_wallpaper_data_url : displayedProfile.settings_wallpaper_data_url} dark={resolvedAppearanceMode === 'dark'} onClose={() => setPageWallpaperEditorOpen(null)} onChoose={(file) => { const kind = pageWallpaperEditorOpen; setPageWallpaperEditorOpen(null); void choosePortraitBackground(file, kind); }} onRemove={() => { if (pageWallpaperEditorOpen === 'analysis') setNewAnalysisWallpaper(null); else setNewSettingsWallpaper(null); setPageWallpaperEditorOpen(null); }} />}
     {logoutConfirm && <ViewportSheetPortal><ConfirmDialog title="确认退出航的助手？" description="退出后将返回登录页。已导入的课程表、成绩缓存和自定义安排都会保留。" confirmLabel="确认退出" pending={appLogout.isPending} onCancel={() => setLogoutConfirm(false)} onConfirm={() => appLogout.mutate()} /></ViewportSheetPortal>}
   </Page>;
 }
@@ -1000,14 +1015,24 @@ function formatSettingsDate(value: string | null) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-function ProfileSettings({ profile, dirty, pending, error, onOpenAvatar, onOpenName, onOpenHomeWallpaper, onOpenTimetableBackground, onSave }: { profile: Profile; dirty: boolean; pending: boolean; error: string | null; onOpenAvatar: () => void; onOpenName: () => void; onOpenHomeWallpaper: () => void; onOpenTimetableBackground: () => void; onSave: () => void }) {
+function ProfileSettings({ profile, dirty, pending, error, onOpenAvatar, onOpenName, onOpenWallpaperMenu, onSave }: { profile: Profile; dirty: boolean; pending: boolean; error: string | null; onOpenAvatar: () => void; onOpenName: () => void; onOpenWallpaperMenu: () => void; onSave: () => void }) {
+  const wallpaperCount = [profile.home_wallpaper_data_url, profile.timetable_background_data_url, profile.analysis_wallpaper_data_url, profile.settings_wallpaper_data_url].filter(Boolean).length;
   return <section className="profile-settings-section" aria-labelledby="profile-settings-heading"><h2 id="profile-settings-heading">个人资料</h2><form onSubmit={(event) => { event.preventDefault(); onSave(); }}><div className="profile-settings-group">
     <button type="button" className="profile-settings-row" onClick={onOpenAvatar}><span className="profile-settings-label">头像</span><span className="profile-settings-trailing"><Avatar profile={profile} className="profile-settings-avatar" /><ChevronRight size={18} aria-hidden="true" /></span></button>
     <button type="button" className="profile-settings-row" onClick={onOpenName}><span className="profile-settings-label">显示姓名</span><span className="profile-settings-trailing profile-settings-name">{profile.display_name}<ChevronRight size={18} aria-hidden="true" /></span></button>
-    <button type="button" className="profile-settings-row" onClick={onOpenHomeWallpaper}><span className="profile-settings-label">首页壁纸</span><span className="profile-settings-trailing profile-settings-name">{profile.home_wallpaper_data_url ? '已设置' : '未设置'}<ChevronRight size={18} aria-hidden="true" /></span></button>
-    <button type="button" className="profile-settings-row" onClick={onOpenTimetableBackground}><span className="profile-settings-label">课表背景</span><span className="profile-settings-trailing profile-settings-name">{profile.timetable_background_data_url ? '已设置' : '未设置'}<ChevronRight size={18} aria-hidden="true" /></span></button>
+    <button type="button" className="profile-settings-row" onClick={onOpenWallpaperMenu}><span className="profile-settings-label">页面壁纸</span><span className="profile-settings-trailing profile-settings-name">{wallpaperCount ? `已设置 ${wallpaperCount}/4` : '未设置'}<ChevronRight size={18} aria-hidden="true" /></span></button>
     <button className="profile-settings-save" type="submit" disabled={!dirty || pending}>{pending ? '正在保存…' : '保存更改'}</button>
   </div>{error && <p className="profile-settings-error" role="alert">{error}</p>}</form></section>;
+}
+
+function WallpaperMenuSheet({ profile, dark, onClose, onSelect }: { profile: Profile; dark: boolean; onClose: () => void; onSelect: (kind: PortraitBackgroundKind) => void }) {
+  const choices: Array<{ kind: PortraitBackgroundKind; label: string; set: boolean }> = [
+    { kind: 'home', label: '首页壁纸', set: Boolean(profile.home_wallpaper_data_url) },
+    { kind: 'timetable', label: '课表背景', set: Boolean(profile.timetable_background_data_url) },
+    { kind: 'analysis', label: '分析页壁纸', set: Boolean(profile.analysis_wallpaper_data_url) },
+    { kind: 'settings', label: '设置页壁纸', set: Boolean(profile.settings_wallpaper_data_url) },
+  ];
+  return <DetailSheet title="页面壁纸" dark={dark} onClose={onClose}><div className="wallpaper-menu-group">{choices.map(({ kind, label, set }) => <button key={kind} type="button" className="wallpaper-menu-row" onClick={() => onSelect(kind)}><span>{label}</span><span>{set ? '已设置' : '未设置'}<ChevronRight size={18} aria-hidden="true" /></span></button>)}</div></DetailSheet>;
 }
 
 function ProfileAvatarSheet({ profile, dark, onClose, onChoose, onRemove }: { profile: Profile; dark: boolean; onClose: () => void; onChoose: (file: File | undefined) => void; onRemove: () => void }) {
@@ -1020,6 +1045,11 @@ function TimetableBackgroundSheet({ background, dark, onClose, onChoose, onRemov
 
 function HomeWallpaperSheet({ background, dark, onClose, onChoose, onRemove }: { background: string | null; dark: boolean; onClose: () => void; onChoose: (file: File | undefined) => void; onRemove: () => void }) {
   return <DetailSheet title="首页壁纸" dark={dark} onClose={onClose}><section className="timetable-background-editor">{background ? <img src={background} alt="当前首页壁纸预览" /> : <div className="timetable-background-editor-empty">尚未设置首页壁纸</div>}<label className="profile-avatar-picker">选择并裁切首页壁纸<input aria-label="选择首页壁纸" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { onChoose(event.target.files?.[0]); event.currentTarget.value = ''; }} /></label>{background && <button type="button" className="profile-avatar-remove" onClick={onRemove}>移除首页壁纸</button>}<small>原图最大 5 MB。保存后为 9:16 JPEG，最大 1 MB；只影响首页，不改变课表背景。</small></section></DetailSheet>;
+}
+
+function PageWallpaperSheet({ kind, background, dark, onClose, onChoose, onRemove }: { kind: 'analysis' | 'settings'; background: string | null; dark: boolean; onClose: () => void; onChoose: (file: File | undefined) => void; onRemove: () => void }) {
+  const label = kind === 'analysis' ? '分析页壁纸' : '设置页壁纸';
+  return <DetailSheet title={label} dark={dark} onClose={onClose}><section className="timetable-background-editor">{background ? <img src={background} alt={`当前${label}预览`} /> : <div className="timetable-background-editor-empty">尚未设置{label}</div>}<label className="profile-avatar-picker">选择并裁切{label}<input aria-label={`选择${label}`} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { onChoose(event.target.files?.[0]); event.currentTarget.value = ''; }} /></label>{background && <button type="button" className="profile-avatar-remove" onClick={onRemove}>移除{label}</button>}<small>原图最大 5 MB。保存后为 9:16 JPEG，最大 1 MB；仅应用于{kind === 'analysis' ? '分析' : '设置'}页面。</small></section></DetailSheet>;
 }
 
 function ProfileNameSheet({ initialName, dark, onClose, onConfirm }: { initialName: string; dark: boolean; onClose: () => void; onConfirm: (name: string) => void }) {
@@ -1302,7 +1332,7 @@ function ConfirmDialog({ title, description, confirmLabel, pending, onCancel, on
   return <div className="sheet-mask confirm-mask" role="presentation" onClick={pending ? undefined : onCancel}><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-description" onClick={(event) => event.stopPropagation()}><div className="confirm-dialog-copy"><h2 id="confirm-dialog-title">{title}</h2><p id="confirm-dialog-description">{description}</p></div><div className="confirm-dialog-actions"><button type="button" className="confirm-dialog-destructive" disabled={pending} onClick={onConfirm}>{pending ? '正在处理…' : confirmLabel}</button><button type="button" className="confirm-dialog-cancel" disabled={pending} onClick={onCancel}>取消</button></div></section></div>;
 }
 function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
-function Page({ title, children, action, icon, className, headerClassName, compactTitle, mainRef, headerRef }: { title: string; children: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode; className?: string; headerClassName?: string; compactTitle?: boolean; mainRef?: RefObject<HTMLElement>; headerRef?: RefObject<HTMLElement> }) { return <main ref={mainRef} className={className}><header ref={headerRef} className={headerClassName}>{compactTitle && icon && <span className="page-fixed-title-icon" aria-hidden="true">{icon}</span>}<h1 className="page-title">{!compactTitle && icon && <span className="page-title-icon" aria-hidden="true">{icon}</span>}{title}</h1>{compactTitle && <span className="page-title-compact" aria-hidden="true">{title}</span>}{action}</header>{children}</main>; }
+function Page({ title, children, action, icon, className, wallpaper, headerClassName, compactTitle, mainRef, headerRef }: { title: string; children: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode; className?: string; wallpaper?: string | null; headerClassName?: string; compactTitle?: boolean; mainRef?: RefObject<HTMLElement>; headerRef?: RefObject<HTMLElement> }) { return <>{wallpaper && createPortal(<div className="secondary-page-wallpaper" aria-hidden="true" style={{ backgroundImage: `url("${wallpaper}")` }} />, document.body)}<main ref={mainRef} className={`${className ?? ''}${wallpaper ? ' page-with-personal-wallpaper' : ''}`.trim()}><header ref={headerRef} className={headerClassName}>{compactTitle && icon && <span className="page-fixed-title-icon" aria-hidden="true">{icon}</span>}<h1 className="page-title">{!compactTitle && icon && <span className="page-title-icon" aria-hidden="true">{icon}</span>}{title}</h1>{compactTitle && <span className="page-title-compact" aria-hidden="true">{title}</span>}{action}</header>{children}</main></>; }
 
 function useAuthenticationViewportLock() {
   useEffect(() => {

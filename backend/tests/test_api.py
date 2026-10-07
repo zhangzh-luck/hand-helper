@@ -82,6 +82,18 @@ def test_api_auth_and_local_file_import():
         assert removed_home_wallpaper.json()["data"]["timetable_background_data_url"] == avatar_data_url(720, 1280)
         invalid_home_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "home_wallpaper_data_url": avatar_data_url(640, 480)})
         assert invalid_home_wallpaper.status_code == 422
+        analysis_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "analysis_wallpaper_data_url": avatar_data_url(720, 1280)})
+        assert analysis_wallpaper.status_code == 200
+        assert analysis_wallpaper.json()["data"]["analysis_wallpaper_data_url"] == avatar_data_url(720, 1280)
+        assert analysis_wallpaper.json()["data"]["settings_wallpaper_data_url"] is None
+        settings_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "settings_wallpaper_data_url": avatar_data_url(720, 1280)})
+        assert settings_wallpaper.status_code == 200
+        assert settings_wallpaper.json()["data"]["analysis_wallpaper_data_url"] == avatar_data_url(720, 1280)
+        removed_analysis_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "analysis_wallpaper_data_url": None})
+        assert removed_analysis_wallpaper.json()["data"]["analysis_wallpaper_data_url"] is None
+        assert removed_analysis_wallpaper.json()["data"]["settings_wallpaper_data_url"] == avatar_data_url(720, 1280)
+        invalid_settings_wallpaper = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "settings_wallpaper_data_url": avatar_data_url(640, 480)})
+        assert invalid_settings_wallpaper.status_code == 422
         invalid_background = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "timetable_background_data_url": avatar_data_url(640, 480)})
         assert invalid_background.status_code == 422
         non_square_avatar = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(640, 480)})
