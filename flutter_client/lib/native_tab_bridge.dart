@@ -119,8 +119,10 @@ Uint8List? _prepareAvatar(String source) {
     }
     final decoded = img.decodeImage(base64Decode(source.substring(comma + 1)));
     if (decoded == null) return null;
+    // JPEG avatars have no alpha channel. The crop mask needs an RGBA target,
+    // otherwise its transparent corners are discarded when PNG is encoded.
     final circular = img.copyResizeCropSquare(
-      img.bakeOrientation(decoded),
+      img.bakeOrientation(decoded).convert(numChannels: 4),
       size: 96,
       interpolation: img.Interpolation.average,
       radius: 48,

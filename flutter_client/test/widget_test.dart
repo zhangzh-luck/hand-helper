@@ -5766,6 +5766,42 @@ void main() {
     },
   );
 
+  test('iOS avatar preserves a transparent circle from an RGB JPEG', () async {
+    final source = img.Image(width: 160, height: 96, numChannels: 3);
+    for (var y = 0; y < source.height; y++) {
+      for (var x = 0; x < source.width; x++) {
+        source.setPixelRgb(x, y, 210, 50, 85);
+      }
+    }
+    final dataUrl =
+        'data:image/jpeg;base64,${base64Encode(img.encodeJpg(source))}';
+    final prepared = await NativeTabBridge.prepareAvatar(dataUrl);
+    expect(prepared, isNotNull);
+    // PNG must retain an alpha channel even though the source JPEG has none.
+    final image = img.decodePng(prepared!)!;
+    expect(image.width, 96);
+    expect(image.height, 96);
+    expect(image.hasAlpha, isTrue);
+    for (final point in [
+      (0, 0),
+      (95, 0),
+      (0, 95),
+      (95, 95),
+      (8, 8),
+      (87, 8),
+      (8, 87),
+      (87, 87),
+    ]) {
+      expect(image.getPixel(point.$1, point.$2).a, 0);
+    }
+    for (final point in [(48, 48), (48, 1), (1, 48), (94, 48)]) {
+      final pixel = image.getPixel(point.$1, point.$2);
+      expect(pixel.a, greaterThan(200));
+      expect(pixel.r, greaterThan(150));
+      expect(pixel.g, lessThan(100));
+    }
+  });
+
   testWidgets('iOS Shell updates avatar and clears it across account changes', (
     tester,
   ) async {

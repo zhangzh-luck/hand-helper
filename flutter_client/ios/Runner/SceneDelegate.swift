@@ -144,11 +144,24 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
             // Match the system house symbol's point height. UITabBar keeps
             // ownership of item alignment, highlighting, and interaction.
             let diameter = max(self.homeSymbol?.size.height ?? 24, 1)
-            let image = UIImage(
-              cgImage: decoded,
-              scale: CGFloat(decoded.height) / diameter,
-              orientation: .up
-            ).withRenderingMode(.alwaysOriginal)
+            // Restore the circular UIKit rendering used by the first native
+            // tab implementation. The transparent renderer also protects the
+            // shape if an avatar arrives without an alpha channel.
+            let size = CGSize(width: diameter, height: diameter)
+            let format = UIGraphicsImageRendererFormat()
+            format.opaque = false
+            format.scale = CGFloat(decoded.height) / diameter
+            let source = UIImage(cgImage: decoded)
+            let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+              UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).addClip()
+              let scale = max(size.width / source.size.width,
+                              size.height / source.size.height)
+              let drawn = CGSize(width: source.size.width * scale,
+                                 height: source.size.height * scale)
+              source.draw(in: CGRect(x: (size.width - drawn.width) / 2,
+                                   y: (size.height - drawn.height) / 2,
+                                   width: drawn.width, height: drawn.height))
+            }.withRenderingMode(.alwaysOriginal)
             self.applyHomeAvatar(image)
           }
         }
