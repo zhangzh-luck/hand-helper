@@ -5782,6 +5782,20 @@ void main() {
     expect(image.width, 96);
     expect(image.height, 96);
     expect(image.hasAlpha, isTrue);
+    var minX = image.width;
+    var minY = image.height;
+    var maxX = -1;
+    var maxY = -1;
+    for (var y = 0; y < image.height; y++) {
+      for (var x = 0; x < image.width; x++) {
+        if (image.getPixel(x, y).a == 0) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+    expect((minX, minY, maxX, maxY), (0, 0, 95, 95));
     for (final point in [
       (0, 0),
       (95, 0),

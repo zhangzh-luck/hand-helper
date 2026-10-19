@@ -141,9 +141,10 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
           DispatchQueue.main.async { [weak self] in
             guard let self, self.avatarRequestID == requestID,
                   let decoded else { return }
-            // Match the system house symbol's point height. UITabBar keeps
-            // ownership of item alignment, highlighting, and interaction.
-            let diameter = max(self.homeSymbol?.size.height ?? 24, 1)
+            // Use the 24-point avatar canvas from the original native tab.
+            // A symbol's intrinsic image height is smaller than the size
+            // UIKit may render it at inside the tab bar.
+            let diameter: CGFloat = 24
             // Restore the circular UIKit rendering used by the first native
             // tab implementation. The transparent renderer also protects the
             // shape if an avatar arrives without an alpha channel.
