@@ -1,0 +1,57 @@
+name: Flutter iOS Release (unsigned)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: flutter_client
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.3'
+          cache: true
+
+      - name: Show build tools
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: Resolve Flutter dependencies
+        run: |
+          flutter precache --ios
+          flutter pub get
+
+      - name: Install iOS dependencies
+        run: pod install --repo-update
+        working-directory: flutter_client/ios
+
+      - name: Build unsigned iOS Release app
+        run: flutter build ios --release --no-codesign
+
+      - name: Package build artifact
+        run: |
+          test -d build/ios/iphoneos/Runner.app
+          tar -czf build/Runner-ios-release-unsigned.tar.gz -C build/ios/iphoneos Runner.app
+
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-ios-release-unsigned-app
+          path: flutter_client/build/Runner-ios-release-unsigned.tar.gz
+          if-no-files-found: error
+          retention-days: 14
