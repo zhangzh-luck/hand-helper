@@ -775,7 +775,11 @@ class _TimetablePageState extends State<TimetablePage> {
             Expanded(
               child: SingleChildScrollView(
                 physics: const ClampingScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 100),
+                padding: EdgeInsets.only(
+                  bottom: defaultTargetPlatform == TargetPlatform.iOS
+                      ? 24
+                      : 100,
+                ),
                 child: SizedBox(
                   height: periods.length * rowHeight,
                   child: Row(

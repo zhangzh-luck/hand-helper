@@ -9,6 +9,7 @@ import 'api.dart';
 import 'analysis_page.dart';
 import 'floating_tab_bar.dart';
 import 'launch_preview.dart';
+import 'native_tab_bridge.dart';
 import 'passkey_login.dart';
 import 'settings_page.dart';
 import 'today_page.dart';
@@ -16,10 +17,10 @@ import 'timetable_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations(const [
-    DeviceOrientation.portraitUp,
-  ]);
   if (defaultTargetPlatform == TargetPlatform.android) {
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
     final picker = ImagePickerPlatform.instance;
     if (picker is ImagePickerAndroid) picker.useAndroidPhotoPicker = true;
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -772,9 +773,33 @@ class _ShellState extends State<Shell> {
   bool analysisDetailClosing = false;
   String? avatarSource;
   ImageProvider? avatarImage;
+  String? _lastNativeState;
+  bool _nativeSyncScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    NativeTabBridge.attach(
+      onSelected: (index) {
+        if (settingsDetailOpen ||
+            analysisDetailOpen ||
+            settingsDetailClosing ||
+            analysisDetailClosing) {
+          return;
+        }
+        select(index);
+      },
+      onReady: () {
+        _lastNativeState = null;
+        NativeTabBridge.setAvatar(avatarSource);
+        if (mounted) setState(() {});
+      },
+    );
+  }
 
   @override
   void dispose() {
+    NativeTabBridge.detach();
     localProfileChanges.dispose();
     super.dispose();
   }
@@ -799,6 +824,7 @@ class _ShellState extends State<Shell> {
       analysisDetailClosing = false;
       avatarSource = null;
       avatarImage = null;
+      NativeTabBridge.setAvatar(null);
     }
   }
 
@@ -806,6 +832,7 @@ class _ShellState extends State<Shell> {
     if (avatarSource == value.avatar) return;
     avatarSource = value.avatar;
     setState(() => avatarImage = dataImage(value.avatar));
+    NativeTabBridge.setAvatar(value.avatar);
   }
 
   void applyLocalProfile(Profile value) {
@@ -871,8 +898,28 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final detailOpen = settingsDetailOpen || analysisDetailOpen;
     final detailClosing = settingsDetailClosing || analysisDetailClosing;
+    if (NativeTabBridge.enabled && !_nativeSyncScheduled) {
+      _nativeSyncScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _nativeSyncScheduled = false;
+        if (!mounted) return;
+        final state =
+            '$selected/${settingsDetailOpen || analysisDetailOpen || settingsDetailClosing || analysisDetailClosing}/${Theme.of(context).brightness}';
+        if (state == _lastNativeState) return;
+        _lastNativeState = state;
+        NativeTabBridge.sync(
+          selected: selected,
+          detailOpen:
+              settingsDetailOpen ||
+              analysisDetailOpen ||
+              settingsDetailClosing ||
+              analysisDetailClosing,
+          dark: Theme.of(context).brightness == Brightness.dark,
+        );
+      });
+    }
     return Scaffold(
-      extendBody: true,
+      extendBody: !NativeTabBridge.enabled,
       body: IndexedStack(
         index: selected,
         children: [
@@ -895,33 +942,35 @@ class _ShellState extends State<Shell> {
             ),
         ],
       ),
-      bottomNavigationBar: IgnorePointer(
-        key: const Key('settings-dock-interaction'),
-        ignoring: detailOpen || detailClosing,
-        child: ExcludeSemantics(
-          excluding: detailOpen || detailClosing,
-          child: AnimatedSlide(
-            key: const Key('settings-dock-slide'),
-            offset: detailOpen ? const Offset(0, 1.25) : Offset.zero,
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            child: AnimatedOpacity(
-              opacity: detailOpen ? 0 : 1,
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 220),
-              child: FloatingTabBar(
-                key: const Key('primary-tab-bar'),
-                selectedIndex: selected,
-                avatar: avatarImage,
-                onSelected: select,
+      bottomNavigationBar: NativeTabBridge.enabled
+          ? null
+          : IgnorePointer(
+              key: const Key('settings-dock-interaction'),
+              ignoring: detailOpen || detailClosing,
+              child: ExcludeSemantics(
+                excluding: detailOpen || detailClosing,
+                child: AnimatedSlide(
+                  key: const Key('settings-dock-slide'),
+                  offset: detailOpen ? const Offset(0, 1.25) : Offset.zero,
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: detailOpen ? 0 : 1,
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 220),
+                    child: FloatingTabBar(
+                      key: const Key('primary-tab-bar'),
+                      selectedIndex: selected,
+                      avatar: avatarImage,
+                      onSelected: select,
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

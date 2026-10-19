@@ -559,7 +559,11 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
                 Expanded(
                   child: ListView(
                     physics: const ClampingScrollPhysics(),
-                    padding: const EdgeInsets.only(bottom: 105),
+                    padding: EdgeInsets.only(
+                      bottom: defaultTargetPlatform == TargetPlatform.iOS
+                          ? 24
+                          : 105,
+                    ),
                     children: [
                       if (!hasTodayData && !hasCourseData)
                         Padding(

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5465,6 +5466,68 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'iOS Shell follows native tab selection and hides it on dispose',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      const channel = MethodChannel('hand_helper/native_tab');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(channel, null);
+      });
+      SharedPreferences.setMockInitialValues({
+        'session_cookie': 'session=offline',
+      });
+      final client = ApiClient(
+        cache: _EmptyTodayCache(),
+        localManualCourseStore: _MemoryLocalManualCourseStore(),
+        localProfileStore: _MemoryLocalProfileStore(),
+        client: MockClient((_) async => throw const SocketException('offline')),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Shell(
+            api: client,
+            onUnauthorized: () {},
+            themeMode: ThemeMode.system,
+            onThemeModeChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(FloatingTabBar), findsNothing);
+      Map<Object?, Object?> state() =>
+          calls.lastWhere((call) => call.method == 'sync').arguments
+              as Map<Object?, Object?>;
+      expect(state()['visible'], isTrue);
+      expect(state()['selected'], 0);
+
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('selectTab', 1),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(state()['selected'], 1);
+      expect(find.byType(FloatingTabBar), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(state()['visible'], isFalse);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets('Shell preserves timetable week after switching tabs', (
     tester,

@@ -599,7 +599,14 @@ class _AnalysisPageState extends State<AnalysisPage>
                       ListView(
                         controller: scrollController,
                         physics: const ClampingScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(18, 25, 18, 118),
+                        padding: EdgeInsets.fromLTRB(
+                          18,
+                          25,
+                          18,
+                          defaultTargetPlatform == TargetPlatform.iOS
+                              ? 24
+                              : 118,
+                        ),
                         children: [
                           const Row(
                             children: [
