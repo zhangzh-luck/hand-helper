@@ -18,6 +18,13 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      # device_info_plus 13.3.0 references NSProcessInfo.isiOSAppOnVision,
+      # which is declared in the iOS 26.1 SDK but not Xcode 16.4's SDK.
+      - name: Select Xcode 26.1.1
+        run: |
+          test -d /Applications/Xcode_26.1.1.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -29,6 +36,7 @@ jobs:
         run: |
           flutter --version
           xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
           pod --version
 
       - name: Resolve Flutter dependencies
