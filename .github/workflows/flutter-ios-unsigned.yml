@@ -63,3 +63,38 @@ jobs:
           path: flutter_client/build/Runner-ios-release-unsigned.tar.gz
           if-no-files-found: error
           retention-days: 14
+
+      - name: Package and verify unsigned IPA
+        run: |
+          app=build/ios/iphoneos/Runner.app
+          payload=build/unsigned-ipa/Payload
+          ipa=build/HandHelper-unsigned.ipa
+          extracted=build/unsigned-ipa/verified/Payload/Runner.app
+
+          test -d "$app"
+          test -f "$app/Info.plist"
+          test -x "$app/Runner"
+          mkdir -p "$payload"
+          /usr/bin/ditto "$app" "$payload/Runner.app"
+          (cd build/unsigned-ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelper-unsigned.ipa)
+
+          /usr/bin/unzip -tqq "$ipa"
+          /usr/bin/ditto -x -k "$ipa" build/unsigned-ipa/verified
+          test -f "$extracted/Info.plist"
+          test -x "$extracted/Runner"
+          while IFS= read -r -d '' file; do
+            test -f "$extracted/$file"
+            test "$(stat -f '%Lp' "$app/$file")" = "$(stat -f '%Lp' "$extracted/$file")"
+          done < <(cd "$app" && find . -type f -print0)
+          while IFS= read -r link; do
+            test -L "$extracted/$link"
+            test "$(readlink "$app/$link")" = "$(readlink "$extracted/$link")"
+          done < <(cd "$app" && find . -type l -print)
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HandHelper-unsigned-ipa
+          path: flutter_client/build/HandHelper-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
