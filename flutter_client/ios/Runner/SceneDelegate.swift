@@ -1,4 +1,5 @@
 import Flutter
+import ImageIO
 import UIKit
 
 class SceneDelegate: FlutterSceneDelegate {
@@ -32,6 +33,8 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private var bottomOcclusion: CGFloat = -1
   private var selectedIndex = 0
   private var appearanceMode: String?
+  private let homeSymbol = UIImage(systemName: "house")
+  private var avatarRequestID = 0
 
   init(flutter: FlutterViewController) {
     self.flutter = flutter
@@ -120,6 +123,36 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
         }
         if appearance != self.appearanceMode { self.applyAppearance(appearance) }
         result(nil)
+      case "setAvatar":
+        self.avatarRequestID += 1
+        let requestID = self.avatarRequestID
+        // Drop the previous user's image before asynchronous decoding starts.
+        self.applyHomeAvatar(nil)
+        guard let typedData = call.arguments as? FlutterStandardTypedData,
+              typedData.data.count <= 256_000 else {
+          result(nil)
+          return
+        }
+        let data = typedData.data
+        DispatchQueue.global(qos: .userInitiated).async {
+          let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+          let decoded = CGImageSourceCreateWithData(data as CFData, options)
+            .flatMap { CGImageSourceCreateImageAtIndex($0, 0, options) }
+          DispatchQueue.main.async { [weak self] in
+            guard let self, self.avatarRequestID == requestID,
+                  let decoded else { return }
+            // Match the system house symbol's point height. UITabBar keeps
+            // ownership of item alignment, highlighting, and interaction.
+            let diameter = max(self.homeSymbol?.size.height ?? 24, 1)
+            let image = UIImage(
+              cgImage: decoded,
+              scale: CGFloat(decoded.height) / diameter,
+              orientation: .up
+            ).withRenderingMode(.alwaysOriginal)
+            self.applyHomeAvatar(image)
+          }
+        }
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -180,6 +213,12 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
     // the same appearance as Flutter's user-selected ThemeMode.
     overrideUserInterfaceStyle = style
     view.window?.overrideUserInterfaceStyle = style
+  }
+
+  private func applyHomeAvatar(_ avatar: UIImage?) {
+    guard let item = tabBar.items?.first else { return }
+    item.image = avatar ?? homeSymbol
+    item.selectedImage = avatar
   }
 
   @objc private func keyboardChanged(_ notification: Notification) {

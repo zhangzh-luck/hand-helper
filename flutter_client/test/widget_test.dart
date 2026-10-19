@@ -1427,7 +1427,10 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        theme: ThemeData(brightness: Brightness.dark),
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          splashFactory: NoSplash.splashFactory,
+        ),
         home: Scaffold(
           body: TodayPage(
             api: client,
@@ -1455,6 +1458,252 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('编辑安排'), findsOneWidget);
   });
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    for (final hasWallpaper in [false, true]) {
+      for (final dark in [false, true]) {
+        testWidgets(
+          'schedule actions stay clipped until swipe on ${platform.name} '
+          'with ${hasWallpaper ? 'wallpaper' : 'default background'} '
+          'in ${dark ? 'dark' : 'light'} mode',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = platform;
+            addTearDown(() => debugDefaultTargetPlatformOverride = null);
+            SharedPreferences.setMockInitialValues({
+              'session_cookie': 'session=schedule-swipe',
+            });
+            tester.view.physicalSize = const Size(1080, 2400);
+            tester.view.devicePixelRatio = 3;
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+            final date = dateKey(DateTime.now());
+            final profile = Profile(
+              '测试',
+              null,
+              hasWallpaper ? _avatarDataUrl(width: 2, height: 2) : null,
+            );
+            final snapshot = TodaySnapshot(
+              TodayData(profile, const [], [
+                CustomSchedule(7, '完成实验报告', date, '19:00'),
+              ]),
+              date,
+              DateTime.now(),
+            );
+            final client = ApiClient(
+              cache: _FixtureTodayCache(snapshot),
+              localProfileStore: _MemoryLocalProfileStore(),
+              localScheduleStore: _MemoryLocalScheduleStore(),
+              client: MockClient(
+                (_) async => throw const SocketException('offline'),
+              ),
+            );
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: ThemeData(
+                  brightness: dark ? Brightness.dark : Brightness.light,
+                  splashFactory: NoSplash.splashFactory,
+                ),
+                home: Scaffold(
+                  body: TodayPage(
+                    api: client,
+                    onUnauthorized: () {},
+                    onProfile: (_) {},
+                  ),
+                ),
+              ),
+            );
+            for (var i = 0; i < 15; i++) {
+              await tester.pump(const Duration(milliseconds: 100));
+            }
+            final card = find.byKey(const Key('today-entry-card'));
+            final actions = find.byKey(
+              const Key('today-schedule-actions-clip'),
+            );
+            expect(card, findsOneWidget);
+            final gradient =
+                (tester.widget<Container>(card).decoration! as BoxDecoration)
+                        .gradient!
+                    as LinearGradient;
+            expect(gradient.colors.first.a < 1, hasWallpaper);
+            expect(tester.getSize(actions).width, 0);
+            expect(find.text('编辑').hitTestable(), findsNothing);
+            expect(find.text('删除').hitTestable(), findsNothing);
+            await tester.tapAt(tester.getCenter(card));
+            await tester.pump();
+            expect(find.byType(AlertDialog), findsNothing);
+
+            await tester.drag(card, const Offset(-220, 0));
+            await tester.pumpAndSettle();
+            expect(tester.getSize(actions).width, 168);
+            expect(find.text('编辑').hitTestable(), findsOneWidget);
+            expect(find.text('删除').hitTestable(), findsOneWidget);
+            final shiftedCard = tester.getRect(card);
+            await tester.tapAt(
+              Offset(shiftedCard.right - 20, shiftedCard.center.dy),
+            );
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 110));
+            final actionRect = tester.getRect(actions);
+            expect(actionRect.width, greaterThan(0));
+            expect(
+              actionRect.width,
+              closeTo(actionRect.right - tester.getRect(card).right, 1),
+            );
+            expect(find.text('删除').hitTestable(), findsNothing);
+            await tester.pumpAndSettle();
+            expect(tester.getSize(actions).width, 0);
+            expect(find.text('编辑').hitTestable(), findsNothing);
+            await tester.drag(card, const Offset(-220, 0));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('删除'));
+            await tester.pumpAndSettle();
+            expect(find.textContaining('删除“完成实验报告”'), findsOneWidget);
+            await tester.tap(find.text('取消'));
+            await tester.pumpAndSettle();
+
+            await tester.drag(card, const Offset(-220, 0));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('编辑'));
+            await tester.pumpAndSettle();
+            expect(find.text('编辑安排'), findsOneWidget);
+            expect(tester.takeException(), isNull);
+            debugDefaultTargetPlatformOverride = null;
+          },
+        );
+      }
+    }
+  }
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    for (final hasWallpaper in [false, true]) {
+      testWidgets(
+        'Shell closes schedule actions on tab exit on ${platform.name} '
+        'with ${hasWallpaper ? 'wallpaper' : 'default background'}',
+        (tester) async {
+          debugDefaultTargetPlatformOverride = platform;
+          addTearDown(() => debugDefaultTargetPlatformOverride = null);
+          const channel = MethodChannel('hand_helper/native_tab');
+          final messenger =
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+          if (platform == TargetPlatform.iOS) {
+            messenger.setMockMethodCallHandler(channel, (_) async => null);
+            addTearDown(
+              () => messenger.setMockMethodCallHandler(channel, null),
+            );
+          }
+          SharedPreferences.setMockInitialValues({
+            'session_cookie': 'session=schedule-tab',
+          });
+          tester.view.physicalSize = const Size(1080, 2400);
+          tester.view.devicePixelRatio = 3;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final date = dateKey(DateTime.now());
+          final profile = Profile(
+            '测试',
+            null,
+            hasWallpaper ? _avatarDataUrl(width: 2, height: 2) : null,
+          );
+          final client = ApiClient(
+            cache: _FixtureTodayCache(
+              TodaySnapshot(
+                TodayData(profile, const [], [
+                  CustomSchedule(7, '完成实验报告', date, '19:00'),
+                ]),
+                date,
+                DateTime.now(),
+              ),
+            ),
+            localProfileStore: _MemoryLocalProfileStore(),
+            localScheduleStore: _MemoryLocalScheduleStore(),
+            client: MockClient(
+              (_) async => throw const SocketException('offline'),
+            ),
+          );
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Shell(
+                api: client,
+                onUnauthorized: () {},
+                themeMode: ThemeMode.light,
+                onThemeModeChanged: (_) {},
+              ),
+            ),
+          );
+          for (var i = 0; i < 15; i++) {
+            await tester.pump(const Duration(milliseconds: 100));
+          }
+          final todayState = tester.state(find.byType(TodayPage));
+          final card = find.byKey(const Key('today-entry-card'));
+          final actions = find.byKey(const Key('today-schedule-actions-clip'));
+          final gradient =
+              (tester.widget<Container>(card).decoration! as BoxDecoration)
+                      .gradient!
+                  as LinearGradient;
+          expect(gradient.colors.first.a < 1, hasWallpaper);
+
+          Future<void> selectTab(int index) async {
+            if (platform == TargetPlatform.iOS) {
+              await messenger.handlePlatformMessage(
+                channel.name,
+                const StandardMethodCodec().encodeMethodCall(
+                  MethodCall('selectTab', index),
+                ),
+                (_) {},
+              );
+            } else {
+              tester
+                  .widget<FloatingTabBar>(find.byType(FloatingTabBar))
+                  .onSelected(index);
+            }
+          }
+
+          await tester.drag(card, const Offset(-220, 0));
+          await tester.pumpAndSettle();
+          expect(tester.getSize(actions).width, 168);
+          await selectTab(1);
+          await tester.pump();
+          await selectTab(0);
+          await tester.pumpAndSettle();
+          expect(tester.state(find.byType(TodayPage)), same(todayState));
+          expect(tester.getSize(actions).width, 0);
+          expect(find.text('编辑').hitTestable(), findsNothing);
+          expect(find.text('删除').hitTestable(), findsNothing);
+          final semantics = tester.ensureSemantics();
+          expect(find.semantics.byLabel('编辑'), findsNothing);
+          expect(find.semantics.byLabel('删除'), findsNothing);
+          semantics.dispose();
+          await tester.tapAt(tester.getCenter(card));
+          await tester.pump();
+          expect(find.byType(AlertDialog), findsNothing);
+
+          await tester.drag(card, const Offset(-220, 0));
+          await tester.pumpAndSettle();
+          expect(find.text('删除').hitTestable(), findsOneWidget);
+          // Switch twice without waiting for the close animation to finish.
+          await selectTab(1);
+          await selectTab(0);
+          await tester.pumpAndSettle();
+          expect(tester.getSize(actions).width, 0);
+          expect(find.text('删除').hitTestable(), findsNothing);
+          final gesture = await tester.startGesture(tester.getCenter(card));
+          await gesture.moveBy(const Offset(-100, 0));
+          await tester.pump();
+          expect(tester.getSize(actions).width, greaterThan(0));
+          await selectTab(1);
+          await selectTab(0);
+          await gesture.moveBy(const Offset(-60, 0));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(tester.getSize(actions).width, 0);
+          expect(find.text('编辑').hitTestable(), findsNothing);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+          debugDefaultTargetPlatformOverride = null;
+        },
+      );
+    }
+  }
 
   testWidgets('active course reminder aligns with Today course cards', (
     tester,
@@ -5466,6 +5715,151 @@ void main() {
       isTrue,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  test(
+    'iOS avatar channel sends a full-color circular image and reset',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      const channel = MethodChannel('hand_helper/native_tab');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(channel, null);
+      });
+      final source = img.Image(width: 4, height: 4, numChannels: 4);
+      for (var y = 0; y < 4; y++) {
+        for (var x = 0; x < 4; x++) {
+          source.setPixelRgba(x, y, 220, 40, 60, 255);
+        }
+      }
+      final dataUrl =
+          'data:image/png;base64,${base64Encode(img.encodePng(source))}';
+      final prepared = await NativeTabBridge.prepareAvatar(dataUrl);
+      expect(prepared, isNotNull);
+      final image = img.decodePng(prepared!)!;
+      expect(image.width, 96);
+      expect(image.height, 96);
+      expect(image.getPixel(0, 0).a, 0);
+      expect(image.getPixel(48, 48).r, greaterThan(150));
+      expect(image.getPixel(48, 48).g, lessThan(100));
+      NativeTabBridge.setAvatar(prepared);
+      NativeTabBridge.setAvatar(null);
+      await Future<void>.delayed(Duration.zero);
+      final avatarCalls = calls
+          .where((call) => call.method == 'setAvatar')
+          .toList();
+      expect(avatarCalls, hasLength(2));
+      expect(avatarCalls.first.arguments, isA<Uint8List>());
+      expect(avatarCalls.last.arguments, isNull);
+      expect(await NativeTabBridge.prepareAvatar('invalid'), isNull);
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      NativeTabBridge.setAvatar(prepared);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((call) => call.method == 'setAvatar'), hasLength(2));
+    },
+  );
+
+  testWidgets('iOS Shell updates avatar and clears it across account changes', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    const channel = MethodChannel('hand_helper/native_tab');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+    SharedPreferences.setMockInitialValues({
+      'session_cookie': 'session=avatar',
+    });
+    ApiClient client() => ApiClient(
+      cache: _EmptyTodayCache(),
+      localProfileStore: _MemoryLocalProfileStore(),
+      localScheduleStore: _MemoryLocalScheduleStore(),
+      localManualCourseStore: _MemoryLocalManualCourseStore(),
+      client: MockClient((_) async => throw const SocketException('offline')),
+    );
+    final first = client();
+    Widget shell(ApiClient api) => MaterialApp(
+      home: Shell(
+        api: api,
+        onUnauthorized: () {},
+        themeMode: ThemeMode.system,
+        onThemeModeChanged: (_) {},
+      ),
+    );
+    await tester.pumpWidget(shell(first));
+    await tester.pumpAndSettle();
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('selectTab', 3),
+      ),
+      (_) {},
+    );
+    await tester.pump();
+    final settings = tester.widget<SettingsPage>(find.byType(SettingsPage));
+    settings.onProfileChanged!(
+      Profile('甲', _avatarDataUrl(width: 4, height: 4), null),
+    );
+    for (
+      var i = 0;
+      i < 100 &&
+          !calls.any(
+            (call) => call.method == 'setAvatar' && call.arguments is Uint8List,
+          );
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump();
+    }
+    expect(
+      calls.any(
+        (call) => call.method == 'setAvatar' && call.arguments is Uint8List,
+      ),
+      isTrue,
+    );
+    settings.onProfileChanged!(const Profile('甲', null, null));
+    await tester.pump();
+    expect(
+      calls.lastWhere((call) => call.method == 'setAvatar').arguments,
+      isNull,
+    );
+
+    settings.onProfileChanged!(
+      Profile('甲', _avatarDataUrl(width: 8, height: 8), null),
+    );
+    await tester.pumpWidget(shell(client()));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 250)),
+    );
+    await tester.pump();
+    expect(
+      calls.lastWhere((call) => call.method == 'setAvatar').arguments,
+      isNull,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(
+      calls.lastWhere((call) => call.method == 'setAvatar').arguments,
+      isNull,
+    );
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets(

@@ -776,6 +776,7 @@ class _ShellState extends State<Shell> {
   final Set<int> visited = {0};
   final Map<int, Widget> mainPages = {};
   ValueNotifier<Profile?> localProfileChanges = ValueNotifier(null);
+  final ValueNotifier<bool> todayTabActive = ValueNotifier(true);
   bool settingsDetailOpen = false;
   bool settingsDetailClosing = false;
   bool analysisDetailOpen = false;
@@ -785,6 +786,7 @@ class _ShellState extends State<Shell> {
   double _nativeBottomOverlap = 0;
   String? _lastNativeState;
   bool _nativeSyncScheduled = false;
+  int _avatarGeneration = 0;
 
   @override
   void initState() {
@@ -801,7 +803,10 @@ class _ShellState extends State<Shell> {
       },
       onReady: () {
         _lastNativeState = null;
-        if (mounted) _sendNativeState();
+        if (mounted) {
+          _sendNativeState();
+          _syncNativeAvatar();
+        }
       },
       onMetrics: (height) {
         if (!mounted ||
@@ -816,8 +821,10 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _avatarGeneration++;
     NativeTabBridge.detach();
     localProfileChanges.dispose();
+    todayTabActive.dispose();
     super.dispose();
   }
 
@@ -841,6 +848,8 @@ class _ShellState extends State<Shell> {
       analysisDetailClosing = false;
       avatarSource = null;
       avatarImage = null;
+      todayTabActive.value = true;
+      _syncNativeAvatar();
     }
     if (oldWidget.themeMode != widget.themeMode ||
         !identical(oldWidget.api, widget.api)) {
@@ -852,6 +861,29 @@ class _ShellState extends State<Shell> {
     if (avatarSource == value.avatar) return;
     avatarSource = value.avatar;
     setState(() => avatarImage = dataImage(value.avatar));
+    _syncNativeAvatar();
+  }
+
+  void _syncNativeAvatar() {
+    if (!NativeTabBridge.enabled) return;
+    final source = avatarSource;
+    final generation = ++_avatarGeneration;
+    // Clear immediately so an old account or old image is never displayed
+    // while a replacement is being prepared in an isolate.
+    NativeTabBridge.setAvatar(null);
+    if (source == null) return;
+    NativeTabBridge.prepareAvatar(source).then(
+      (image) {
+        if (!mounted || generation != _avatarGeneration) return;
+        NativeTabBridge.setAvatar(image);
+      },
+      onError: (Object error, StackTrace stack) {
+        if (mounted && generation == _avatarGeneration) {
+          NativeTabBridge.setAvatar(null);
+          debugPrint('Native tab avatar preparation failed: $error');
+        }
+      },
+    );
   }
 
   void applyLocalProfile(Profile value) {
@@ -861,6 +893,7 @@ class _ShellState extends State<Shell> {
 
   void select(int index) {
     if (index == selected) return;
+    todayTabActive.value = index == 0;
     setState(() {
       selected = index;
       visited.add(index);
@@ -919,14 +952,17 @@ class _ShellState extends State<Shell> {
     _sendNativeState();
   }
 
-  Widget mainPage(int index) => mainPages.putIfAbsent(
-    index,
-    () => switch (index) {
+  Widget mainPage(int index) => mainPages.putIfAbsent(index, () {
+    final mainApi = widget.api;
+    return switch (index) {
       0 => TodayPage(
         api: widget.api,
         onUnauthorized: widget.onUnauthorized,
-        onProfile: updateProfile,
+        onProfile: (profile) {
+          if (identical(widget.api, mainApi)) updateProfile(profile);
+        },
         localProfileChanges: localProfileChanges,
+        tabActive: todayTabActive,
       ),
       1 => TimetablePage(
         api: widget.api,
@@ -941,8 +977,8 @@ class _ShellState extends State<Shell> {
         onDetailClosingChanged: _setAnalysisDetailClosing,
       ),
       _ => throw ArgumentError.value(index, 'index'),
-    },
-  );
+    };
+  });
 
   Widget settingsPage() => SettingsPage(
     api: widget.api,

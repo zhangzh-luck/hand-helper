@@ -25,11 +25,13 @@ class TodayPage extends StatefulWidget {
     required this.onUnauthorized,
     required this.onProfile,
     this.localProfileChanges,
+    this.tabActive,
   });
   final ApiClient api;
   final VoidCallback onUnauthorized;
   final ValueChanged<Profile> onProfile;
   final ValueListenable<Profile?>? localProfileChanges;
+  final ValueListenable<bool>? tabActive;
   @override
   State<TodayPage> createState() => _TodayPageState();
 }
@@ -620,6 +622,7 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
                                   dark: dark,
                                   hasWallpaper: wallpaper != null,
                                   enabled: true,
+                                  tabActive: widget.tabActive,
                                   onEdit: () => edit(entry.custom!),
                                   onDelete: () => delete(entry.custom!),
                                 ),
@@ -1323,24 +1326,54 @@ class _ScheduleCard extends StatefulWidget {
     required this.dark,
     required this.hasWallpaper,
     required this.enabled,
+    this.tabActive,
     required this.onEdit,
     required this.onDelete,
   });
   final CustomSchedule schedule;
   final bool dark, hasWallpaper, enabled;
+  final ValueListenable<bool>? tabActive;
   final VoidCallback onEdit, onDelete;
   @override
   State<_ScheduleCard> createState() => _ScheduleCardState();
 }
 
 class _ScheduleCardState extends State<_ScheduleCard> {
+  static const double _actionWidth = 168;
   double reveal = 0;
   bool dragging = false;
+  Duration get slideDuration =>
+      dragging ? Duration.zero : const Duration(milliseconds: 220);
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tabActive?.addListener(_closeWhenLeavingToday);
+  }
+
+  @override
+  void dispose() {
+    widget.tabActive?.removeListener(_closeWhenLeavingToday);
+    super.dispose();
+  }
+
+  void _closeWhenLeavingToday() {
+    if (widget.tabActive?.value == false && (reveal != 0 || dragging)) {
+      setState(() {
+        reveal = 0;
+        dragging = false;
+      });
+    }
+  }
 
   @override
   void didUpdateWidget(covariant _ScheduleCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.enabled) {
+    if (oldWidget.tabActive != widget.tabActive) {
+      oldWidget.tabActive?.removeListener(_closeWhenLeavingToday);
+      widget.tabActive?.addListener(_closeWhenLeavingToday);
+    }
+    if (!widget.enabled || widget.tabActive?.value == false) {
       reveal = 0;
       dragging = false;
     }
@@ -1354,42 +1387,54 @@ class _ScheduleCardState extends State<_ScheduleCard> {
       child: Stack(
         children: [
           if (widget.enabled)
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: SizedBox(
-                  width: 168,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _SwipeAction(
-                          label: '编辑',
-                          color: const Color(0xff8e8e93),
-                          onTap: () {
-                            setState(() => reveal = 0);
-                            widget.onEdit();
-                          },
-                        ),
+            AnimatedPositioned(
+              duration: slideDuration,
+              curve: Curves.easeOutCubic,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: reveal,
+              child: IgnorePointer(
+                ignoring: reveal == 0,
+                child: ExcludeSemantics(
+                  excluding: reveal == 0,
+                  child: ClipRect(
+                    key: const Key('today-schedule-actions-clip'),
+                    child: OverflowBox(
+                      alignment: Alignment.centerRight,
+                      minWidth: _actionWidth,
+                      maxWidth: _actionWidth,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _SwipeAction(
+                              label: '编辑',
+                              color: const Color(0xff8e8e93),
+                              onTap: () {
+                                setState(() => reveal = 0);
+                                widget.onEdit();
+                              },
+                            ),
+                          ),
+                          Expanded(
+                            child: _SwipeAction(
+                              label: '删除',
+                              color: const Color(0xffff3b30),
+                              onTap: () {
+                                setState(() => reveal = 0);
+                                widget.onDelete();
+                              },
+                            ),
+                          ),
+                        ],
                       ),
-                      Expanded(
-                        child: _SwipeAction(
-                          label: '删除',
-                          color: const Color(0xffff3b30),
-                          onTap: () {
-                            setState(() => reveal = 0);
-                            widget.onDelete();
-                          },
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
           AnimatedPositioned(
-            duration: dragging
-                ? Duration.zero
-                : const Duration(milliseconds: 220),
+            duration: slideDuration,
             curve: Curves.easeOutCubic,
             left: -reveal,
             right: reveal,
@@ -1399,21 +1444,44 @@ class _ScheduleCardState extends State<_ScheduleCard> {
               behavior: HitTestBehavior.opaque,
               onTap: reveal > 0 ? () => setState(() => reveal = 0) : null,
               onHorizontalDragStart: widget.enabled
-                  ? (_) => setState(() => dragging = true)
+                  ? (_) {
+                      if (widget.tabActive?.value != false) {
+                        setState(() => dragging = true);
+                      }
+                    }
                   : null,
               onHorizontalDragUpdate: widget.enabled
-                  ? (details) => setState(
-                      () => reveal = (reveal - details.delta.dx).clamp(
-                        0.0,
-                        168.0,
-                      ),
-                    )
+                  ? (details) {
+                      if (!dragging || widget.tabActive?.value == false) return;
+                      setState(
+                        () => reveal = (reveal - details.delta.dx).clamp(
+                          0.0,
+                          _actionWidth,
+                        ),
+                      );
+                    }
                   : null,
               onHorizontalDragEnd: widget.enabled
-                  ? (_) => setState(() {
-                      dragging = false;
-                      reveal = reveal >= 72 ? 168 : 0;
-                    })
+                  ? (_) {
+                      if (!dragging) return;
+                      setState(() {
+                        dragging = false;
+                        reveal = widget.tabActive?.value == false
+                            ? 0
+                            : reveal >= 72
+                            ? _actionWidth
+                            : 0;
+                      });
+                    }
+                  : null,
+              onHorizontalDragCancel: widget.enabled
+                  ? () {
+                      if (!dragging) return;
+                      setState(() {
+                        dragging = false;
+                        reveal = 0;
+                      });
+                    }
                   : null,
               child: _EntryCard(
                 kind: '自定义安排',

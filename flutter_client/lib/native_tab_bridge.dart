@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:image/image.dart' as img;
 
 /// The iOS scene owns the actual UITabBar. Android never calls this channel.
 class NativeTabBridge {
@@ -48,6 +50,7 @@ class NativeTabBridge {
     _onMetrics = null;
     _onReady = null;
     _channel.setMethodCallHandler(null);
+    unawaited(_invoke('setAvatar', null));
     unawaited(
       _invoke('sync', {'visible': false, 'selected': 0, 'detailOpen': false}),
     );
@@ -74,6 +77,16 @@ class NativeTabBridge {
     unawaited(_invoke('setAppearance', appearance));
   }
 
+  /// Prepares a small, full-color circular image off the UI isolate. A null
+  /// result asks UIKit to restore its SF Symbol instead of retaining old data.
+  static Future<Uint8List?> prepareAvatar(String source) =>
+      compute(_prepareAvatar, source);
+
+  static void setAvatar(Uint8List? image) {
+    if (!enabled) return;
+    unawaited(_invoke('setAvatar', image));
+  }
+
   static Future<void> _invoke(String method, Object? arguments) async {
     try {
       await _channel.invokeMethod<void>(method, arguments);
@@ -93,6 +106,29 @@ class NativeTabBridge {
     } on PlatformException catch (error) {
       debugPrint('Native tab metrics error: $error');
     }
+  }
+}
+
+Uint8List? _prepareAvatar(String source) {
+  try {
+    final comma = source.indexOf(',');
+    if (!source.startsWith('data:image/') ||
+        comma < 0 ||
+        !source.substring(0, comma).contains(';base64')) {
+      return null;
+    }
+    final decoded = img.decodeImage(base64Decode(source.substring(comma + 1)));
+    if (decoded == null) return null;
+    final circular = img.copyResizeCropSquare(
+      img.bakeOrientation(decoded),
+      size: 96,
+      interpolation: img.Interpolation.average,
+      radius: 48,
+      antialias: true,
+    );
+    return Uint8List.fromList(img.encodePng(circular));
+  } catch (_) {
+    return null;
   }
 }
 
