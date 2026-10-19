@@ -55,8 +55,17 @@ class App extends StatefulWidget {
 class _AppState extends State<App> {
   late ThemeMode themeMode = widget.initialThemeMode;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) NativeTabBridge.setAppearance(themeMode.name);
+    });
+  }
+
   Future<void> changeTheme(ThemeMode value) async {
     setState(() => themeMode = value);
+    NativeTabBridge.setAppearance(value.name);
     await (await SharedPreferences.getInstance()).setString(
       'appearance_mode',
       value.name,
@@ -773,6 +782,7 @@ class _ShellState extends State<Shell> {
   bool analysisDetailClosing = false;
   String? avatarSource;
   ImageProvider? avatarImage;
+  double _nativeBottomOverlap = 0;
   String? _lastNativeState;
   bool _nativeSyncScheduled = false;
 
@@ -791,8 +801,15 @@ class _ShellState extends State<Shell> {
       },
       onReady: () {
         _lastNativeState = null;
-        NativeTabBridge.setAvatar(avatarSource);
-        if (mounted) setState(() {});
+        if (mounted) _sendNativeState();
+      },
+      onMetrics: (height) {
+        if (!mounted ||
+            (height == 0 && _nativeBottomOverlap > 0) ||
+            (height - _nativeBottomOverlap).abs() < 0.5) {
+          return;
+        }
+        setState(() => _nativeBottomOverlap = height);
       },
     );
   }
@@ -824,7 +841,10 @@ class _ShellState extends State<Shell> {
       analysisDetailClosing = false;
       avatarSource = null;
       avatarImage = null;
-      NativeTabBridge.setAvatar(null);
+    }
+    if (oldWidget.themeMode != widget.themeMode ||
+        !identical(oldWidget.api, widget.api)) {
+      _sendNativeState();
     }
   }
 
@@ -832,7 +852,6 @@ class _ShellState extends State<Shell> {
     if (avatarSource == value.avatar) return;
     avatarSource = value.avatar;
     setState(() => avatarImage = dataImage(value.avatar));
-    NativeTabBridge.setAvatar(value.avatar);
   }
 
   void applyLocalProfile(Profile value) {
@@ -854,6 +873,50 @@ class _ShellState extends State<Shell> {
         analysisDetailClosing = false;
       }
     });
+    _sendNativeState();
+  }
+
+  String get _nativeStateKey =>
+      '$selected/${settingsDetailOpen || analysisDetailOpen || settingsDetailClosing || analysisDetailClosing}/${widget.themeMode.name}';
+
+  void _sendNativeState() {
+    if (!NativeTabBridge.enabled || !mounted) return;
+    final state = _nativeStateKey;
+    if (state == _lastNativeState) return;
+    _lastNativeState = state;
+    NativeTabBridge.sync(
+      selected: selected,
+      detailOpen:
+          settingsDetailOpen ||
+          analysisDetailOpen ||
+          settingsDetailClosing ||
+          analysisDetailClosing,
+      appearance: widget.themeMode.name,
+    );
+  }
+
+  void _setSettingsDetailOpen(bool value) {
+    if (settingsDetailOpen == value) return;
+    setState(() => settingsDetailOpen = value);
+    _sendNativeState();
+  }
+
+  void _setSettingsDetailClosing(bool value) {
+    if (settingsDetailClosing == value) return;
+    setState(() => settingsDetailClosing = value);
+    _sendNativeState();
+  }
+
+  void _setAnalysisDetailOpen(bool value) {
+    if (analysisDetailOpen == value) return;
+    setState(() => analysisDetailOpen = value);
+    _sendNativeState();
+  }
+
+  void _setAnalysisDetailClosing(bool value) {
+    if (analysisDetailClosing == value) return;
+    setState(() => analysisDetailClosing = value);
+    _sendNativeState();
   }
 
   Widget mainPage(int index) => mainPages.putIfAbsent(
@@ -874,9 +937,8 @@ class _ShellState extends State<Shell> {
         api: widget.api,
         onUnauthorized: widget.onUnauthorized,
         localProfileChanges: localProfileChanges,
-        onDetailChanged: (value) => setState(() => analysisDetailOpen = value),
-        onDetailClosingChanged: (value) =>
-            setState(() => analysisDetailClosing = value),
+        onDetailChanged: _setAnalysisDetailOpen,
+        onDetailClosingChanged: _setAnalysisDetailClosing,
       ),
       _ => throw ArgumentError.value(index, 'index'),
     },
@@ -889,58 +951,51 @@ class _ShellState extends State<Shell> {
     themeMode: widget.themeMode,
     onThemeModeChanged: widget.onThemeModeChanged,
     onProfileChanged: applyLocalProfile,
-    onSectionChanged: (value) => setState(() => settingsDetailOpen = value),
-    onSectionClosingChanged: (value) =>
-        setState(() => settingsDetailClosing = value),
+    onSectionChanged: _setSettingsDetailOpen,
+    onSectionClosingChanged: _setSettingsDetailClosing,
   );
 
   @override
   Widget build(BuildContext context) {
     final detailOpen = settingsDetailOpen || analysisDetailOpen;
     final detailClosing = settingsDetailClosing || analysisDetailClosing;
-    if (NativeTabBridge.enabled && !_nativeSyncScheduled) {
+    if (NativeTabBridge.enabled &&
+        _nativeStateKey != _lastNativeState &&
+        !_nativeSyncScheduled) {
       _nativeSyncScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _nativeSyncScheduled = false;
-        if (!mounted) return;
-        final state =
-            '$selected/${settingsDetailOpen || analysisDetailOpen || settingsDetailClosing || analysisDetailClosing}/${Theme.of(context).brightness}';
-        if (state == _lastNativeState) return;
-        _lastNativeState = state;
-        NativeTabBridge.sync(
-          selected: selected,
-          detailOpen:
-              settingsDetailOpen ||
-              analysisDetailOpen ||
-              settingsDetailClosing ||
-              analysisDetailClosing,
-          dark: Theme.of(context).brightness == Brightness.dark,
-        );
+        _sendNativeState();
       });
     }
     return Scaffold(
       extendBody: !NativeTabBridge.enabled,
-      body: IndexedStack(
-        index: selected,
-        children: [
-          for (var index = 0; index < 4; index++)
-            TickerMode(
-              enabled: selected == index,
-              child: ExcludeFocus(
-                excluding: selected != index,
-                // Keep every visited page, including Settings, mounted so tab
-                // changes do not restart its local loading and image decoding.
-                child: visited.contains(index)
-                    ? KeyedSubtree(
-                        key: ObjectKey(widget.api),
-                        child: RepaintBoundary(
-                          child: index == 3 ? settingsPage() : mainPage(index),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
+      body: NativeTabMetrics(
+        bottomOverlap: _nativeBottomOverlap,
+        child: IndexedStack(
+          index: selected,
+          children: [
+            for (var index = 0; index < 4; index++)
+              TickerMode(
+                enabled: selected == index,
+                child: ExcludeFocus(
+                  excluding: selected != index,
+                  // Keep every visited page, including Settings, mounted so tab
+                  // changes do not restart its local loading and image decoding.
+                  child: visited.contains(index)
+                      ? KeyedSubtree(
+                          key: ObjectKey(widget.api),
+                          child: RepaintBoundary(
+                            child: index == 3
+                                ? settingsPage()
+                                : mainPage(index),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
       bottomNavigationBar: NativeTabBridge.enabled
           ? null

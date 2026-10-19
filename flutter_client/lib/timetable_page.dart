@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'container_morph_transition.dart';
+import 'native_tab_bridge.dart';
 import 'today_page.dart' show dataImage;
 
 DateTime mondayOf(DateTime date) {
@@ -776,9 +777,10 @@ class _TimetablePageState extends State<TimetablePage> {
               child: SingleChildScrollView(
                 physics: const ClampingScrollPhysics(),
                 padding: EdgeInsets.only(
-                  bottom: defaultTargetPlatform == TargetPlatform.iOS
-                      ? 24
-                      : 100,
+                  bottom: NativeTabMetrics.contentBottomPadding(
+                    context,
+                    android: 100,
+                  ),
                 ),
                 child: SizedBox(
                   height: periods.length * rowHeight,

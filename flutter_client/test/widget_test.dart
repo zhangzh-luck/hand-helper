@@ -13,6 +13,7 @@ import 'package:hand_helper_flutter/container_morph_transition.dart';
 import 'package:hand_helper_flutter/floating_tab_bar.dart';
 import 'package:hand_helper_flutter/launch_preview.dart';
 import 'package:hand_helper_flutter/main.dart';
+import 'package:hand_helper_flutter/native_tab_bridge.dart';
 import 'package:hand_helper_flutter/passkey_login.dart';
 import 'package:hand_helper_flutter/settings_page.dart';
 import 'package:hand_helper_flutter/today_page.dart';
@@ -5509,7 +5510,28 @@ void main() {
               as Map<Object?, Object?>;
       expect(state()['visible'], isTrue);
       expect(state()['selected'], 0);
+      expect(state()['appearance'], 'system');
 
+      final viewport = tester.getSize(find.byType(IndexedStack));
+      final todayList = find
+          .descendant(
+            of: find.byType(TodayPage),
+            matching: find.byType(ListView),
+          )
+          .first;
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('tabMetrics', 96.0),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      expect(tester.getSize(find.byType(IndexedStack)), viewport);
+      expect(
+        (tester.widget<ListView>(todayList).padding! as EdgeInsets).bottom,
+        120,
+      );
       await messenger.handlePlatformMessage(
         channel.name,
         const StandardMethodCodec().encodeMethodCall(
@@ -5522,12 +5544,173 @@ void main() {
       expect(state()['selected'], 1);
       expect(find.byType(FloatingTabBar), findsNothing);
 
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('selectTab', 3),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      final settings = tester.widget<SettingsPage>(find.byType(SettingsPage));
+      settings.onSectionChanged!(true);
+      await tester.pump();
+      expect(state()['detailOpen'], isTrue);
+      final syncCount = calls.where((call) => call.method == 'sync').length;
+      settings.onSectionChanged!(true);
+      settings.onSectionClosingChanged!(true);
+      await tester.pump();
+      expect(calls.where((call) => call.method == 'sync').length, syncCount);
+      settings.onSectionChanged!(false);
+      await tester.pump();
+      expect(state()['detailOpen'], isTrue);
+      settings.onSectionClosingChanged!(false);
+      await tester.pump();
+      expect(state()['detailOpen'], isFalse);
+      expect(tester.getSize(find.byType(IndexedStack)), viewport);
+
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('selectTab', 2),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      final analysis = tester.widget<AnalysisPage>(find.byType(AnalysisPage));
+      analysis.onDetailChanged!(true);
+      await tester.pump();
+      expect(state()['detailOpen'], isTrue);
+      analysis.onDetailClosingChanged!(true);
+      analysis.onDetailChanged!(false);
+      await tester.pump();
+      expect(state()['detailOpen'], isTrue);
+      analysis.onDetailClosingChanged!(false);
+      await tester.pump();
+      expect(state()['detailOpen'], isFalse);
+      expect(tester.getSize(find.byType(IndexedStack)), viewport);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Shell(
+            api: client,
+            onUnauthorized: () {},
+            themeMode: ThemeMode.light,
+            onThemeModeChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(state()['appearance'], 'light');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Shell(
+            api: client,
+            onUnauthorized: () {},
+            themeMode: ThemeMode.dark,
+            onThemeModeChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(state()['appearance'], 'dark');
+
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       expect(state()['visible'], isFalse);
       debugDefaultTargetPlatformOverride = null;
     },
   );
+
+  testWidgets('iOS native tab padding clears when keyboard covers content', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    double? padding;
+    Widget page(double keyboard) => MediaQuery(
+      data: MediaQueryData(viewInsets: EdgeInsets.only(bottom: keyboard)),
+      child: NativeTabMetrics(
+        bottomOverlap: 96,
+        child: Builder(
+          builder: (context) {
+            padding = NativeTabMetrics.contentBottomPadding(
+              context,
+              android: 105,
+            );
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    await tester.pumpWidget(page(0));
+    expect(padding, 120);
+    await tester.pumpWidget(page(300));
+    expect(padding, 24);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('iOS login initializes the UIKit host appearance', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    const channel = MethodChannel('hand_helper/native_tab');
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const App(initialThemeMode: ThemeMode.light));
+    await tester.pump();
+    expect(
+      calls.where((call) => call.method == 'setAppearance').last.arguments,
+      'light',
+    );
+    expect(find.byType(FloatingTabBar), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Android Shell retains FloatingTabBar selection', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    SharedPreferences.setMockInitialValues({
+      'session_cookie': 'session=offline',
+    });
+    final client = ApiClient(
+      cache: _EmptyTodayCache(),
+      localManualCourseStore: _MemoryLocalManualCourseStore(),
+      localProfileStore: _MemoryLocalProfileStore(),
+      client: MockClient((_) async => throw const SocketException('offline')),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Shell(
+          api: client,
+          onUnauthorized: () {},
+          themeMode: ThemeMode.system,
+          onThemeModeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(FloatingTabBar), findsOneWidget);
+    tester.widget<FloatingTabBar>(find.byType(FloatingTabBar)).onSelected(1);
+    await tester.pump();
+    expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 1);
+    expect(
+      tester.widget<FloatingTabBar>(find.byType(FloatingTabBar)).selectedIndex,
+      1,
+    );
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets('Shell preserves timetable week after switching tabs', (
     tester,

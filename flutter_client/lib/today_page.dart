@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'container_morph_transition.dart';
 import 'main.dart' show greeting;
+import 'native_tab_bridge.dart';
 
 String formatCourseCountdown(Duration remaining) {
   final minutes = (remaining.inMilliseconds / Duration.millisecondsPerMinute)
@@ -560,9 +561,10 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
                   child: ListView(
                     physics: const ClampingScrollPhysics(),
                     padding: EdgeInsets.only(
-                      bottom: defaultTargetPlatform == TargetPlatform.iOS
-                          ? 24
-                          : 105,
+                      bottom: NativeTabMetrics.contentBottomPadding(
+                        context,
+                        android: 105,
+                      ),
                     ),
                     children: [
                       if (!hasTodayData && !hasCourseData)

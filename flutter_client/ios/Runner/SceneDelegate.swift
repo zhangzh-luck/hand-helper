@@ -14,6 +14,7 @@ class SceneDelegate: FlutterSceneDelegate {
       assertionFailure("Expected the storyboard FlutterViewController")
       return
     }
+    window?.backgroundColor = .systemBackground
     window?.rootViewController = NativeTabHostController(flutter: flutter)
   }
 }
@@ -23,12 +24,14 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private let flutter: FlutterViewController
   private let tabBar = UITabBar()
   private var channel: FlutterMethodChannel!
-  private var flutterBottomToBar: NSLayoutConstraint!
-  private var flutterBottomToView: NSLayoutConstraint!
   private var tabHeight: NSLayoutConstraint!
   private var wantsTabs = false
   private var detailOpen = false
   private var keyboardCoversBottom = false
+  private var tabsShown = false
+  private var bottomOcclusion: CGFloat = -1
+  private var selectedIndex = 0
+  private var appearanceMode: String?
 
   init(flutter: FlutterViewController) {
     self.flutter = flutter
@@ -47,24 +50,33 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
 
     tabBar.translatesAutoresizingMaskIntoConstraints = false
     tabBar.delegate = self
-    tabBar.items = [
-      UITabBarItem(title: "今日", image: UIImage(systemName: "house"), tag: 0),
-      UITabBarItem(title: "课程表", image: UIImage(systemName: "calendar"), tag: 1),
-      UITabBarItem(title: "分析", image: UIImage(systemName: "chart.bar"), tag: 2),
-      UITabBarItem(title: "设置", image: UIImage(systemName: "gearshape"), tag: 3),
+    // UIKit explicitly supports a nil title for an image-only item. Keep the
+    // spoken names separate so they never occupy visual layout space.
+    let tabs: [(symbol: String, name: String)] = [
+      ("house", "今日"), ("calendar", "课程表"),
+      ("chart.bar", "分析"), ("gearshape", "设置"),
     ]
+    tabBar.items = tabs.enumerated().map { index, tab in
+      let item = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: index)
+      item.accessibilityLabel = tab.name
+      return item
+    }
     tabBar.selectedItem = tabBar.items?.first
     tabBar.isHidden = true
+    tabBar.alpha = 0
     view.addSubview(tabBar)
 
-    flutterBottomToBar = flutter.view.bottomAnchor.constraint(equalTo: tabBar.topAnchor)
-    flutterBottomToView = flutter.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-    tabHeight = tabBar.heightAnchor.constraint(equalToConstant: 49)
+    // Let UIKit measure its own bar; Flutter always renders to the window's
+    // bottom edge, including behind the translucent bar and home indicator.
+    let initialHeight = tabBar.sizeThatFits(
+      CGSize(width: view.bounds.width, height: 0)
+    ).height
+    tabHeight = tabBar.heightAnchor.constraint(equalToConstant: initialHeight)
     NSLayoutConstraint.activate([
       flutter.view.topAnchor.constraint(equalTo: view.topAnchor),
       flutter.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       flutter.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      flutterBottomToView,
+      flutter.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       tabBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -89,14 +101,24 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
         }
         self.wantsTabs = visible
         self.detailOpen = detail
-        self.tabBar.selectedItem = self.tabBar.items?[index]
-        if let dark = state["dark"] as? Bool {
-          self.tabBar.overrideUserInterfaceStyle = dark ? .dark : .light
+        if index != self.selectedIndex {
+          self.selectedIndex = index
+          self.tabBar.selectedItem = self.tabBar.items?[index]
+        }
+        if let appearance = state["appearance"] as? String,
+           appearance != self.appearanceMode {
+          self.applyAppearance(appearance)
         }
         self.updateVisibility()
         result(nil)
-      case "setAvatar":
-        self.setAvatar(call.arguments as? String)
+      case "getMetrics":
+        result(self.bottomOcclusion >= 0 ? Double(self.bottomOcclusion) : 0.0)
+      case "setAppearance":
+        guard let appearance = call.arguments as? String else {
+          result(FlutterError(code: "invalid_appearance", message: nil, details: nil))
+          return
+        }
+        if appearance != self.appearanceMode { self.applyAppearance(appearance) }
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
@@ -117,19 +139,47 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    let fitted = tabBar.sizeThatFits(CGSize(width: view.bounds.width, height: 0)).height
-    let height = max(fitted, 49 + view.safeAreaInsets.bottom)
-    if abs(tabHeight.constant - height) > 0.5 { tabHeight.constant = height }
+    let measured = tabBar.sizeThatFits(
+      CGSize(width: view.bounds.width, height: 0)
+    ).height
+    if measured > 0 && abs(tabHeight.constant - measured) > 0.5 {
+      tabHeight.constant = measured
+      return // Report the resulting frame after Auto Layout places the bar.
+    }
+    let occlusion = max(0, view.bounds.maxY - tabBar.frame.minY)
+    if abs(bottomOcclusion - occlusion) > 0.5 {
+      bottomOcclusion = occlusion
+      channel.invokeMethod("tabMetrics", arguments: Double(occlusion))
+    }
   }
 
   private func updateVisibility() {
     let show = wantsTabs && !detailOpen && !keyboardCoversBottom
-    if show == !tabBar.isHidden { return }
-    flutterBottomToView.isActive = !show
-    flutterBottomToBar.isActive = show
-    tabBar.isHidden = !show
+    if show == tabsShown { return }
+    tabsShown = show
     tabBar.isUserInteractionEnabled = show
-    view.setNeedsLayout()
+    if show { tabBar.isHidden = false }
+    let duration = UIAccessibility.isReduceMotionEnabled ? 0 : 0.2
+    UIView.animate(withDuration: duration, delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction]) {
+        self.tabBar.alpha = show ? 1 : 0
+      } completion: { _ in
+        if !self.tabsShown { self.tabBar.isHidden = true }
+      }
+  }
+
+  private func applyAppearance(_ mode: String) {
+    appearanceMode = mode
+    let style: UIUserInterfaceStyle
+    switch mode {
+    case "light": style = .light
+    case "dark": style = .dark
+    default: style = .unspecified
+    }
+    // Keep UIKit's dynamic material and the window's home-indicator region in
+    // the same appearance as Flutter's user-selected ThemeMode.
+    overrideUserInterfaceStyle = style
+    view.window?.overrideUserInterfaceStyle = style
   }
 
   @objc private func keyboardChanged(_ notification: Notification) {
@@ -146,29 +196,8 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
 
   func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
     guard wantsTabs && !detailOpen && !keyboardCoversBottom else { return }
+    selectedIndex = item.tag
     channel.invokeMethod("selectTab", arguments: item.tag)
   }
 
-  private func setAvatar(_ dataURL: String?) {
-    guard let item = tabBar.items?.first else { return }
-    guard let dataURL,
-          let encoded = dataURL.split(separator: ",", maxSplits: 1).last,
-          let data = Data(base64Encoded: String(encoded)),
-          let image = UIImage(data: data) else {
-      item.image = UIImage(systemName: "house")
-      item.selectedImage = nil
-      return
-    }
-    let size = CGSize(width: 24, height: 24)
-    let avatar = UIGraphicsImageRenderer(size: size).image { _ in
-      UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).addClip()
-      let scale = max(size.width / image.size.width, size.height / image.size.height)
-      let drawn = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-      image.draw(in: CGRect(x: (size.width - drawn.width) / 2,
-                            y: (size.height - drawn.height) / 2,
-                            width: drawn.width, height: drawn.height))
-    }.withRenderingMode(.alwaysOriginal)
-    item.image = avatar
-    item.selectedImage = avatar
-  }
 }

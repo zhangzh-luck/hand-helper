@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 /// The iOS scene owns the actual UITabBar. Android never calls this channel.
 class NativeTabBridge {
@@ -10,14 +11,17 @@ class NativeTabBridge {
   static const _channel = MethodChannel('hand_helper/native_tab');
   static bool get enabled => defaultTargetPlatform == TargetPlatform.iOS;
   static ValueChanged<int>? _onSelected;
+  static ValueChanged<double>? _onMetrics;
   static VoidCallback? _onReady;
 
   static void attach({
     required ValueChanged<int> onSelected,
+    required ValueChanged<double> onMetrics,
     required VoidCallback onReady,
   }) {
     if (!enabled) return;
     _onSelected = onSelected;
+    _onMetrics = onMetrics;
     _onReady = onReady;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'selectTab') {
@@ -27,16 +31,23 @@ class NativeTabBridge {
         }
       } else if (call.method == 'requestState') {
         _onReady?.call();
+        unawaited(_requestMetrics());
+      } else if (call.method == 'tabMetrics') {
+        final height = call.arguments;
+        if (height is num && height >= 0) {
+          _onMetrics?.call(height.toDouble());
+        }
       }
     });
+    unawaited(_requestMetrics());
   }
 
   static void detach() {
     if (!enabled) return;
     _onSelected = null;
+    _onMetrics = null;
     _onReady = null;
     _channel.setMethodCallHandler(null);
-    unawaited(_invoke('setAvatar', null));
     unawaited(
       _invoke('sync', {'visible': false, 'selected': 0, 'detailOpen': false}),
     );
@@ -45,7 +56,7 @@ class NativeTabBridge {
   static void sync({
     required int selected,
     required bool detailOpen,
-    required bool dark,
+    required String appearance,
   }) {
     if (!enabled) return;
     unawaited(
@@ -53,14 +64,14 @@ class NativeTabBridge {
         'visible': true,
         'selected': selected,
         'detailOpen': detailOpen,
-        'dark': dark,
+        'appearance': appearance,
       }),
     );
   }
 
-  static void setAvatar(String? dataUrl) {
+  static void setAppearance(String appearance) {
     if (!enabled) return;
-    unawaited(_invoke('setAvatar', dataUrl));
+    unawaited(_invoke('setAppearance', appearance));
   }
 
   static Future<void> _invoke(String method, Object? arguments) async {
@@ -72,4 +83,46 @@ class NativeTabBridge {
       debugPrint('Native tab channel error: $error');
     }
   }
+
+  static Future<void> _requestMetrics() async {
+    try {
+      final height = await _channel.invokeMethod<double>('getMetrics');
+      if (height != null && height >= 0) _onMetrics?.call(height);
+    } on MissingPluginException {
+      // Widget tests have no UIKit host.
+    } on PlatformException catch (error) {
+      debugPrint('Native tab metrics error: $error');
+    }
+  }
+}
+
+/// The measured system bar overlap stays constant while detail pages animate.
+class NativeTabMetrics extends InheritedWidget {
+  const NativeTabMetrics({
+    super.key,
+    required this.bottomOverlap,
+    required super.child,
+  });
+
+  final double bottomOverlap;
+
+  static double contentBottomPadding(
+    BuildContext context, {
+    required double android,
+  }) {
+    if (!NativeTabBridge.enabled) return android;
+    // Flutter already shrinks the Scaffold for the keyboard. The UIKit bar is
+    // hidden then, so reserving its overlap would leave an empty strip.
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) return 24;
+    final overlap =
+        context
+            .dependOnInheritedWidgetOfExactType<NativeTabMetrics>()
+            ?.bottomOverlap ??
+        0;
+    return overlap + 24;
+  }
+
+  @override
+  bool updateShouldNotify(NativeTabMetrics oldWidget) =>
+      bottomOverlap != oldWidget.bottomOverlap;
 }

@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'appearance_mode_selector.dart';
 import 'container_morph_transition.dart';
+import 'native_tab_bridge.dart';
 import 'passkey_management_page.dart';
 
 enum _LeavePersonalChoice { discard, save }
@@ -528,7 +529,12 @@ class _SettingsPageState extends State<SettingsPage>
 
   Widget _settingsList(bool dark) => ListView(
     key: const Key('settings-content-root'),
-    padding: const EdgeInsets.fromLTRB(18, 19, 18, 120),
+    padding: EdgeInsets.fromLTRB(
+      18,
+      19,
+      18,
+      NativeTabMetrics.contentBottomPadding(context, android: 120),
+    ),
     children: [
       const Row(
         children: [

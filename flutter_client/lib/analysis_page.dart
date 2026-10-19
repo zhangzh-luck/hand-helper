@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'container_morph_transition.dart';
+import 'native_tab_bridge.dart';
 import 'today_page.dart' show dataImage;
 
 class AnalysisPage extends StatefulWidget {
@@ -603,9 +604,10 @@ class _AnalysisPageState extends State<AnalysisPage>
                           18,
                           25,
                           18,
-                          defaultTargetPlatform == TargetPlatform.iOS
-                              ? 24
-                              : 118,
+                          NativeTabMetrics.contentBottomPadding(
+                            context,
+                            android: 118,
+                          ),
                         ),
                         children: [
                           const Row(
