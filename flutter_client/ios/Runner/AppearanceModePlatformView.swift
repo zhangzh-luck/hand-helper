@@ -41,8 +41,9 @@ private final class AppearanceModePlatformView: NSObject, FlutterPlatformView {
       ("moon", "深色模式"),
       ("iphone", "跟随系统"),
     ]
+    let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)
     let actions = segments.map { segment in
-      let image = UIImage(systemName: segment.symbol) ?? UIImage()
+      let image = UIImage(systemName: segment.symbol, withConfiguration: symbolConfiguration) ?? UIImage()
       // Images take visual priority; both public labels describe each segment.
       image.accessibilityLabel = segment.label
       return UIAction(title: segment.label, image: image) { _ in }
@@ -66,6 +67,7 @@ private final class AppearanceModePlatformView: NSObject, FlutterPlatformView {
       control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
       control.trailingAnchor.constraint(equalTo: container.trailingAnchor),
       control.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+      control.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
       control.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor),
       control.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
     ])

@@ -78,6 +78,10 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(UiKitView), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('appearance-mode-native-surface'))).height,
+      56,
+    );
     expect(find.text('浅色'), findsNothing);
     expect(creations, hasLength(1));
     expect(
