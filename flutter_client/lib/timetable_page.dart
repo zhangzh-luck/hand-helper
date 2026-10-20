@@ -123,10 +123,12 @@ class TimetablePage extends StatefulWidget {
     required this.api,
     required this.onUnauthorized,
     this.localProfileChanges,
+    this.onEditorChanged,
   });
   final ApiClient api;
   final VoidCallback onUnauthorized;
   final ValueListenable<Profile?>? localProfileChanges;
+  final ValueChanged<bool>? onEditorChanged;
   @override
   State<TimetablePage> createState() => _TimetablePageState();
 }
@@ -147,6 +149,11 @@ class _TimetablePageState extends State<TimetablePage> {
   String? _backgroundSource;
   ImageProvider? _backgroundImage;
   final Expando<GlobalKey> _courseCardKeys = Expando<GlobalKey>();
+  final GlobalKey _addCourseSlotKey = GlobalKey();
+  bool _addCourseOpen = false;
+  int? _addCoursePage;
+  String? _addCourseTerm;
+  Size? _addCourseViewSize;
   TimetableCourse? _activeCourse;
   int? _activeCoursePage;
   String? _activeCourseTerm;
@@ -448,6 +455,94 @@ class _TimetablePageState extends State<TimetablePage> {
     );
   }
 
+  Rect? _addCourseRect() {
+    if (armedSlot == null ||
+        _addCoursePage != pageIndex ||
+        _addCourseTerm != selectedTerm?.sourceId ||
+        _addCourseViewSize != MediaQuery.sizeOf(context)) {
+      return null;
+    }
+    final box = _addCourseSlotKey.currentContext?.findRenderObject();
+    final overlay = Overlay.of(
+      context,
+      rootOverlay: true,
+    ).context.findRenderObject();
+    if (box is! RenderBox ||
+        overlay is! RenderBox ||
+        !box.attached ||
+        !box.hasSize ||
+        !overlay.hasSize) {
+      return null;
+    }
+    var rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    if (!rect.isFinite || rect.isEmpty) return null;
+    var ancestor = box.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderAbstractViewport && ancestor is RenderBox) {
+        final viewport = ancestor as RenderBox;
+        final visible =
+            viewport.localToGlobal(Offset.zero, ancestor: overlay) &
+            viewport.size;
+        // A partially visible slot remains a valid source only while its +
+        // is visible. Never animate to a point outside the scroll viewport.
+        if (!visible.contains(rect.center)) return null;
+        rect = rect.intersect(visible);
+        break;
+      }
+      ancestor = ancestor.parent;
+    }
+    return rect.overlaps(Offset.zero & overlay.size) ? rect : null;
+  }
+
+  Future<void> _addCourse(int weekday, int period) async {
+    if (_addCourseOpen) return;
+    final term = selectedTerm;
+    if (term?.startDate == null || data?.periods.isEmpty != false) return;
+    _addCoursePage = pageIndex;
+    _addCourseTerm = term!.sourceId;
+    _addCourseViewSize = MediaQuery.sizeOf(context);
+    final startRect = _addCourseRect();
+    if (startRect == null) {
+      _addCoursePage = null;
+      _addCourseTerm = null;
+      _addCourseViewSize = null;
+      return;
+    }
+    setState(() => _addCourseOpen = true);
+    widget.onEditorChanged?.call(true);
+    try {
+      final changed = await showGeneralDialog<bool>(
+        context: context,
+        useRootNavigator: true,
+        barrierDismissible: false,
+        barrierColor: Colors.transparent,
+        transitionDuration: Duration.zero,
+        pageBuilder: (context, _, _) => _AddCourseMorphDialog(
+          api: widget.api,
+          term: term,
+          periods: data!.periods,
+          weekday: weekday,
+          period: period,
+          initialWeek: weekNumber(currentMonday, term) ?? 1,
+          startRect: startRect,
+          currentSourceRect: () => mounted ? _addCourseRect() : null,
+        ),
+      );
+      if (mounted && changed == true) await reloadLocalCourses();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _addCourseOpen = false;
+          armedSlot = null;
+          _addCoursePage = null;
+          _addCourseTerm = null;
+          _addCourseViewSize = null;
+        });
+        widget.onEditorChanged?.call(false);
+      }
+    }
+  }
+
   Future<void> editCourse({
     TimetableCourse? course,
     int? weekday,
@@ -458,6 +553,10 @@ class _TimetablePageState extends State<TimetablePage> {
         selectedTerm!.startDate == null ||
         data?.periods.isEmpty != false)
       return;
+    if (course == null) {
+      if (weekday != null && period != null) await _addCourse(weekday, period);
+      return;
+    }
     final changed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -864,6 +963,12 @@ class _TimetablePageState extends State<TimetablePage> {
                                           }
                                         : null,
                                     child: Container(
+                                      key:
+                                          monday == currentMonday &&
+                                              armedSlot ==
+                                                  (day + 1, firstPeriod + row)
+                                          ? _addCourseSlotKey
+                                          : null,
                                       alignment: Alignment.center,
                                       decoration: BoxDecoration(
                                         color:
@@ -896,7 +1001,8 @@ class _TimetablePageState extends State<TimetablePage> {
                                                     day + 1,
                                                     firstPeriod + row,
                                                   ) &&
-                                              canAdd
+                                              canAdd &&
+                                              !_addCourseOpen
                                           ? const Icon(
                                               Icons.add,
                                               color: Colors.white,
@@ -1431,6 +1537,211 @@ class _FallbackBackdrop extends CustomPainter {
       oldDelegate.dark != dark;
 }
 
+class _AddCourseMorphDialog extends StatefulWidget {
+  const _AddCourseMorphDialog({
+    required this.api,
+    required this.term,
+    required this.periods,
+    required this.weekday,
+    required this.period,
+    required this.initialWeek,
+    required this.startRect,
+    required this.currentSourceRect,
+  });
+
+  final ApiClient api;
+  final TermInfo term;
+  final List<PeriodInfo> periods;
+  final int weekday;
+  final int period;
+  final int initialWeek;
+  final Rect startRect;
+  final Rect? Function() currentSourceRect;
+
+  @override
+  State<_AddCourseMorphDialog> createState() => _AddCourseMorphDialogState();
+}
+
+class _AddCourseMorphDialogState extends State<_AddCourseMorphDialog>
+    with SingleTickerProviderStateMixin {
+  static const _duration = Duration(milliseconds: 260);
+  final GlobalKey<_ManualCourseEditorState> _formKey = GlobalKey();
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: _duration,
+    reverseDuration: _duration,
+  );
+  late Rect _startRect = widget.startRect;
+  Rect? _displayEndRect;
+  Rect? _closingEndRect;
+  double? _frozenProgress;
+  bool _started = false;
+  bool _closing = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _closing) return;
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _animation.value = 1;
+      } else {
+        _animation.forward();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  Rect _targetRect() {
+    final size = MediaQuery.sizeOf(context);
+    final safe = MediaQuery.paddingOf(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final top = safe.top + 12;
+    final bottom = math.max(
+      top,
+      size.height - math.max(safe.bottom, keyboard) - 12,
+    );
+    final width = math.min(560.0, math.max(0.0, size.width - 32));
+    final height = math.min(620.0, bottom - top);
+    return Rect.fromLTWH(
+      (size.width - width) / 2,
+      top + (bottom - top - height) / 2,
+      width,
+      height,
+    );
+  }
+
+  Future<void> _requestClose() async {
+    if (_closing || _formKey.currentState?.pending == true) return;
+    await _close(false);
+  }
+
+  Future<void> _close(bool saved) async {
+    if (_closing) return;
+    final currentRect = widget.currentSourceRect();
+    setState(() {
+      _closing = true;
+      _closingEndRect = _displayEndRect ?? _targetRect();
+      if (currentRect == null) {
+        _frozenProgress = _animation.value;
+      } else if (_animation.value >= 1) {
+        _startRect = currentRect;
+      }
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _animation.value = 0;
+    } else {
+      await _animation.reverse();
+    }
+    if (mounted) Navigator.of(context, rootNavigator: true).pop(saved);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final target = _closing
+        ? (_closingEndRect ?? _targetRect())
+        : _targetRect();
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _requestClose();
+      },
+      child: AnimatedBuilder(
+        animation: _animation,
+        builder: (context, _) {
+          final progress = _animation.value;
+          final visualProgress = _frozenProgress ?? progress;
+          final surfaceOpacity = _frozenProgress == null || _frozenProgress == 0
+              ? 1.0
+              : (progress / _frozenProgress!).clamp(0.0, 1.0);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  key: const Key('timetable-add-course-scrim'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _requestClose,
+                  child: ColoredBox(
+                    color: Colors.black.withValues(
+                      alpha: (dark ? .54 : .38) * progress,
+                    ),
+                  ),
+                ),
+              ),
+              TweenAnimationBuilder<Rect?>(
+                tween: RectTween(begin: _displayEndRect ?? target, end: target),
+                duration: _closing
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                builder: (context, displayEndRect, _) {
+                  final end = displayEndRect ?? target;
+                  _displayEndRect = end;
+                  return Positioned.fill(
+                    child: Opacity(
+                      key: const Key('timetable-add-course-fade-close'),
+                      opacity: surfaceOpacity,
+                      child: Stack(
+                        children: [
+                          ContainerMorphTransition(
+                            progress: visualProgress,
+                            isClosing: false,
+                            detailInteractive: progress >= 1 && !_closing,
+                            startRect: _startRect,
+                            endSize: end.size,
+                            endRect: end,
+                            startBorderRadius: BorderRadius.circular(4),
+                            endBorderRadius: BorderRadius.circular(24),
+                            detailSafeArea: false,
+                            // The selected grid cell stays underneath; its
+                            // translucent wallpaper color is the closed face.
+                            closedColor: Colors.transparent,
+                            openColor: dark
+                                ? const Color(0xff1c1c1e)
+                                : Colors.white,
+                            sourceContent: const Center(
+                              child: Icon(Icons.add, color: Colors.white),
+                            ),
+                            detailHeader: const SizedBox.shrink(),
+                            detailBody: ManualCourseEditor(
+                              key: _formKey,
+                              api: widget.api,
+                              term: widget.term,
+                              periods: widget.periods,
+                              initialWeek: widget.initialWeek,
+                              weekday: widget.weekday,
+                              period: widget.period,
+                              embedded: true,
+                              onClose: _requestClose,
+                              onSaved: () => _close(true),
+                            ),
+                            surfaceKey: const Key(
+                              'timetable-add-course-surface',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 class ManualCourseEditor extends StatefulWidget {
   const ManualCourseEditor({
     super.key,
@@ -1441,6 +1752,9 @@ class ManualCourseEditor extends StatefulWidget {
     this.course,
     this.weekday,
     this.period,
+    this.embedded = false,
+    this.onClose,
+    this.onSaved,
   });
   final ApiClient api;
   final TermInfo term;
@@ -1449,6 +1763,9 @@ class ManualCourseEditor extends StatefulWidget {
   final TimetableCourse? course;
   final int? weekday;
   final int? period;
+  final bool embedded;
+  final VoidCallback? onClose;
+  final VoidCallback? onSaved;
   @override
   State<ManualCourseEditor> createState() => _ManualCourseEditorState();
 }
@@ -1530,7 +1847,13 @@ class _ManualCourseEditorState extends State<ManualCourseEditor> {
         room: room.text.trim().isEmpty ? null : room.text.trim(),
         teacher: teacher.text.trim().isEmpty ? null : teacher.text.trim(),
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) {
+        if (widget.onSaved != null) {
+          widget.onSaved!();
+        } else {
+          Navigator.pop(context, true);
+        }
+      }
     } on ApiFailure catch (failure) {
       if (mounted)
         setState(() {
@@ -1543,12 +1866,13 @@ class _ManualCourseEditorState extends State<ManualCourseEditor> {
   @override
   Widget build(BuildContext context) => SafeArea(
     top: false,
+    bottom: !widget.embedded,
     child: Padding(
       padding: EdgeInsets.fromLTRB(
         20,
         0,
         20,
-        MediaQuery.viewInsetsOf(context).bottom + 20,
+        (widget.embedded ? 0 : MediaQuery.viewInsetsOf(context).bottom) + 20,
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -1567,7 +1891,9 @@ class _ManualCourseEditorState extends State<ManualCourseEditor> {
                   ),
                 ),
                 IconButton(
-                  onPressed: pending ? null : () => Navigator.pop(context),
+                  onPressed: pending
+                      ? null
+                      : widget.onClose ?? () => Navigator.pop(context),
                   icon: const Icon(Icons.close),
                 ),
               ],

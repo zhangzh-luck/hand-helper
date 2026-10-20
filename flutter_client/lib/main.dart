@@ -781,6 +781,7 @@ class _ShellState extends State<Shell> {
   bool settingsDetailClosing = false;
   bool analysisDetailOpen = false;
   bool analysisDetailClosing = false;
+  bool courseEditorOpen = false;
   String? avatarSource;
   ImageProvider? avatarImage;
   double _nativeBottomOverlap = 0;
@@ -795,6 +796,7 @@ class _ShellState extends State<Shell> {
       onSelected: (index) {
         if (settingsDetailOpen ||
             analysisDetailOpen ||
+            courseEditorOpen ||
             settingsDetailClosing ||
             analysisDetailClosing) {
           return;
@@ -846,6 +848,7 @@ class _ShellState extends State<Shell> {
       settingsDetailClosing = false;
       analysisDetailOpen = false;
       analysisDetailClosing = false;
+      courseEditorOpen = false;
       avatarSource = null;
       avatarImage = null;
       todayTabActive.value = true;
@@ -892,6 +895,7 @@ class _ShellState extends State<Shell> {
   }
 
   void select(int index) {
+    if (courseEditorOpen) return;
     if (index == selected) return;
     todayTabActive.value = index == 0;
     setState(() {
@@ -910,7 +914,7 @@ class _ShellState extends State<Shell> {
   }
 
   String get _nativeStateKey =>
-      '$selected/${settingsDetailOpen || analysisDetailOpen || settingsDetailClosing || analysisDetailClosing}/${widget.themeMode.name}';
+      '$selected/${settingsDetailOpen || analysisDetailOpen || courseEditorOpen || settingsDetailClosing || analysisDetailClosing}/${widget.themeMode.name}';
 
   void _sendNativeState() {
     if (!NativeTabBridge.enabled || !mounted) return;
@@ -922,6 +926,7 @@ class _ShellState extends State<Shell> {
       detailOpen:
           settingsDetailOpen ||
           analysisDetailOpen ||
+          courseEditorOpen ||
           settingsDetailClosing ||
           analysisDetailClosing,
       appearance: widget.themeMode.name,
@@ -952,6 +957,12 @@ class _ShellState extends State<Shell> {
     _sendNativeState();
   }
 
+  void _setCourseEditorOpen(bool value) {
+    if (courseEditorOpen == value) return;
+    setState(() => courseEditorOpen = value);
+    _sendNativeState();
+  }
+
   Widget mainPage(int index) => mainPages.putIfAbsent(index, () {
     final mainApi = widget.api;
     return switch (index) {
@@ -968,6 +979,7 @@ class _ShellState extends State<Shell> {
         api: widget.api,
         onUnauthorized: widget.onUnauthorized,
         localProfileChanges: localProfileChanges,
+        onEditorChanged: _setCourseEditorOpen,
       ),
       2 => AnalysisPage(
         api: widget.api,
@@ -993,7 +1005,8 @@ class _ShellState extends State<Shell> {
 
   @override
   Widget build(BuildContext context) {
-    final detailOpen = settingsDetailOpen || analysisDetailOpen;
+    final detailOpen =
+        settingsDetailOpen || analysisDetailOpen || courseEditorOpen;
     final detailClosing = settingsDetailClosing || analysisDetailClosing;
     if (NativeTabBridge.enabled &&
         _nativeStateKey != _lastNativeState &&

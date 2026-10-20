@@ -2461,6 +2461,7 @@ void main() {
       final monday = mondayOf(DateTime.now());
       await tester.pumpWidget(
         MaterialApp(
+          theme: ThemeData(splashFactory: InkRipple.splashFactory),
           home: Scaffold(
             body: ManualCourseEditor(
               api: ApiClient(),
@@ -3351,6 +3352,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
+        theme: ThemeData(splashFactory: InkRipple.splashFactory),
         home: Scaffold(
           body: TimetablePage(api: client, onUnauthorized: () {}),
         ),
@@ -3449,6 +3451,237 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets(
+      'add course morph opens from the selected slot and closes on $platform',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetViewInsets);
+        final states = <bool>[];
+        final (_, slot) = await _pumpEmptyTimetableForMorph(
+          tester,
+          onEditorChanged: states.add,
+        );
+        final surface = find.byKey(const Key('timetable-add-course-surface'));
+        await tester.tapAt(slot);
+        await tester.pump();
+        expect(find.byIcon(Icons.add), findsOneWidget);
+        expect(surface, findsNothing);
+        final sourceRect = tester.getRect(
+          find
+              .ancestor(
+                of: find.byIcon(Icons.add),
+                matching: find.byType(InkWell),
+              )
+              .first,
+        );
+
+        await tester.tapAt(slot);
+        await tester.pump();
+        expect(surface, findsOneWidget);
+        expect(tester.getRect(surface), sourceRect);
+        expect(states, [true]);
+        await tester.tapAt(slot); // The modal absorbs a rapid third tap.
+        await tester.pump(const Duration(milliseconds: 130));
+        expect(find.byType(ManualCourseEditor), findsOneWidget);
+        expect(
+          find.byKey(const Key('timetable-add-course-surface')),
+          findsOneWidget,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getRect(surface).height, greaterThan(sourceRect.height));
+
+        await tester.tap(find.byKey(const Key('manual-week-trigger')));
+        await tester.pumpAndSettle();
+        expect(find.text('上课周次'), findsWidgets);
+        await tester.tap(find.text('取消'));
+        await tester.pumpAndSettle();
+        expect(find.byType(ManualCourseEditor), findsOneWidget);
+
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(surface).bottom, lessThanOrEqualTo(544));
+        await tester.ensureVisible(find.text('保存课程'));
+        expect(tester.takeException(), isNull);
+        tester.view.resetViewInsets();
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.close));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 130));
+        expect(surface, findsOneWidget);
+        expect(tester.getRect(surface).height, lessThan(620));
+        await tester.pumpAndSettle();
+        expect(surface, findsNothing);
+        expect(states, [true, false]);
+        expect(find.byIcon(Icons.add), findsNothing);
+        expect(tester.takeException(), isNull);
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+  }
+
+  testWidgets(
+    'add course save refreshes after morph; missing source fades on back',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = _RecordingManualCourseStore();
+      final states = <bool>[];
+      final (client, slot) = await _pumpEmptyTimetableForMorph(
+        tester,
+        store: store,
+        onEditorChanged: states.add,
+      );
+      final otherSlot = slot + const Offset(49.3, 0);
+      await tester.tapAt(otherSlot);
+      await tester.pump();
+      await tester.tapAt(otherSlot);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, '课程名称'),
+        'Morph 测试课程',
+      );
+      await tester.tap(find.text('保存课程'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('timetable-add-course-surface')),
+        findsNothing,
+      );
+      expect(store.saved.single.name, 'Morph 测试课程');
+      expect(states, [true, false]);
+      expect(
+        (await client.loadTimetableSnapshot())!.coursesByTerm[1]!.any(
+          (course) => course.name == 'Morph 测试课程',
+        ),
+        isTrue,
+      );
+      expect(find.text('Morph 测试课程'), findsWidgets);
+
+      await tester.tapAt(slot);
+      await tester.pump();
+      await tester.tapAt(slot);
+      await tester.pumpAndSettle();
+      tester.view.physicalSize = const Size(844, 390);
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 130));
+      final opacity = tester.widget<Opacity>(
+        find.byKey(const Key('timetable-add-course-fade-close')),
+      );
+      expect(opacity.opacity, lessThan(1));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('timetable-add-course-surface')),
+        findsNothing,
+      );
+      expect(store.saved, hasLength(1));
+      expect(states, [true, false, true, false]);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('add course keeps its route on failed or pending save', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _ControlledManualCourseStore();
+    final states = <bool>[];
+    final (_, slot) = await _pumpEmptyTimetableForMorph(
+      tester,
+      store: store,
+      onEditorChanged: states.add,
+    );
+    await tester.tapAt(slot);
+    await tester.pump();
+    await tester.tapAt(slot);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '课程名称'), '保存失败测试');
+    await tester.tap(find.text('保存课程'));
+    await tester.pump();
+    expect(store.saveAttempts, 1);
+    expect(find.text('保存中…'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(states, [true]);
+    expect(find.byType(ManualCourseEditor), findsOneWidget);
+    store.release.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('保存失败测试'), findsWidgets);
+    expect(find.text('模拟保存失败'), findsOneWidget);
+    expect(find.byType(ManualCourseEditor), findsOneWidget);
+    expect(store.saveAttempts, 1);
+
+    await tester.tap(find.byKey(const Key('manual-week-trigger')));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualCourseEditor), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualCourseEditor), findsNothing);
+    expect(states, [true, false]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Android course editor hides and restores the existing dock', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    SharedPreferences.setMockInitialValues({
+      'session_cookie': 'session=offline',
+    });
+    final client = ApiClient(
+      cache: _EmptyTodayCache(),
+      localProfileStore: _MemoryLocalProfileStore(),
+      client: MockClient((_) async => throw const SocketException('offline')),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(splashFactory: InkRipple.splashFactory),
+        home: Shell(
+          api: client,
+          onUnauthorized: () {},
+          themeMode: ThemeMode.system,
+          onThemeModeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('tab-1')));
+    await tester.pump(const Duration(milliseconds: 300));
+    final timetable = tester.widget<TimetablePage>(find.byType(TimetablePage));
+    timetable.onEditorChanged!(true);
+    await tester.pump();
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('settings-dock-slide')))
+          .offset,
+      const Offset(0, 1.25),
+    );
+    timetable.onEditorChanged!(false);
+    await tester.pump();
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('settings-dock-slide')))
+          .offset,
+      Offset.zero,
+    );
+    expect(find.byKey(const Key('primary-tab-bar')), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets(
@@ -5988,6 +6221,26 @@ void main() {
       expect(state()['selected'], 1);
       expect(find.byType(FloatingTabBar), findsNothing);
 
+      final timetable = tester.widget<TimetablePage>(
+        find.byType(TimetablePage),
+      );
+      timetable.onEditorChanged!(true);
+      await tester.pump();
+      expect(state()['detailOpen'], isTrue);
+      expect(tester.getSize(find.byType(IndexedStack)), viewport);
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('selectTab', 3),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      expect(state()['selected'], 1);
+      timetable.onEditorChanged!(false);
+      await tester.pump();
+      expect(state()['detailOpen'], isFalse);
+
       await messenger.handlePlatformMessage(
         channel.name,
         const StandardMethodCodec().encodeMethodCall(
@@ -6653,4 +6906,73 @@ class _MemoryLocalManualCourseStore extends LocalManualCourseStore {
     String oldOwner,
     String newOwner,
   ) async {}
+}
+
+class _RecordingManualCourseStore extends _MemoryLocalManualCourseStore {
+  final saved = <LocalManualCourse>[];
+
+  @override
+  Future<List<LocalManualCourse>> all(String key) async => [...saved];
+
+  @override
+  Future<void> save(String key, LocalManualCourse course) async {
+    saved.add(course);
+  }
+}
+
+class _ControlledManualCourseStore extends _RecordingManualCourseStore {
+  final release = Completer<void>();
+  int saveAttempts = 0;
+
+  @override
+  Future<void> save(String key, LocalManualCourse course) async {
+    saveAttempts++;
+    await release.future;
+    throw const ApiFailure('模拟保存失败');
+  }
+}
+
+Future<(ApiClient, Offset)> _pumpEmptyTimetableForMorph(
+  WidgetTester tester, {
+  ValueChanged<bool>? onEditorChanged,
+  LocalManualCourseStore? store,
+}) async {
+  SharedPreferences.setMockInitialValues({'session_cookie': 'session=offline'});
+  final monday = mondayOf(DateTime.now());
+  final client = ApiClient(
+    timetableCache: _FixtureTimetableCache(
+      TimetableData(
+        [TermInfo(1, 'term', '测试学期', dateKey(monday), true)],
+        defaultPeriods,
+        null,
+        {1: []},
+        DateTime.now(),
+      ),
+    ),
+    localManualCourseStore: store ?? _MemoryLocalManualCourseStore(),
+    localProfileStore: _MemoryLocalProfileStore(),
+    client: MockClient((_) async => throw const SocketException('offline')),
+  );
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: ThemeData(splashFactory: InkRipple.splashFactory),
+      home: Scaffold(
+        body: TimetablePage(
+          api: client,
+          onUnauthorized: () {},
+          onEditorChanged: onEditorChanged,
+        ),
+      ),
+    ),
+  );
+  for (var i = 0; i < 15; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  final grid = find.byType(SingleChildScrollView).first;
+  final rect = tester.getRect(grid);
+  final slot = Offset(
+    rect.left + 45 + (rect.width - 45) * 2.5 / 7,
+    rect.top + 66 * 1.5,
+  );
+  return (client, slot);
 }
