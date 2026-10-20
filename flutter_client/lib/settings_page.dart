@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -14,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'appearance_mode_selector.dart';
 import 'container_morph_transition.dart';
+import 'native_period_time_picker.dart';
 import 'native_tab_bridge.dart';
 import 'passkey_management_page.dart';
 
@@ -70,6 +72,9 @@ class _SettingsPageState extends State<SettingsPage>
   bool busy = false;
   bool confirmingLeave = false;
   bool closingSection = false;
+  final NativePeriodTimePicker _nativeTimePicker = NativePeriodTimePicker();
+  int? _activeTimeRequestId;
+  int _timeRequestGeneration = 0;
   int? selectedTermId;
   int? selectedPeriodNumber;
   String? draftName;
@@ -95,8 +100,25 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
+    final requestId = _activeTimeRequestId;
+    if (requestId != null) {
+      unawaited(_dismissTimePicker(requestId));
+    }
     _sectionAnimation.dispose();
     super.dispose();
+  }
+
+  Future<void> _dismissTimePicker(int requestId) async {
+    _timeRequestGeneration++;
+    try {
+      await _nativeTimePicker.dismiss(requestId);
+    } on PlatformException {
+      // A scene can close before the outstanding native picker is dismissed.
+    } on MissingPluginException {
+      // The Flutter engine may already be detached during disposal.
+    } finally {
+      if (_activeTimeRequestId == requestId) _activeTimeRequestId = null;
+    }
   }
 
   Future<void> initialize() async {
@@ -287,6 +309,11 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> requestBack({bool fromSystemBack = false}) async {
+    final requestId = _activeTimeRequestId;
+    if (requestId != null) {
+      await _dismissTimePicker(requestId);
+      return;
+    }
     if (section == null || busy || confirmingLeave || closingSection) return;
     if (!fromSystemBack) HapticFeedback.lightImpact();
     if (section != 'personal' || !hasUnsavedProfile) {
@@ -975,16 +1002,65 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> pickPeriodTime(PeriodInfo period, bool start) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        _activeTimeRequestId != null) {
+      return;
+    }
     final value = start ? period.start : period.end;
     final parts = value.split(':');
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(
-        hour: int.parse(parts[0]),
-        minute: int.parse(parts[1]),
-      ),
-      initialEntryMode: TimePickerEntryMode.dialOnly,
+    final initialTime = TimeOfDay(
+      hour: int.parse(parts[0]),
+      minute: int.parse(parts[1]),
     );
+    TimeOfDay? picked;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final requestId = NativePeriodTimePicker.nextRequestId();
+      final generation = ++_timeRequestGeneration;
+      _activeTimeRequestId = requestId;
+      FocusManager.instance.primaryFocus?.unfocus();
+      try {
+        picked = await _nativeTimePicker.pickTime(
+          initialTime: initialTime,
+          title: start ? '上课时间' : '下课时间',
+          requestId: requestId,
+        );
+      } on PlatformException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _timeRequestGeneration) {
+          message('系统时间选择器暂不可用，请重试。');
+        }
+        return;
+      } on MissingPluginException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _timeRequestGeneration) {
+          message('系统时间选择器暂不可用，请重试。');
+        }
+        return;
+      } on FormatException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _timeRequestGeneration) {
+          message('系统时间选择结果无效，请重试。');
+        }
+        return;
+      } finally {
+        if (_activeTimeRequestId == requestId) _activeTimeRequestId = null;
+      }
+      if (!mounted ||
+          generation != _timeRequestGeneration ||
+          section != 'time' ||
+          chosenPeriod?.number != period.number) {
+        return;
+      }
+    } else {
+      picked = await showTimePicker(
+        context: context,
+        initialTime: initialTime,
+        initialEntryMode: TimePickerEntryMode.dialOnly,
+      );
+    }
     if (picked == null || !mounted) return;
     final formatted =
         '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';

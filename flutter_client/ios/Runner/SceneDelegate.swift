@@ -18,6 +18,11 @@ class SceneDelegate: FlutterSceneDelegate {
     window?.backgroundColor = .systemBackground
     window?.rootViewController = NativeTabHostController(flutter: flutter)
   }
+
+  override func sceneDidDisconnect(_ scene: UIScene) {
+    (window?.rootViewController as? NativeTabHostController)?.invalidateTimePicker()
+    super.sceneDidDisconnect(scene)
+  }
 }
 
 /// UIKit owns the tab control while one FlutterViewController owns all pages.
@@ -25,6 +30,8 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private let flutter: FlutterViewController
   private let tabBar = UITabBar()
   private var channel: FlutterMethodChannel!
+  private var timeChannel: FlutterMethodChannel!
+  private var timePickerPresenter: NativeTimePickerPresenter!
   private var tabHeight: NSLayoutConstraint!
   private var wantsTabs = false
   private var detailOpen = false
@@ -87,6 +94,17 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
     ])
 
     channel = FlutterMethodChannel(name: "hand_helper/native_tab", binaryMessenger: flutter.binaryMessenger)
+    timePickerPresenter = NativeTimePickerPresenter(host: self)
+    timeChannel = FlutterMethodChannel(
+      name: "hand_helper/native_period_time", binaryMessenger: flutter.binaryMessenger
+    )
+    timeChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "scene_closed", message: nil, details: nil))
+        return
+      }
+      self.timePickerPresenter.handle(call, result: result)
+    }
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else {
         result(FlutterError(code: "scene_closed", message: nil, details: nil))
@@ -182,7 +200,11 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   deinit {
     NotificationCenter.default.removeObserver(self)
     channel?.setMethodCallHandler(nil)
+    timeChannel?.setMethodCallHandler(nil)
+    timePickerPresenter?.invalidate()
   }
+
+  func invalidateTimePicker() { timePickerPresenter?.invalidate() }
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
