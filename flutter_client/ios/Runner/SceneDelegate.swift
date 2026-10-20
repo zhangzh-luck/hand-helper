@@ -34,6 +34,8 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private var timePickerPresenter: NativeTimePickerPresenter!
   private var dateChannel: FlutterMethodChannel!
   private var datePickerPresenter: NativeDatePickerPresenter!
+  private var imageActionChannel: FlutterMethodChannel!
+  private var imageActionPresenter: NativeImageActionSheetPresenter!
   private var tabHeight: NSLayoutConstraint!
   private var wantsTabs = false
   private var detailOpen = false
@@ -117,6 +119,17 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
         return
       }
       self.datePickerPresenter.handle(call, result: result)
+    }
+    imageActionPresenter = NativeImageActionSheetPresenter(host: self, sourceView: flutter.view)
+    imageActionChannel = FlutterMethodChannel(
+      name: "hand_helper/native_image_action_sheet", binaryMessenger: flutter.binaryMessenger
+    )
+    imageActionChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "scene_closed", message: nil, details: nil))
+        return
+      }
+      self.imageActionPresenter.handle(call, result: result)
     }
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else {
@@ -217,11 +230,14 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
     timePickerPresenter?.invalidate()
     dateChannel?.setMethodCallHandler(nil)
     datePickerPresenter?.invalidate()
+    imageActionChannel?.setMethodCallHandler(nil)
+    imageActionPresenter?.invalidate()
   }
 
   func invalidateNativePickers() {
     timePickerPresenter?.invalidate()
     datePickerPresenter?.invalidate()
+    imageActionPresenter?.invalidate()
   }
 
   override func viewDidLayoutSubviews() {

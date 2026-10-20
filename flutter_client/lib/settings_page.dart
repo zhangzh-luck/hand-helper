@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +17,7 @@ import 'api.dart';
 import 'appearance_mode_selector.dart';
 import 'container_morph_transition.dart';
 import 'native_period_time_picker.dart';
+import 'native_image_action_sheet.dart';
 import 'native_term_start_date_picker.dart';
 import 'native_tab_bridge.dart';
 import 'passkey_management_page.dart';
@@ -50,6 +52,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   final GlobalKey _contentStackKey = GlobalKey();
+  final GlobalKey _avatarRowKey = GlobalKey();
+  final GlobalKey _wallpaperRowKey = GlobalKey();
   final Map<String, GlobalKey> _entryKeys = {
     for (final name in [
       'account',
@@ -80,6 +84,10 @@ class _SettingsPageState extends State<SettingsPage>
       NativeTermStartDatePicker();
   int? _activeDateRequestId;
   int _dateRequestGeneration = 0;
+  final NativeImageActionSheet _imageActionSheet = NativeImageActionSheet();
+  int? _activeImageActionRequestId;
+  int _imageFlowGeneration = 0;
+  bool _imageFlowBusy = false;
   int? selectedTermId;
   int? selectedPeriodNumber;
   String? draftName;
@@ -105,6 +113,10 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
+    final imageRequestId = _activeImageActionRequestId;
+    if (imageRequestId != null) {
+      unawaited(_dismissImageActions(imageRequestId));
+    }
     final requestId = _activeTimeRequestId;
     if (requestId != null) {
       unawaited(_dismissTimePicker(requestId));
@@ -115,6 +127,21 @@ class _SettingsPageState extends State<SettingsPage>
     }
     _sectionAnimation.dispose();
     super.dispose();
+  }
+
+  Future<void> _dismissImageActions(int requestId) async {
+    _imageFlowGeneration++;
+    try {
+      await _imageActionSheet.dismiss(requestId);
+    } on PlatformException {
+      // The scene can close before its native action sheet is dismissed.
+    } on MissingPluginException {
+      // The Flutter engine can detach while Settings is being disposed.
+    } finally {
+      if (_activeImageActionRequestId == requestId) {
+        _activeImageActionRequestId = null;
+      }
+    }
   }
 
   Future<void> _dismissTimePicker(int requestId) async {
@@ -288,6 +315,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   Future<void> returnToRoot({bool discardDraft = false}) async {
     if (closingSection) return;
+    _imageFlowGeneration++;
     closingSection = true;
     widget.onSectionClosingChanged?.call(true);
     var dockRestored = false;
@@ -331,6 +359,11 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> requestBack({bool fromSystemBack = false}) async {
+    final imageRequestId = _activeImageActionRequestId;
+    if (imageRequestId != null) {
+      await _dismissImageActions(imageRequestId);
+      return;
+    }
     final dateRequestId = _activeDateRequestId;
     if (dateRequestId != null) {
       await _dismissDatePicker(dateRequestId);
@@ -884,12 +917,10 @@ class _SettingsPageState extends State<SettingsPage>
   Future<T?> _choose<T>(
     String title,
     List<T> values,
-    String Function(T) label,
-  ) => showModalBottomSheet<T>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (context) => SafeArea(
+    String Function(T) label, {
+    bool waitForDismissal = false,
+  }) async {
+    Widget content(BuildContext context) => SafeArea(
       top: false,
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -912,8 +943,32 @@ class _SettingsPageState extends State<SettingsPage>
           ],
         ),
       ),
-    ),
-  );
+    );
+    if (!waitForDismissal) {
+      return showModalBottomSheet<T>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: content,
+      );
+    }
+    // Navigator.push resolves when popped, before the sheet's reverse animation
+    // removes its overlay. The native action sheet must wait for that removal.
+    final navigator = Navigator.of(context);
+    final route = ModalBottomSheetRoute<T>(
+      builder: content,
+      isScrollControlled: true,
+      showDragHandle: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      capturedThemes: InheritedTheme.capture(
+        from: context,
+        to: navigator.context,
+      ),
+    );
+    final picked = await navigator.push(route);
+    await route.completed;
+    return picked;
+  }
 
   Widget _time(bool dark) {
     final term = chosenTerm;
@@ -1168,12 +1223,15 @@ class _SettingsPageState extends State<SettingsPage>
         ),
         _sectionTitle('个人资料'),
         _group([
-          _row(
-            '头像',
-            '显示在首页和底部导航栏',
-            Icons.account_circle_outlined,
-            trailing: profile.avatar == null ? '未设置' : '已设置',
-            onTap: () => editImage('avatar_data_url', profile.avatar),
+          KeyedSubtree(
+            key: _avatarRowKey,
+            child: _row(
+              '头像',
+              '显示在首页和底部导航栏',
+              Icons.account_circle_outlined,
+              trailing: profile.avatar == null ? '未设置' : '已设置',
+              onTap: () => editAvatar(profile.avatar),
+            ),
           ),
           _row(
             '显示姓名',
@@ -1182,12 +1240,15 @@ class _SettingsPageState extends State<SettingsPage>
             trailing: profile.name,
             onTap: editName,
           ),
-          _row(
-            '页面壁纸',
-            '首页、课表、分析；设置页暂不显示壁纸',
-            Icons.wallpaper_outlined,
-            trailing: '已设置 $count/3',
-            onTap: editWallpaper,
+          KeyedSubtree(
+            key: _wallpaperRowKey,
+            child: _row(
+              '页面壁纸',
+              '首页、课表、分析；设置页暂不显示壁纸',
+              Icons.wallpaper_outlined,
+              trailing: '已设置 $count/3',
+              onTap: editWallpaper,
+            ),
           ),
         ], dark),
         const SizedBox(height: 12),
@@ -1238,7 +1299,51 @@ class _SettingsPageState extends State<SettingsPage>
       setState(() => draftName = result);
   }
 
+  bool get _canStartImageFlow =>
+      mounted &&
+      section == 'personal' &&
+      _sectionAnimation.isCompleted &&
+      !closingSection &&
+      !_imageFlowBusy;
+
+  bool _canContinueImageFlow(int generation, ApiClient owner) =>
+      mounted &&
+      section == 'personal' &&
+      !closingSection &&
+      generation == _imageFlowGeneration &&
+      identical(widget.api, owner);
+
+  Future<void> editAvatar(String? current) async {
+    if (!_canStartImageFlow) return;
+    _imageFlowBusy = true;
+    final generation = ++_imageFlowGeneration;
+    final owner = widget.api;
+    try {
+      await editImage(
+        'avatar_data_url',
+        current,
+        _avatarRowKey,
+        generation,
+        owner,
+      );
+    } finally {
+      _imageFlowBusy = false;
+    }
+  }
+
   Future<void> editWallpaper() async {
+    if (!_canStartImageFlow) return;
+    _imageFlowBusy = true;
+    final generation = ++_imageFlowGeneration;
+    final owner = widget.api;
+    try {
+      await _editWallpaper(generation, owner);
+    } finally {
+      _imageFlowBusy = false;
+    }
+  }
+
+  Future<void> _editWallpaper(int generation, ApiClient owner) async {
     const choices = <(String, String)>[
       ('home_wallpaper_data_url', '首页壁纸'),
       ('timetable_background_data_url', '课表背景'),
@@ -1249,8 +1354,9 @@ class _SettingsPageState extends State<SettingsPage>
       '页面壁纸',
       choices,
       ((String, String) item) => item.$2,
+      waitForDismissal: defaultTargetPlatform == TargetPlatform.iOS,
     );
-    if (picked == null || !mounted) return;
+    if (picked == null || !_canContinueImageFlow(generation, owner)) return;
     if (picked.$1 == 'settings_wallpaper_data_url') {
       message('设置页壁纸暂不显示；原图片仍保存在本设备。');
       return;
@@ -1262,10 +1368,49 @@ class _SettingsPageState extends State<SettingsPage>
       'analysis_wallpaper_data_url' => profile.analysisWallpaper,
       _ => profile.settingsWallpaper,
     };
-    await editImage(picked.$1, current);
+    await editImage(picked.$1, current, _wallpaperRowKey, generation, owner);
   }
 
-  Future<void> editImage(String key, String? current) async {
+  (Rect, Size)? _imageActionAnchor(GlobalKey rowKey) {
+    final row = rowKey.currentContext?.findRenderObject();
+    final overlay = Overlay.of(
+      context,
+      rootOverlay: true,
+    ).context.findRenderObject();
+    if (row is! RenderBox ||
+        overlay is! RenderBox ||
+        !row.hasSize ||
+        !overlay.hasSize) {
+      return null;
+    }
+    var visible = row.localToGlobal(Offset.zero, ancestor: overlay) & row.size;
+    final viewport = RenderAbstractViewport.of(row);
+    final viewportBox = viewport is RenderBox ? viewport as RenderBox : null;
+    if (viewportBox != null && viewportBox.hasSize) {
+      visible = visible.intersect(
+        viewportBox.localToGlobal(Offset.zero, ancestor: overlay) &
+            viewportBox.size,
+      );
+    }
+    visible = visible.intersect(Offset.zero & overlay.size);
+    if (!visible.left.isFinite ||
+        !visible.top.isFinite ||
+        !visible.width.isFinite ||
+        !visible.height.isFinite ||
+        visible.width <= 0 ||
+        visible.height <= 0) {
+      return null;
+    }
+    return (visible, overlay.size);
+  }
+
+  Future<void> editImage(
+    String key,
+    String? current,
+    GlobalKey rowKey,
+    int generation,
+    ApiClient owner,
+  ) async {
     final title = key == 'avatar_data_url'
         ? '头像'
         : switch (key) {
@@ -1274,56 +1419,110 @@ class _SettingsPageState extends State<SettingsPage>
             'analysis_wallpaper_data_url' => '分析页壁纸',
             _ => '设置页壁纸',
           };
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('从相册选择并自定义裁剪'),
-              onTap: () => Navigator.pop(context, 'choose'),
-            ),
-            if (current != null)
+    String? choice;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final anchor = _imageActionAnchor(rowKey);
+      if (anchor == null) return;
+      final requestId = NativeImageActionSheet.nextRequestId();
+      _activeImageActionRequestId = requestId;
+      try {
+        choice = await _imageActionSheet.show(
+          requestId: requestId,
+          title: title,
+          canRemove: current != null,
+          anchor: anchor.$1,
+          flutterViewSize: anchor.$2,
+        );
+      } on PlatformException catch (failure) {
+        if (_canContinueImageFlow(generation, owner) &&
+            failure.code != 'invalid_anchor') {
+          message('图片操作菜单暂不可用，请重试。');
+        }
+        return;
+      } on MissingPluginException {
+        if (_canContinueImageFlow(generation, owner)) {
+          message('图片操作菜单暂不可用，请重试。');
+        }
+        return;
+      } on FormatException {
+        if (_canContinueImageFlow(generation, owner)) {
+          message('图片操作菜单返回了无效操作，请重试。');
+        }
+        return;
+      } finally {
+        if (_activeImageActionRequestId == requestId) {
+          _activeImageActionRequestId = null;
+        }
+      }
+    } else {
+      choice = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) => SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.delete_outline),
-                title: const Text('移除图片'),
-                onTap: () => Navigator.pop(context, 'remove'),
+                title: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
               ),
-          ],
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('从相册选择并自定义裁剪'),
+                onTap: () => Navigator.pop(context, 'choose'),
+              ),
+              if (current != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: const Text('移除图片'),
+                  onTap: () => Navigator.pop(context, 'remove'),
+                ),
+            ],
+          ),
         ),
-      ),
-    );
-    if (choice == 'remove' && mounted) {
+      );
+    }
+    if (!_canContinueImageFlow(generation, owner)) return;
+    if (choice == 'remove') {
       setState(() => profileChanges[key] = null);
       return;
     }
-    if (choice != 'choose' || !mounted) return;
+    if (choice != 'choose') return;
     final prefs = await SharedPreferences.getInstance();
+    if (!_canContinueImageFlow(generation, owner)) return;
     await prefs.setString(pendingLocalPhotoKey, key);
     try {
+      if (!_canContinueImageFlow(generation, owner)) return;
       final file = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         requestFullMetadata: false,
       );
-      if (file != null && mounted) await cropPickedImage(key, file);
+      if (file != null && _canContinueImageFlow(generation, owner)) {
+        await cropPickedImage(
+          key,
+          file,
+          canContinue: () => _canContinueImageFlow(generation, owner),
+        );
+      }
     } catch (_) {
-      if (mounted) message('图片选择失败，请重试。');
+      if (_canContinueImageFlow(generation, owner)) {
+        message('图片选择失败，请重试。');
+      }
     } finally {
       await prefs.remove(pendingLocalPhotoKey);
     }
   }
 
-  Future<void> cropPickedImage(String key, XFile file) async {
+  Future<void> cropPickedImage(
+    String key,
+    XFile file, {
+    bool Function()? canContinue,
+  }) async {
+    bool active() => mounted && (canContinue?.call() ?? true);
+    if (!active()) return;
     final title = key == 'avatar_data_url'
         ? '头像'
         : switch (key) {
@@ -1334,16 +1533,17 @@ class _SettingsPageState extends State<SettingsPage>
           };
     final limit = key == 'avatar_data_url' ? 15_000_000 : 5_000_000;
     if (await file.length() > limit) {
-      if (mounted) message('原图不能超过 ${limit ~/ 1000000} MB。');
+      if (active()) message('原图不能超过 ${limit ~/ 1000000} MB。');
       return;
     }
     final bytes = await file.readAsBytes();
+    if (!active()) return;
     if (bytes.length > limit) {
-      if (mounted) message('原图不能超过 ${limit ~/ 1000000} MB。');
+      message('原图不能超过 ${limit ~/ 1000000} MB。');
       return;
     }
     final cropSource = await compute(_prepareCropSource, bytes);
-    if (!mounted) return;
+    if (!mounted || !active()) return;
     if (cropSource == null) {
       message('请选择不超过 2500 万像素、可解析的 JPEG、PNG 或 WebP 图片。');
       return;
@@ -1357,7 +1557,7 @@ class _SettingsPageState extends State<SettingsPage>
         ),
       ),
     );
-    if (!mounted || processed == null) return;
+    if (!mounted || !active() || processed == null) return;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1380,7 +1580,7 @@ class _SettingsPageState extends State<SettingsPage>
         ],
       ),
     );
-    if (accepted == true && mounted) {
+    if (accepted == true && active()) {
       setState(
         () => profileChanges[key] =
             'data:image/jpeg;base64,${base64Encode(processed)}',

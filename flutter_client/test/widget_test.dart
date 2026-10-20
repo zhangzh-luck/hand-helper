@@ -21,6 +21,7 @@ import 'package:hand_helper_flutter/timetable_page.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:passkeys/types.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5015,6 +5016,378 @@ void main() {
   });
 
   testWidgets(
+    'iOS image actions preserve drafts, menu order and picker cancellation',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      tester.view.physicalSize = const Size(1170, 2532);
+      tester.view.devicePixelRatio = 3;
+      SharedPreferences.setMockInitialValues({
+        'session_cookie': 'session=images',
+      });
+      const channel = MethodChannel('hand_helper/native_image_action_sheet');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final appearanceChannels = <MethodChannel>[];
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
+        call,
+      ) async {
+        if (call.method == 'create') {
+          final args = call.arguments as Map<Object?, Object?>;
+          final appearanceChannel = MethodChannel(
+            'hand_helper/appearance_mode/${args['id']}',
+          );
+          appearanceChannels.add(appearanceChannel);
+          messenger.setMockMethodCallHandler(
+            appearanceChannel,
+            (_) async => null,
+          );
+        }
+        return null;
+      });
+      final calls = <MethodCall>[];
+      final replies = <Completer<Object?>>[];
+      messenger.setMockMethodCallHandler(channel, (call) {
+        calls.add(call);
+        if (call.method == 'dismissImageActions') return Future.value(null);
+        final reply = Completer<Object?>();
+        replies.add(reply);
+        return reply.future;
+      });
+      final originalPicker = ImagePickerPlatform.instance;
+      final fakePicker = _CancelledImagePickerPlatform();
+      ImagePickerPlatform.instance = fakePicker;
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        messenger.setMockMethodCallHandler(channel, null);
+        messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+        for (final appearanceChannel in appearanceChannels) {
+          messenger.setMockMethodCallHandler(appearanceChannel, null);
+        }
+        ImagePickerPlatform.instance = originalPicker;
+      });
+      final avatar = _avatarDataUrl(width: 4, height: 4);
+      final wallpaper = _avatarDataUrl(width: 2, height: 2);
+      final profile = Profile(
+        '本机用户',
+        avatar,
+        wallpaper,
+        timetableBackground: wallpaper,
+        analysisWallpaper: wallpaper,
+      );
+      final store = _MemoryLocalProfileStore()..profile = profile;
+      final client = ApiClient(
+        localProfileStore: store,
+        settingsCache: _FixtureSettingsCache(
+          SettingsData(profile, const [], const [], DateTime.now()),
+        ),
+        client: MockClient((_) async => throw const SocketException('offline')),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsPage(
+              api: client,
+              onUnauthorized: () {},
+              onSignedOut: () {},
+              themeMode: ThemeMode.system,
+              onThemeModeChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('个性化设置'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      expect(
+        calls.where((call) => call.method == 'showImageActions'),
+        hasLength(1),
+      );
+      final avatarArgs = calls.last.arguments as Map<Object?, Object?>;
+      expect(avatarArgs['title'], '头像');
+      expect(avatarArgs['canRemove'], isTrue);
+      final anchor = avatarArgs['anchor'] as Map<Object?, Object?>;
+      final size = avatarArgs['flutterViewSize'] as Map<Object?, Object?>;
+      expect((anchor['width'] as num), greaterThan(0));
+      expect((anchor['height'] as num), greaterThan(0));
+      expect((anchor['y'] as num), greaterThanOrEqualTo(0));
+      expect((size['width'] as num), 390);
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      expect(
+        calls.where((call) => call.method == 'showImageActions'),
+        hasLength(1),
+      );
+      replies.removeAt(0).complete('remove');
+      await tester.pumpAndSettle();
+      expect(
+        store.profile?.avatar,
+        avatar,
+      ); // The action only changes the draft.
+      await tester.tap(find.text('保存更改'));
+      await tester.pumpAndSettle();
+      expect(store.profile?.avatar, isNull);
+
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      expect(
+        (calls.last.arguments as Map<Object?, Object?>)['canRemove'],
+        isFalse,
+      );
+      replies.removeAt(0).complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text('保存更改'), findsOneWidget);
+      expect(store.profile?.avatar, isNull);
+
+      for (final name in ['首页壁纸', '课表背景', '分析页壁纸']) {
+        final before = calls
+            .where((call) => call.method == 'showImageActions')
+            .length;
+        await tester.tap(find.text('页面壁纸'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(name));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(
+          calls.where((call) => call.method == 'showImageActions'),
+          hasLength(before),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          calls.where((call) => call.method == 'showImageActions'),
+          hasLength(before + 1),
+        );
+        expect((calls.last.arguments as Map<Object?, Object?>)['title'], name);
+        expect(
+          (calls.last.arguments as Map<Object?, Object?>)['canRemove'],
+          isTrue,
+        );
+        replies.removeAt(0).complete(null);
+        await tester.pumpAndSettle();
+      }
+
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      expect(fakePicker.requests, 0);
+      replies.removeAt(0).complete('choose');
+      await tester.pumpAndSettle();
+      expect(fakePicker.requests, 1);
+      expect(store.profile?.avatar, isNull);
+
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('settings-detail-back')));
+      await tester.pump();
+      expect(calls.last.method, 'dismissImageActions');
+      replies.removeAt(0).complete('choose');
+      await tester.pumpAndSettle();
+      expect(fakePicker.requests, 1); // Late result cannot reopen the gallery.
+
+      final delayedGallery = Completer<XFile?>();
+      fakePicker.nextReply = delayedGallery;
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      replies.removeAt(0).complete('choose');
+      for (var i = 0; i < 20 && fakePicker.requests < 2; i++) {
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      expect(fakePicker.requests, 2);
+      await tester.tap(find.byKey(const Key('settings-detail-back')));
+      await tester.pumpAndSettle();
+      delayedGallery.complete(
+        XFile.fromData(
+          Uint8List.fromList(img.encodePng(img.Image(width: 32, height: 32))),
+          name: 'avatar.png',
+          mimeType: 'image/png',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('裁剪头像'), findsNothing);
+      expect(store.profile?.avatar, isNull);
+      await tester.tap(find.text('个性化设置'));
+      await tester.pumpAndSettle();
+
+      fakePicker.pickedFile = XFile.fromData(
+        Uint8List.fromList(img.encodePng(img.Image(width: 32, height: 32))),
+        name: 'avatar.png',
+        mimeType: 'image/png',
+      );
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      replies.removeAt(0).complete('choose');
+      for (var i = 0; i < 50 && find.text('裁剪头像').evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(find.text('裁剪头像'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(store.profile?.avatar, isNull);
+
+      await tester.tap(find.text('头像'));
+      await tester.pump();
+      replies.removeAt(0).complete('choose');
+      for (var i = 0; i < 50 && find.text('裁剪头像').evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      for (var i = 0; i < 50; i++) {
+        final cropButton = find.widgetWithText(FilledButton, '完成裁剪');
+        if (cropButton.evaluate().isNotEmpty &&
+            tester.widget<FilledButton>(cropButton).onPressed != null) {
+          break;
+        }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '完成裁剪'))
+          .onPressed!();
+      for (var i = 0; i < 50 && find.text('头像预览').evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(find.text('头像预览'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(store.profile?.avatar, isNull);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets('iPad image action skips an offscreen wallpaper anchor', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    tester.view.physicalSize = const Size(1024, 600);
+    tester.view.devicePixelRatio = 1;
+    SharedPreferences.setMockInitialValues({
+      'session_cookie': 'session=anchor',
+    });
+    const channel = MethodChannel('hand_helper/native_image_action_sheet');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+    const profile = Profile('用户', null, null);
+    final client = ApiClient(
+      localProfileStore: _MemoryLocalProfileStore()..profile = profile,
+      settingsCache: _FixtureSettingsCache(
+        SettingsData(profile, const [], const [], DateTime.now()),
+      ),
+      client: MockClient((_) async => throw const SocketException('offline')),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsPage(
+            api: client,
+            onUnauthorized: () {},
+            onSignedOut: () {},
+            themeMode: ThemeMode.system,
+            onThemeModeChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('个性化设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('页面壁纸'));
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = const Size(1024, 320);
+    await tester.pumpAndSettle();
+    final list = find.byKey(const ValueKey('settings-content-personal'));
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(of: list, matching: find.byType(Scrollable)).first,
+    );
+    expect(scrollable.position.maxScrollExtent, greaterThan(0));
+    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+    await tester.pump();
+    await tester.tap(find.text('首页壁纸'));
+    await tester.pumpAndSettle();
+    expect(calls.where((call) => call.method == 'showImageActions'), isEmpty);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Android image actions retain the Flutter bottom sheet', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    SharedPreferences.setMockInitialValues({
+      'session_cookie': 'session=android-images',
+    });
+    const channel = MethodChannel('hand_helper/native_image_action_sheet');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final nativeCalls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      nativeCalls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+    const profile = Profile('用户', null, null);
+    final store = _MemoryLocalProfileStore()..profile = profile;
+    final client = ApiClient(
+      localProfileStore: store,
+      settingsCache: _FixtureSettingsCache(
+        SettingsData(profile, const [], const [], DateTime.now()),
+      ),
+      client: MockClient((_) async => throw const SocketException('offline')),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(splashFactory: InkRipple.splashFactory),
+        home: Scaffold(
+          body: SettingsPage(
+            api: client,
+            onUnauthorized: () {},
+            onSignedOut: () {},
+            themeMode: ThemeMode.system,
+            onThemeModeChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('个性化设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('头像'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('从相册选择并自定义裁剪'), findsOneWidget);
+    expect(find.text('移除图片'), findsNothing);
+    expect(nativeCalls, isEmpty);
+    expect(store.profile?.avatar, isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets(
     'Today and Analysis react to local wallpaper changes without reload',
     (tester) async {
       SharedPreferences.setMockInitialValues({
@@ -6807,6 +7180,28 @@ class _MemoryLocalProfileStore extends LocalProfileStore {
   @override
   Future<void> clear() async {
     profile = null;
+  }
+}
+
+class _CancelledImagePickerPlatform extends ImagePickerPlatform {
+  int requests = 0;
+  XFile? pickedFile;
+  Completer<XFile?>? nextReply;
+
+  @override
+  Future<XFile?> getImageFromSource({
+    required ImageSource source,
+    ImagePickerOptions options = const ImagePickerOptions(),
+  }) async {
+    expect(source, ImageSource.gallery);
+    expect(options.requestFullMetadata, isFalse);
+    requests++;
+    final reply = nextReply;
+    if (reply != null) {
+      nextReply = null;
+      return reply.future;
+    }
+    return pickedFile;
   }
 }
 
