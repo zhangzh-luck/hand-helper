@@ -12,5 +12,12 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    guard let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "HandHelperAppearanceMode"
+    ) else { return }
+    registrar.register(
+      AppearanceModePlatformViewFactory(messenger: registrar.messenger()),
+      withId: "hand_helper/appearance_mode_view"
+    )
   }
 }

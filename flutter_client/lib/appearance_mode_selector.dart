@@ -1,6 +1,9 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import 'native_appearance_mode_selector.dart';
 
 /// A tap-only counterpart to the floating tab bar's glass selection surface.
 class AppearanceModeSelector extends StatelessWidget {
@@ -23,6 +26,12 @@ class AppearanceModeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return NativeAppearanceModeSelector(
+        selected: selected,
+        onSelected: onSelected,
+      );
+    }
     final dark = Theme.of(context).brightness == Brightness.dark;
     final activeColor = dark
         ? const Color(0xff69adff)
