@@ -16,6 +16,7 @@ import 'api.dart';
 import 'appearance_mode_selector.dart';
 import 'container_morph_transition.dart';
 import 'native_period_time_picker.dart';
+import 'native_term_start_date_picker.dart';
 import 'native_tab_bridge.dart';
 import 'passkey_management_page.dart';
 
@@ -75,6 +76,10 @@ class _SettingsPageState extends State<SettingsPage>
   final NativePeriodTimePicker _nativeTimePicker = NativePeriodTimePicker();
   int? _activeTimeRequestId;
   int _timeRequestGeneration = 0;
+  final NativeTermStartDatePicker _nativeDatePicker =
+      NativeTermStartDatePicker();
+  int? _activeDateRequestId;
+  int _dateRequestGeneration = 0;
   int? selectedTermId;
   int? selectedPeriodNumber;
   String? draftName;
@@ -104,6 +109,10 @@ class _SettingsPageState extends State<SettingsPage>
     if (requestId != null) {
       unawaited(_dismissTimePicker(requestId));
     }
+    final dateRequestId = _activeDateRequestId;
+    if (dateRequestId != null) {
+      unawaited(_dismissDatePicker(dateRequestId));
+    }
     _sectionAnimation.dispose();
     super.dispose();
   }
@@ -118,6 +127,19 @@ class _SettingsPageState extends State<SettingsPage>
       // The Flutter engine may already be detached during disposal.
     } finally {
       if (_activeTimeRequestId == requestId) _activeTimeRequestId = null;
+    }
+  }
+
+  Future<void> _dismissDatePicker(int requestId) async {
+    _dateRequestGeneration++;
+    try {
+      await _nativeDatePicker.dismiss(requestId);
+    } on PlatformException {
+      // The scene may close while its native date sheet is still presented.
+    } on MissingPluginException {
+      // The Flutter engine may already be detached during disposal.
+    } finally {
+      if (_activeDateRequestId == requestId) _activeDateRequestId = null;
     }
   }
 
@@ -309,6 +331,11 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> requestBack({bool fromSystemBack = false}) async {
+    final dateRequestId = _activeDateRequestId;
+    if (dateRequestId != null) {
+      await _dismissDatePicker(dateRequestId);
+      return;
+    }
     final requestId = _activeTimeRequestId;
     if (requestId != null) {
       await _dismissTimePicker(requestId);
@@ -979,13 +1006,60 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> pickStartDate(TermInfo term) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        (_activeDateRequestId != null || _activeTimeRequestId != null)) {
+      return;
+    }
     final initial = DateTime.tryParse(term.startDate ?? '') ?? DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(2010),
-      lastDate: DateTime(2100),
-    );
+    DateTime? picked;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final requestId = NativeTermStartDatePicker.nextRequestId();
+      final generation = ++_dateRequestGeneration;
+      _activeDateRequestId = requestId;
+      FocusManager.instance.primaryFocus?.unfocus();
+      try {
+        picked = await _nativeDatePicker.pickDate(
+          initialDate: initial,
+          requestId: requestId,
+        );
+      } on PlatformException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _dateRequestGeneration) {
+          message('系统日期选择器暂不可用，请重试。');
+        }
+        return;
+      } on MissingPluginException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _dateRequestGeneration) {
+          message('系统日期选择器暂不可用，请重试。');
+        }
+        return;
+      } on FormatException {
+        if (mounted &&
+            section == 'time' &&
+            generation == _dateRequestGeneration) {
+          message('系统日期选择结果无效，请重试。');
+        }
+        return;
+      } finally {
+        if (_activeDateRequestId == requestId) _activeDateRequestId = null;
+      }
+      if (!mounted ||
+          generation != _dateRequestGeneration ||
+          section != 'time' ||
+          chosenTerm?.id != term.id) {
+        return;
+      }
+    } else {
+      picked = await showDatePicker(
+        context: context,
+        initialDate: initial,
+        firstDate: DateTime(2010),
+        lastDate: DateTime(2100),
+      );
+    }
     if (picked == null || !mounted) return;
     if (picked.weekday != DateTime.monday) {
       message('请选择星期一作为第一周的开始日期。');
@@ -1003,7 +1077,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   Future<void> pickPeriodTime(PeriodInfo period, bool start) async {
     if (defaultTargetPlatform == TargetPlatform.iOS &&
-        _activeTimeRequestId != null) {
+        (_activeTimeRequestId != null || _activeDateRequestId != null)) {
       return;
     }
     final value = start ? period.start : period.end;

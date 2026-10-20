@@ -20,7 +20,7 @@ class SceneDelegate: FlutterSceneDelegate {
   }
 
   override func sceneDidDisconnect(_ scene: UIScene) {
-    (window?.rootViewController as? NativeTabHostController)?.invalidateTimePicker()
+    (window?.rootViewController as? NativeTabHostController)?.invalidateNativePickers()
     super.sceneDidDisconnect(scene)
   }
 }
@@ -32,6 +32,8 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private var channel: FlutterMethodChannel!
   private var timeChannel: FlutterMethodChannel!
   private var timePickerPresenter: NativeTimePickerPresenter!
+  private var dateChannel: FlutterMethodChannel!
+  private var datePickerPresenter: NativeDatePickerPresenter!
   private var tabHeight: NSLayoutConstraint!
   private var wantsTabs = false
   private var detailOpen = false
@@ -104,6 +106,17 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
         return
       }
       self.timePickerPresenter.handle(call, result: result)
+    }
+    datePickerPresenter = NativeDatePickerPresenter(host: self)
+    dateChannel = FlutterMethodChannel(
+      name: "hand_helper/native_term_start_date", binaryMessenger: flutter.binaryMessenger
+    )
+    dateChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "scene_closed", message: nil, details: nil))
+        return
+      }
+      self.datePickerPresenter.handle(call, result: result)
     }
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else {
@@ -202,9 +215,14 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
     channel?.setMethodCallHandler(nil)
     timeChannel?.setMethodCallHandler(nil)
     timePickerPresenter?.invalidate()
+    dateChannel?.setMethodCallHandler(nil)
+    datePickerPresenter?.invalidate()
   }
 
-  func invalidateTimePicker() { timePickerPresenter?.invalidate() }
+  func invalidateNativePickers() {
+    timePickerPresenter?.invalidate()
+    datePickerPresenter?.invalidate()
+  }
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
