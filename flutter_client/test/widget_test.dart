@@ -5259,8 +5259,13 @@ void main() {
         await tester.pump();
       }
       expect(find.text('头像预览'), findsOneWidget);
+      final previewAppearanceCreations = appearanceChannels.length;
+      expect(find.byType(ModalBarrier), findsWidgets);
+      expect(find.byType(UiKitView, skipOffstage: false), findsOneWidget);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
+      expect(find.byType(UiKitView), findsOneWidget);
+      expect(appearanceChannels, hasLength(previewAppearanceCreations));
       expect(store.profile?.avatar, isNull);
       expect(tester.takeException(), isNull);
       debugDefaultTargetPlatformOverride = null;

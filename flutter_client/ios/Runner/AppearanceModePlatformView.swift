@@ -58,7 +58,27 @@ private final class AppearanceModePlatformView: NSObject, FlutterPlatformView {
     lastEmittedIndex = safeIndex
     super.init()
 
-    container.backgroundColor = .clear
+    // The Flutter settings card is translucent, but a transparent UIKit
+    // platform-view root can expose the compositor's dark backing beneath a
+    // Flutter modal barrier. Match the card's resolved color instead of
+    // painting an independent dark rectangle behind the system control.
+    container.backgroundColor = UIColor { trait in
+      if trait.userInterfaceStyle == .dark {
+        // 0xe5222630 composited over black, preserving Flutter's fractional
+        // Color.alphaBlend components instead of rounding to 8-bit RGB.
+        let cardAlpha: CGFloat = 229.0 / 255.0
+        return UIColor(red: (34.0 / 255.0) * cardAlpha,
+                       green: (38.0 / 255.0) * cardAlpha,
+                       blue: (48.0 / 255.0) * cardAlpha, alpha: 1)
+      }
+      // 0xf5ffffff over the settings page's 0xfff4f7fb background.
+      let cardAlpha: CGFloat = 245.0 / 255.0
+      let pageWeight = 1.0 - cardAlpha
+      return UIColor(red: cardAlpha + (244.0 / 255.0) * pageWeight,
+                     green: cardAlpha + (247.0 / 255.0) * pageWeight,
+                     blue: cardAlpha + (251.0 / 255.0) * pageWeight, alpha: 1)
+    }
+    container.isOpaque = true
     control.accessibilityIdentifier = "appearance-mode-control"
     control.selectedSegmentIndex = safeIndex
     control.translatesAutoresizingMaskIntoConstraints = false
