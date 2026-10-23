@@ -22,6 +22,15 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(route.image.size, CGSize(width: 2, height: 2))
     }
 
+    func testTodayAvatarLightboxKeepsImageSquareAndWithinViewport() {
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageSide(
+            in: CGSize(width: 390, height: 844)), 342)
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageSide(
+            in: CGSize(width: 1024, height: 1366)), 520)
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageSide(
+            in: CGSize(width: 320, height: 400)), 250)
+    }
+
     func testWallpaperDataURLDecoding() {
         XCTAssertEqual(WallpaperStore.decodeDataURL("data:image/png;base64,AQID"), Data([1, 2, 3]))
         XCTAssertNil(WallpaperStore.decodeDataURL("data:image/png;base64,not-base64!"))

@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct TodayView: View {
     @ObservedObject private var state: AppState
+    private let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
     @StateObject private var model: TodayViewModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -14,11 +15,11 @@ struct TodayView: View {
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var localError: String?
 
-    init(state: AppState) {
+    init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void) {
         self.state = state
+        self.onAvatarPreview = onAvatarPreview
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore)
@@ -121,7 +122,6 @@ struct TodayView: View {
             editor = nil
             pendingDelete = nil
             selectedPhoto = nil
-            avatarPreview = nil
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
@@ -167,16 +167,6 @@ struct TodayView: View {
                 }
                 catch { localError = error.localizedDescription }
             }
-        }
-        .fullScreenCover(item: $avatarPreview) { route in
-            Group {
-                if route.revision == state.authenticationRevision && state.canAccessPrivateData {
-                    TodayAvatarPreviewView(image: route.image)
-                } else {
-                    Color.black.ignoresSafeArea()
-                }
-            }
-            .presentationBackground(.clear)
         }
     }
 
@@ -290,7 +280,9 @@ struct TodayView: View {
     }
 
     private var avatarButton: some View {
-        Button { avatarPreview = avatarPreviewRoute } label: {
+        Button {
+            if let route = avatarPreviewRoute { onAvatarPreview(route) }
+        } label: {
             Group {
                 if let avatarData, let image = UIImage(data: avatarData) {
                     Image(uiImage: image).resizable().scaledToFill()
@@ -392,42 +384,5 @@ struct TodayAvatarPreviewRoute: Identifiable {
         guard canAccessPrivateData, let avatarData,
               let image = UIImage(data: avatarData) else { return nil }
         return TodayAvatarPreviewRoute(image: image, revision: revision)
-    }
-}
-
-private struct TodayAvatarPreviewView: View {
-    let image: UIImage
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.84).ignoresSafeArea()
-            GeometryReader { geometry in
-                let side = max(1, min(geometry.size.width - 40,
-                                      geometry.size.height - 140, 520))
-                VStack(spacing: 24) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: side, height: side)
-                        .background(Color.black.opacity(0.25))
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .strokeBorder(.white, lineWidth: 3)
-                        }
-
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .frame(width: 54, height: 54)
-                            .background(.white, in: Circle())
-                    }
-                    .accessibilityLabel("关闭头像预览")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
     }
 }

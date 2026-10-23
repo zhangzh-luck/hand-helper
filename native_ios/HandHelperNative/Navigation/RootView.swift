@@ -1,11 +1,14 @@
 import SwiftUI
 import UIKit
 
+@MainActor
 struct RootView: View {
     @EnvironmentObject private var state: AppState
+    @State private var avatarPreview: TodayAvatarPreviewRoute?
+    @State private var avatarPreviewVisible = false
 
     var body: some View {
-        Group {
+        ZStack {
             switch state.entry {
             case .login:
                 LoginView(state: state)
@@ -20,10 +23,56 @@ struct RootView: View {
                                          message: state.credentialRemovalError ?? "请重试清理设备钥匙串。",
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
-                NativeTabContainer(state: state)
+                NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview)
                     .ignoresSafeArea()
+                    .allowsHitTesting(avatarPreview == nil)
+                    .accessibilityHidden(avatarPreview != nil)
+            }
+            if let avatarPreview,
+               state.entry == .main, state.selectedTab == .today,
+               state.canAccessPrivateData,
+               avatarPreview.revision == state.authenticationRevision {
+                TodayAvatarLightboxView(image: avatarPreview.image,
+                                        isVisible: avatarPreviewVisible,
+                                        onClose: closeAvatarPreview)
+                    .zIndex(1)
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            avatarPreviewVisible = true
+                        }
+                    }
             }
         }
+        .onChange(of: state.authenticationRevision) { _, _ in clearAvatarPreview() }
+        .onChange(of: state.selectedTab) { _, tab in
+            if tab != .today { clearAvatarPreview() }
+        }
+        .onChange(of: state.entry) { _, entry in
+            if entry != .main { clearAvatarPreview() }
+        }
+    }
+
+    private func showAvatarPreview(_ route: TodayAvatarPreviewRoute) {
+        guard state.entry == .main, state.selectedTab == .today,
+              state.canAccessPrivateData,
+              route.revision == state.authenticationRevision else { return }
+        avatarPreviewVisible = false
+        avatarPreview = route
+    }
+
+    private func closeAvatarPreview() {
+        guard let preview = avatarPreview else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { avatarPreviewVisible = false }
+        Task {
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard avatarPreview?.id == preview.id, !avatarPreviewVisible else { return }
+            avatarPreview = nil
+        }
+    }
+
+    private func clearAvatarPreview() {
+        avatarPreviewVisible = false
+        avatarPreview = nil
     }
 }
 
@@ -48,9 +97,10 @@ private struct AuthenticationStatusView: View {
 
 private struct NativeTabContainer: UIViewControllerRepresentable {
     @ObservedObject var state: AppState
+    let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
 
     func makeUIViewController(context: Context) -> NativeTabController {
-        let controller = NativeTabController(state: state)
+        let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview)
         controller.selectedTabDidChange = { [weak state] tab in state?.selectedTab = tab }
         return controller
     }
@@ -64,12 +114,12 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var keyboardCoversBottom = false
     private var detailPresented = false
 
-    init(state: AppState) {
+    init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in }) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
             let page: AnyView
             switch tab {
-            case .today: page = AnyView(TodayView(state: state))
+            case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview))
             case .settings: page = AnyView(SettingsView(state: state))
             case .timetable, .analysis: page = AnyView(PlaceholderPage(tab: tab))
             }
