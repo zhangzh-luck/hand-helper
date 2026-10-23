@@ -5,8 +5,44 @@ struct RootView: View {
     @EnvironmentObject private var state: AppState
 
     var body: some View {
-        NativeTabContainer(state: state)
-            .ignoresSafeArea()
+        Group {
+            switch state.entry {
+            case .login:
+                LoginView(state: state)
+            case .verifying:
+                AuthenticationStatusView(title: "正在验证登录状态", message: "确认账号后即可进入航的助手。", retry: nil)
+            case .offline:
+                AuthenticationStatusView(title: "暂时无法验证登录状态", message: "请检查网络连接后重试。", retry: {
+                    Task { await state.retrySessionVerification() }
+                })
+            case .credentialRecovery:
+                AuthenticationStatusView(title: "无法清除旧登录凭据",
+                                         message: state.credentialRemovalError ?? "请重试清理设备钥匙串。",
+                                         retry: { _ = state.retryCredentialRemoval() })
+            case .main:
+                NativeTabContainer(state: state)
+                    .ignoresSafeArea()
+            }
+        }
+    }
+}
+
+private struct AuthenticationStatusView: View {
+    let title: String
+    let message: String
+    let retry: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if retry == nil { ProgressView() }
+            Text(title).font(.title3.bold())
+            Text(message).font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if let retry { Button("重试", action: retry).buttonStyle(.borderedProminent) }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 

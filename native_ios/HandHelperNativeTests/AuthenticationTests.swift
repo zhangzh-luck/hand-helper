@@ -101,6 +101,7 @@ final class AuthenticationTests: XCTestCase {
         let auth = TestAuthenticationClient()
         let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
         await state.restoreSession()
+        XCTAssertEqual(state.entry, .main)
         XCTAssertEqual(state.authenticationStatus, .signedIn("student"))
         XCTAssertTrue(state.isAuthenticated)
         let restoredRevision = state.authenticationRevision
@@ -121,6 +122,7 @@ final class AuthenticationTests: XCTestCase {
         XCTAssertEqual(try? state.requireCurrentAccount(revision: newRevision), "user:new")
 
         await state.logout()
+        XCTAssertEqual(state.entry, .login)
         XCTAssertNil(session.cookie)
         XCTAssertFalse(state.isAuthenticated)
         XCTAssertEqual(state.authenticationStatus, .signedOut)
@@ -136,6 +138,7 @@ final class AuthenticationTests: XCTestCase {
         expiredAuth.verifyError = APIError.unauthorized(message: "登录状态已失效")
         let expired = AppState(api: MockAPIClient(), sessionStore: expiredSession, authentication: expiredAuth)
         await expired.restoreSession()
+        XCTAssertEqual(expired.entry, .login)
         XCTAssertNil(expiredSession.cookie)
         XCTAssertEqual(expired.authenticationStatus, .expired)
         XCTAssertNil(expired.verifiedAccount.owner)
@@ -146,6 +149,7 @@ final class AuthenticationTests: XCTestCase {
         offlineAuth.verifyError = APIError.connection
         let offline = AppState(api: MockAPIClient(), sessionStore: offlineSession, authentication: offlineAuth)
         await offline.restoreSession()
+        XCTAssertEqual(offline.entry, .offline)
         XCTAssertEqual(offlineSession.cookie, "pending")
         XCTAssertFalse(offline.isAuthenticated)
         XCTAssertEqual(offline.authenticationStatus, .offline)
@@ -230,6 +234,7 @@ final class AuthenticationTests: XCTestCase {
         await state.restoreSession()
         session.failClear = true
         await state.logout()
+        XCTAssertEqual(state.entry, .credentialRecovery)
         XCTAssertFalse(state.canAccessPrivateData)
         XCTAssertEqual(state.authenticationStatus, .signedOut)
         XCTAssertNotNil(state.credentialRemovalError)
@@ -237,6 +242,7 @@ final class AuthenticationTests: XCTestCase {
 
         let relaunched = AppState(api: MockAPIClient(), sessionStore: session,
                                   authentication: auth, preferences: preferences)
+        XCTAssertEqual(relaunched.entry, .credentialRecovery)
         await relaunched.restoreSession()
         XCTAssertFalse(relaunched.isAuthenticated)
         XCTAssertNotNil(relaunched.credentialRemovalError)
@@ -244,6 +250,7 @@ final class AuthenticationTests: XCTestCase {
         XCTAssertTrue(relaunched.retryCredentialRemoval())
         XCTAssertNil(session.cookie)
         XCTAssertNil(relaunched.credentialRemovalError)
+        XCTAssertEqual(relaunched.entry, .login)
     }
 
     @MainActor
@@ -261,20 +268,77 @@ final class AuthenticationTests: XCTestCase {
     }
 
     @MainActor
-    func testClosingLoginInvalidatesLateResult() async {
+    func testLogoutDuringPendingLoginKeepsFullScreenGate() async {
         let session = TestSessionStore()
         let auth = TestAuthenticationClient()
         auth.loginWait = true
         let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
-        state.isLoginPresented = true
         let pending = Task { await state.login(username: "student", password: "example") }
         await auth.waitForLoginStart()
-        state.cancelLogin()
+        await state.logout()
         auth.resumeLogin()
         await pending.value
-        XCTAssertFalse(state.isLoginPresented)
+        XCTAssertEqual(state.entry, .login)
         XCTAssertFalse(state.isAuthenticated)
         XCTAssertNil(session.cookie)
+    }
+
+    @MainActor
+    func testFullScreenGateRequiresVerifiedSessionAndOfflineRetry() async {
+        let empty = AppState(api: MockAPIClient(), sessionStore: TestSessionStore(),
+                             authentication: TestAuthenticationClient())
+        XCTAssertEqual(empty.entry, .login)
+        await empty.restoreSession()
+        XCTAssertEqual(empty.entry, .login)
+
+        let session = TestSessionStore()
+        session.save(cookie: "session=pending")
+        let auth = TestAuthenticationClient()
+        auth.verifyError = APIError.connection
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        XCTAssertEqual(state.entry, .verifying)
+        XCTAssertFalse(state.canAccessPrivateData)
+        await state.restoreSession()
+        XCTAssertEqual(state.entry, .offline)
+        XCTAssertEqual(session.cookie, "session=pending")
+        auth.verifyError = nil
+        await state.retrySessionVerification()
+        XCTAssertEqual(state.entry, .main)
+        XCTAssertTrue(state.canAccessPrivateData)
+    }
+
+    @MainActor
+    func testOrdinaryAPIResponseRotationAutomaticallyGatesAndReverifies() async throws {
+        let session = TestSessionStore()
+        session.save(cookie: "session=old")
+        let auth = TestAuthenticationClient()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AuthenticationURLProtocol.self]
+        let identifier = AuthenticationURLProtocol.register { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=old")
+            return try self.response(request, 200,
+                #"{"success":true,"data":{"username":"student"}}"#,
+                cookie: "session=rotated; Path=/; HttpOnly")
+        }
+        configuration.httpAdditionalHeaders = ["X-Authentication-Test-ID": identifier]
+        let api = APIClient(configuration: .development, sessionStore: session,
+                            session: URLSession(configuration: configuration))
+        let state = AppState(api: api, sessionStore: session, authentication: auth)
+        await state.restoreSession()
+        XCTAssertEqual(state.entry, .main)
+        auth.verifyWait = true
+        let _: AuthIdentity = try await api.request("GET", path: "/api/v1/auth/me")
+        await auth.waitForVerifyStart(count: 2)
+        XCTAssertEqual(state.entry, .verifying)
+        XCTAssertFalse(state.canAccessPrivateData)
+        auth.resumeVerify()
+        for _ in 0..<1_000 {
+            if state.entry == .main { break }
+            await Task.yield()
+        }
+        XCTAssertEqual(state.entry, .main)
+        XCTAssertEqual(session.cookie, "session=rotated")
+        XCTAssertEqual(state.verifiedAccount.owner, "user:student")
     }
 
     @MainActor
@@ -381,6 +445,7 @@ final class AuthenticationTests: XCTestCase {
         XCTAssertNil(model.snapshot)
         await state.login(username: "student", password: "example")
         XCTAssertTrue(state.isAuthenticated)
+        XCTAssertEqual(state.entry, .main)
         XCTAssertEqual(state.authenticationRevision, 1)
         model.authenticationDidChange(allowPrivateCache: state.isAuthenticated)
         let unauthorized = await model.refresh()
@@ -542,9 +607,12 @@ private final class TestAuthenticationClient: AuthenticationClientProtocol {
     var verifiedUsername = "student"
     var rotationCookie: String?
     var loginWait = false
+    var verifyWait = false
     var loginCount = 0
+    var verifyCount = 0
     var logoutCount = 0
     private var continuation: CheckedContinuation<Void, Never>?
+    private var verifyContinuation: CheckedContinuation<Void, Never>?
 
     func login(username: String, password: String) async throws -> (cookie: String, identity: VerifiedIdentity) {
         loginCount += 1
@@ -553,6 +621,8 @@ private final class TestAuthenticationClient: AuthenticationClientProtocol {
         return ("hand_helper_session=new", VerifiedIdentity(authenticated: true, username: username))
     }
     func verify(cookie: String) async throws -> VerifiedIdentity {
+        verifyCount += 1
+        if verifyWait { await withCheckedContinuation { verifyContinuation = $0 } }
         if let verifyError { throw verifyError }
         return VerifiedIdentity(authenticated: true, username: verifiedUsername)
     }
@@ -565,6 +635,14 @@ private final class TestAuthenticationClient: AuthenticationClientProtocol {
         if let logoutError { throw logoutError }
     }
     func resumeLogin() { continuation?.resume(); continuation = nil }
+    func resumeVerify() { verifyContinuation?.resume(); verifyContinuation = nil }
+    func waitForVerifyStart(count: Int) async {
+        for _ in 0..<1_000 {
+            if verifyCount >= count && verifyContinuation != nil { return }
+            await Task.yield()
+        }
+        XCTFail("Verification did not begin")
+    }
     func waitForLoginStart() async {
         for _ in 0..<1_000 {
             if loginCount > 0 && continuation != nil { return }

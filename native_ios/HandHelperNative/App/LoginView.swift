@@ -8,7 +8,6 @@ struct LoginView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var showsPassword = false
-    @State private var loginTask: Task<Void, Never>?
 
     private enum Field { case username, password }
     private var dark: Bool { colorScheme == .dark }
@@ -128,13 +127,7 @@ struct LoginView: View {
                         .position(x: geometry.size.width, y: geometry.size.height)
                 }.ignoresSafeArea().allowsHitTesting(false)
             }
-            .navigationTitle("账号登录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { close() } } }
-        }
-        .interactiveDismissDisabled(state.isLoginSubmitting)
-        .onDisappear {
-            if state.isLoginSubmitting { close() }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
@@ -151,15 +144,9 @@ struct LoginView: View {
         .accessibilityLabel(dark ? "切换为浅色模式" : "切换为深色模式")
     }
 
-    private func close() {
-        loginTask?.cancel()
-        loginTask = nil
-        state.cancelLogin()
-    }
-
     private func submit() {
         guard !state.isLoginSubmitting else { return }
         focusedField = nil
-        loginTask = Task { await state.login(username: username, password: password) }
+        Task { await state.login(username: username, password: password) }
     }
 }

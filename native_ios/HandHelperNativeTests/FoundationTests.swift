@@ -103,6 +103,39 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(store.cookie, "session=new")
     }
 
+    func testInvalidatedRequestCannotClearReusedCookie() async throws {
+        let store = MemorySessionStore()
+        store.save(cookie: "session=same-value")
+        let entered = DispatchSemaphore(value: 0)
+        let resume = DispatchSemaphore(value: 0)
+        let client = makeClient(store: store) { request in
+            entered.signal()
+            guard resume.wait(timeout: .now() + 5) == .success else { throw URLError(.timedOut) }
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 401,
+                                                           httpVersion: nil, headerFields: nil))
+            return (response, Data("not JSON".utf8))
+        }
+        let pending = Task { () -> APIError? in
+            do {
+                let _: AuthIdentity = try await client.request("GET", path: "/api/v1/auth/me")
+                return nil
+            } catch { return error as? APIError }
+        }
+        let didEnter = await Task.detached { entered.wait(timeout: .now() + 5) }.value
+        guard didEnter == .success else {
+            resume.signal()
+            pending.cancel()
+            XCTFail("Request did not reach the URLProtocol")
+            return
+        }
+        client.invalidatePendingSessionRequests()
+        resume.signal()
+        let outcome = await pending.value
+        XCTAssertEqual(outcome, .unauthorized(message: "登录状态已失效，请重新登录"))
+        XCTAssertEqual(store.cookie, "session=same-value")
+    }
+
     @MainActor
     func testAppearancePersistsAndSwitches() {
         let suite = "appearance-tests-\(UUID().uuidString)"

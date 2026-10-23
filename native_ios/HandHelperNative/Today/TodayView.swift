@@ -93,12 +93,8 @@ struct TodayView: View {
                                     .font(.system(size: 14))
                                     .foregroundStyle(TodayStyle.secondary(dark))
                                 Spacer()
-                                if state.credentialRemovalError != nil {
-                                    Button("重试清理") { state.retryCredentialRemoval() }
-                                } else if state.canAccessPrivateData {
+                                if state.canAccessPrivateData {
                                     Button("重试") { Task { await refreshCourses() } }
-                                } else if state.authenticationStatus != .verifying {
-                                    Button("登录") { state.isLoginPresented = true }
                                 }
                             }
                             .padding(.top, 12)
@@ -162,7 +158,6 @@ struct TodayView: View {
             if phase == .active {
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if changed && state.canAccessPrivateData { Task { await refreshCourses() } }
-                if state.authenticationStatus == .offline { Task { await state.retrySessionVerification() } }
             }
         }
         .onDisappear { model.closeActions() }
@@ -209,7 +204,6 @@ struct TodayView: View {
                     .background(TodayStyle.background(dark))
             }
         }
-        .sheet(isPresented: $state.isLoginPresented) { LoginView(state: state) }
     }
 
     private var hero: some View {
@@ -256,8 +250,6 @@ struct TodayView: View {
                 Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right") {
                     Task { await state.logout() }
                 }
-            } else {
-                Button("登录", systemImage: "person.crop.circle") { state.isLoginPresented = true }
             }
             Button("更换今日壁纸", systemImage: "photo") { showPhotoPicker = true }
                 .disabled(!state.canAccessPrivateData)
@@ -282,10 +274,6 @@ struct TodayView: View {
         let revision = state.authenticationRevision
         let unauthorized = await model.refresh()
         guard revision == state.authenticationRevision else { return }
-        if state.isAuthenticated && state.sessionStore.cookie != nil && !state.canAccessPrivateData {
-            await state.reverifyRotatedSession()
-            return
-        }
         if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
             state.handleUnauthorized()
         }

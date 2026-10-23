@@ -19,11 +19,31 @@ protocol APIClientProtocol {
     ) async throws -> Value
 }
 
+enum APISessionEvent {
+    case rotated(previous: String, current: String)
+    case unauthorized(previous: String)
+}
+
 final class APIClient: APIClientProtocol {
     private let configuration: APIConfiguration
     private let session: URLSession
     private let sessionStore: any SessionStore
     private let decoder = JSONDecoder()
+    var onSessionEvent: ((APISessionEvent) -> Void)?
+    private let epochLock = NSLock()
+    private var sessionEpoch = 0
+
+    func invalidatePendingSessionRequests() {
+        epochLock.lock()
+        sessionEpoch += 1
+        epochLock.unlock()
+    }
+
+    private func currentEpoch() -> Int {
+        epochLock.lock()
+        defer { epochLock.unlock() }
+        return sessionEpoch
+    }
 
     init(configuration: APIConfiguration, sessionStore: any SessionStore, session: URLSession? = nil) {
         self.configuration = configuration
@@ -58,7 +78,11 @@ final class APIClient: APIClientProtocol {
             let port = configuration.baseURL.port.map { ":\($0)" } ?? ""
             request.setValue("\(scheme)://\(host)\(port)", forHTTPHeaderField: "Origin")
         }
+        let requestEpoch = currentEpoch()
         let requestCookie = sessionStore.cookie
+        guard currentEpoch() == requestEpoch else {
+            throw APIError.unauthorized(message: "登录状态已变化")
+        }
         if let requestCookie { request.setValue(requestCookie, forHTTPHeaderField: "Cookie") }
         if let body {
             request.httpBody = body
@@ -78,9 +102,10 @@ final class APIClient: APIClientProtocol {
         if http.statusCode == 401 {
             let error = try? decoder.decode(APIEnvelope<APIEmptyResponse>.self, from: data)
             let message = error?.error?.message ?? "登录状态已失效，请重新登录"
-            if sessionStore.cookie == requestCookie &&
+            if currentEpoch() == requestEpoch, sessionStore.cookie == requestCookie,
                 !(preserveSessionOnPasswordError && message == "当前密码错误") {
                 sessionStore.clear()
+                if let requestCookie { onSessionEvent?(.unauthorized(previous: requestCookie)) }
             }
             throw APIError.unauthorized(message: message)
         }
@@ -91,7 +116,7 @@ final class APIClient: APIClientProtocol {
         guard (200..<300).contains(http.statusCode), envelope.success else {
             throw APIError.server(status: http.statusCode, message: serverMessage ?? "请求失败（HTTP \(http.statusCode)）。")
         }
-        if sessionStore.cookie == requestCookie,
+        if currentEpoch() == requestEpoch, sessionStore.cookie == requestCookie,
            let raw = http.value(forHTTPHeaderField: "Set-Cookie"),
            let first = raw.split(separator: ";", maxSplits: 1).first,
            let equal = first.firstIndex(of: "="),
@@ -101,7 +126,11 @@ final class APIClient: APIClientProtocol {
             sessionStore.save(cookie: replacement)
             guard sessionStore.cookie == replacement else {
                 sessionStore.clear()
+                onSessionEvent?(.unauthorized(previous: requestCookie))
                 throw APIError.unauthorized(message: "无法保存更新后的登录状态")
+            }
+            if replacement != requestCookie {
+                onSessionEvent?(.rotated(previous: requestCookie, current: replacement))
             }
         }
         if envelope.data == nil, Value.self == APIEmptyResponse.self {

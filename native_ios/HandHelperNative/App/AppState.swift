@@ -40,6 +40,10 @@ final class AppState: ObservableObject {
         case signedOut, verifying, signedIn(String), offline, expired
     }
 
+    enum Entry: Equatable {
+        case login, verifying, offline, main, credentialRecovery
+    }
+
     @Published var selectedTab: AppTab = .today
     @Published private(set) var appearance: AppearanceMode
     @Published var isDetailPresented = false
@@ -47,7 +51,6 @@ final class AppState: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var authenticationStatus: AuthenticationStatus = .signedOut
     @Published private(set) var authenticationRevision = 0
-    @Published var isLoginPresented = false
     @Published private(set) var isLoginSubmitting = false
     @Published private(set) var loginError: String?
     @Published private(set) var credentialRemovalError: String?
@@ -59,6 +62,7 @@ final class AppState: ObservableObject {
     private let preferences: UserDefaults
     private var authenticationGeneration = 0
     private var rotationExpectedOwner: String?
+    private var verifyingCookie: String?
     private var didStartRestore = false
     private static let appearanceKey = "appearance_mode"
     private static let pendingCredentialRemovalKey = "pending_session_credential_removal"
@@ -76,6 +80,14 @@ final class AppState: ObservableObject {
             ? .signedOut : (sessionStore.cookie == nil ? .signedOut : .verifying)
         self.api = api ?? APIClient(configuration: .development, sessionStore: sessionStore)
         self.authentication = authentication ?? AuthenticationClient()
+        if preferences.bool(forKey: Self.pendingCredentialRemovalKey) {
+            credentialRemovalError = "无法清除设备钥匙串中的旧登录凭据，请重试。"
+        }
+        if let client = self.api as? APIClient {
+            client.onSessionEvent = { [weak self] event in
+                Task { @MainActor [weak self] in self?.handleSessionEvent(event) }
+            }
+        }
     }
 
     func setAppearance(_ mode: AppearanceMode) {
@@ -92,6 +104,30 @@ final class AppState: ObservableObject {
 
     var canAccessPrivateData: Bool {
         isAuthenticated && (try? verifiedAccount.requireOwner(cookie: sessionStore.cookie)) != nil
+    }
+
+    var entry: Entry {
+        if credentialRemovalError != nil { return .credentialRecovery }
+        switch authenticationStatus {
+        case .signedOut, .expired: return .login
+        case .offline: return .offline
+        case .verifying: return .verifying
+        case .signedIn: return canAccessPrivateData ? .main : .verifying
+        }
+    }
+
+    private func handleSessionEvent(_ event: APISessionEvent) {
+        switch event {
+        case .rotated(let previous, let current):
+            guard current != previous, sessionStore.cookie != nil,
+                  (isAuthenticated && (try? verifiedAccount.requireOwner(cookie: previous)) != nil)
+                    || (rotationExpectedOwner != nil && authenticationStatus == .verifying) else { return }
+            Task { await reverifyRotatedSession() }
+        case .unauthorized(let previous):
+            guard (try? verifiedAccount.requireOwner(cookie: previous)) != nil
+                    || (rotationExpectedOwner != nil && authenticationStatus == .verifying) else { return }
+            handleUnauthorized()
+        }
     }
 
     @discardableResult
@@ -138,6 +174,8 @@ final class AppState: ObservableObject {
             }
             try verifiedAccount.confirm(username: identity.username, cookie: verification.cookie)
             rotationExpectedOwner = nil
+            verifyingCookie = nil
+            selectedTab = .today
             authenticationStatus = .signedIn(identity.username)
             isAuthenticated = true
             authenticationRevision += 1
@@ -146,6 +184,7 @@ final class AppState: ObservableObject {
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 handleUnauthorized()
             } else {
+                verifyingCookie = nil
                 authenticationStatus = .offline
                 isAuthenticated = false
                 authenticationRevision += 1
@@ -173,6 +212,7 @@ final class AppState: ObservableObject {
         isLoginSubmitting = true
         loginError = nil
         authenticationGeneration += 1
+        (api as? APIClient)?.invalidatePendingSessionRequests()
         let generation = authenticationGeneration
         defer { if generation == authenticationGeneration { isLoginSubmitting = false } }
         do {
@@ -188,10 +228,11 @@ final class AppState: ObservableObject {
             }
             try verifiedAccount.confirm(username: result.identity.username, cookie: result.cookie)
             rotationExpectedOwner = nil
+            verifyingCookie = nil
+            selectedTab = .today
             authenticationStatus = .signedIn(result.identity.username)
             isAuthenticated = true
             authenticationRevision += 1
-            isLoginPresented = false
         } catch {
             guard generation == authenticationGeneration, !Task.isCancelled else { return }
             if isAuthenticated && sessionStore.cookie == nil { handleUnauthorized() }
@@ -199,21 +240,16 @@ final class AppState: ObservableObject {
         }
     }
 
-    func cancelLogin() {
-        guard isLoginSubmitting else { isLoginPresented = false; return }
-        authenticationGeneration += 1
-        isLoginSubmitting = false
-        loginError = nil
-        isLoginPresented = false
-    }
-
     func reverifyRotatedSession() async {
-        guard isAuthenticated, let cookie = sessionStore.cookie,
-              (try? verifiedAccount.requireOwner(cookie: cookie)) == nil,
-              let oldOwner = verifiedAccount.owner else { return }
+        guard let cookie = sessionStore.cookie,
+              let oldOwner = rotationExpectedOwner ?? verifiedAccount.owner,
+              verifyingCookie != cookie,
+              (try? verifiedAccount.requireOwner(cookie: cookie)) == nil else { return }
         authenticationGeneration += 1
+        (api as? APIClient)?.invalidatePendingSessionRequests()
         let generation = authenticationGeneration
         rotationExpectedOwner = oldOwner
+        verifyingCookie = cookie
         verifiedAccount.clear()
         isAuthenticated = false
         authenticationStatus = .verifying
@@ -233,6 +269,7 @@ final class AppState: ObservableObject {
             }
             try verifiedAccount.confirm(username: identity.username, cookie: verification.cookie)
             rotationExpectedOwner = nil
+            verifyingCookie = nil
             isAuthenticated = true
             authenticationStatus = .signedIn(identity.username)
             authenticationRevision += 1
@@ -241,6 +278,7 @@ final class AppState: ObservableObject {
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 handleUnauthorized()
             } else {
+                verifyingCookie = nil
                 authenticationStatus = .offline
                 authenticationRevision += 1
             }
@@ -250,9 +288,13 @@ final class AppState: ObservableObject {
     func logout() async {
         let cookie = sessionStore.cookie
         authenticationGeneration += 1
+        (api as? APIClient)?.invalidatePendingSessionRequests()
         isLoginSubmitting = false
         verifiedAccount.clear()
         rotationExpectedOwner = nil
+        verifyingCookie = nil
+        selectedTab = .today
+        isDetailPresented = false
         authenticationStatus = .signedOut
         isAuthenticated = false
         homeAvatar = nil
@@ -264,10 +306,14 @@ final class AppState: ObservableObject {
 
     func handleUnauthorized() {
         authenticationGeneration += 1
+        (api as? APIClient)?.invalidatePendingSessionRequests()
         isLoginSubmitting = false
         isAuthenticated = false
         verifiedAccount.clear()
         rotationExpectedOwner = nil
+        verifyingCookie = nil
+        selectedTab = .today
+        isDetailPresented = false
         homeAvatar = nil
         authenticationStatus = .expired
         authenticationRevision += 1
