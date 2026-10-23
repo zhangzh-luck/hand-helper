@@ -17,10 +17,14 @@ struct ScheduleEditorView: View {
         self.now = now
         self.onSave = onSave
         _title = State(initialValue: schedule?.title ?? "")
-        let parsedDate = schedule?.date.flatMap { raw -> Date? in
+        let parsedDate: Date?
+        if let raw = schedule?.date {
             let parts = raw.split(separator: "-").compactMap { Int($0) }
-            guard parts.count == 3 else { return nil }
-            return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+            parsedDate = parts.count == 3
+                ? Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+                : nil
+        } else {
+            parsedDate = nil
         }
         let initialDate = parsedDate ?? now
         _date = State(initialValue: initialDate)
