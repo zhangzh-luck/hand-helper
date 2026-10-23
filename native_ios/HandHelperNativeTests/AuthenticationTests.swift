@@ -2,20 +2,37 @@ import XCTest
 @testable import HandHelperNative
 
 final class AuthenticationTests: XCTestCase {
+    func testLoginRequestBodyReaderSupportsDataAndStream() throws {
+        let url = try XCTUnwrap(URL(string: "https://hand.zhangzh.cc/api/v1/auth/login"))
+        let json = Data(#"{"username":"student","password":"example-password"}"#.utf8)
+
+        var dataRequest = URLRequest(url: url)
+        dataRequest.httpBody = json
+        XCTAssertEqual(try requestBody(dataRequest), json)
+
+        var streamedRequest = URLRequest(url: url)
+        streamedRequest.httpBodyStream = InputStream(data: json)
+        XCTAssertEqual(try requestBody(streamedRequest), json)
+    }
+
     func testLoginParsesCookieAndVerifiesIdentity() async throws {
         let client = makeClient { request in
             if request.url?.path == "/api/v1/auth/login" {
                 XCTAssertEqual(request.httpMethod, "POST")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://hand.zhangzh.cc")
-                let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+                let body = try self.requestBody(request)
+                let payload = try XCTUnwrap(
+                    JSONSerialization.jsonObject(with: body) as? [String: String],
+                    "Login request body must be a JSON object with string fields"
+                )
                 XCTAssertEqual(payload["username"], "student")
                 XCTAssertEqual(payload["password"], "example-password")
-                return self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#,
+                return try self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#,
                                      cookie: "hand_helper_session=sample; Path=/; HttpOnly")
             }
             XCTAssertEqual(request.url?.path, "/api/v1/auth/me")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "hand_helper_session=sample")
-            return self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#)
+            return try self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#)
         }
         let result = try await client.login(username: "student", password: "example-password")
         XCTAssertEqual(result.cookie, "hand_helper_session=sample")
@@ -24,14 +41,14 @@ final class AuthenticationTests: XCTestCase {
 
     func testWrongPasswordAndMissingCookie() async {
         let wrong = makeClient { request in
-            self.response(request, 401, #"{"success":false,"error":{"message":"用户名或密码错误"}}"#)
+            try self.response(request, 401, #"{"success":false,"error":{"message":"用户名或密码错误"}}"#)
         }
         do { _ = try await wrong.login(username: "student", password: "wrong"); XCTFail("Expected 401") }
         catch let error as APIError { XCTAssertEqual(error, .unauthorized(message: "用户名或密码错误")) }
         catch { XCTFail("Unexpected error: \(error)") }
 
         let missing = makeClient { request in
-            self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#)
+            try self.response(request, 200, #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#)
         }
         do { _ = try await missing.login(username: "student", password: "example"); XCTFail("Expected missing cookie") }
         catch let error as APIError { XCTAssertEqual(error, .invalidResponse) }
@@ -40,7 +57,7 @@ final class AuthenticationTests: XCTestCase {
 
     func testVerifyUnauthorizedAndConnectionFailure() async {
         let unauthorized = makeClient { request in
-            self.response(request, 401, #"{"success":false,"error":{"message":"登录状态已失效"}}"#)
+            try self.response(request, 401, #"{"success":false,"error":{"message":"登录状态已失效"}}"#)
         }
         do { _ = try await unauthorized.verify(cookie: "expired"); XCTFail("Expected 401") }
         catch let error as APIError { XCTAssertEqual(error, .unauthorized(message: "登录状态已失效")) }
@@ -228,10 +245,39 @@ final class AuthenticationTests: XCTestCase {
         return AuthenticationClient(session: URLSession(configuration: configuration))
     }
 
+    private func requestBody(_ request: URLRequest) throws -> Data {
+        if let body = request.httpBody { return body }
+        let stream = try XCTUnwrap(request.httpBodyStream,
+                                   "Login request has neither httpBody nor httpBodyStream")
+        stream.open()
+        defer { stream.close() }
+
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = buffer.withUnsafeMutableBufferPointer { bytes -> Int in
+                guard let address = bytes.baseAddress else { return -1 }
+                return stream.read(address, maxLength: bytes.count)
+            }
+            if count < 0 {
+                let error = stream.streamError ?? URLError(.cannotDecodeRawData)
+                XCTFail("Could not read streamed login request body: \(error)")
+                throw error
+            }
+            if count == 0 { break }
+            body.append(contentsOf: buffer.prefix(count))
+        }
+        return body
+    }
+
     private func response(_ request: URLRequest, _ status: Int, _ json: String,
-                          cookie: String? = nil) -> (HTTPURLResponse, Data) {
+                          cookie: String? = nil) throws -> (HTTPURLResponse, Data) {
         let headers = cookie.map { ["Set-Cookie": $0] }
-        return (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, Data(json.utf8))
+        let url = try XCTUnwrap(request.url, "Authentication request has no URL")
+        let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: status,
+                                                      httpVersion: nil, headerFields: headers),
+                                     "Could not construct authentication response")
+        return (response, Data(json.utf8))
     }
 }
 
@@ -241,7 +287,8 @@ private final class AuthenticationURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         do {
-            let (response, data) = try Self.handler!(request)
+            let handler = try XCTUnwrap(Self.handler, "Authentication URLProtocol handler is missing")
+            let (response, data) = try handler(request)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
