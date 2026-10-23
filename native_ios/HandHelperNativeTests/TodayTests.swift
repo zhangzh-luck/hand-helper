@@ -6,7 +6,10 @@ import UIKit
 final class TodayTests: XCTestCase {
     @MainActor
     func testTodayAvatarPreviewRequiresVerifiedAccountAndValidImage() throws {
-        let avatar = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let avatar = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2),
+                                             format: format).pngData { context in
             UIColor.systemBlue.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         }
