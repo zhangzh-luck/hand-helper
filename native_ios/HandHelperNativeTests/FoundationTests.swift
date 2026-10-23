@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import HandHelperNative
 
 final class FoundationTests: XCTestCase {
@@ -145,9 +146,17 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(state.appearance, .system)
         state.setAppearance(.dark)
         XCTAssertEqual(state.appearance.colorScheme, .dark)
+        let tabs = NativeTabController(state: state)
+        tabs.apply(state: state)
+        XCTAssertEqual(tabs.overrideUserInterfaceStyle, .dark)
         XCTAssertEqual(AppState(api: MockAPIClient(), sessionStore: MemorySessionStore(), preferences: defaults).appearance, .dark)
         state.setAppearance(.light)
         XCTAssertEqual(state.appearance.colorScheme, .light)
+        tabs.apply(state: state)
+        XCTAssertEqual(tabs.overrideUserInterfaceStyle, .light)
+        state.setAppearance(.system)
+        tabs.apply(state: state)
+        XCTAssertEqual(tabs.overrideUserInterfaceStyle, .unspecified)
     }
 
     func testSessionStoreContract() {

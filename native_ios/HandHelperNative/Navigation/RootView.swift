@@ -67,7 +67,12 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     init(state: AppState) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
-            let page = tab == .today ? AnyView(TodayView(state: state)) : AnyView(PlaceholderPage(tab: tab))
+            let page: AnyView
+            switch tab {
+            case .today: page = AnyView(TodayView(state: state))
+            case .settings: page = AnyView(SettingsView(state: state))
+            case .timetable, .analysis: page = AnyView(PlaceholderPage(tab: tab))
+            }
             let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
             host.tabBarItem.accessibilityLabel = tab.title
@@ -97,6 +102,13 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     func apply(state: AppState) {
+        let style: UIUserInterfaceStyle
+        switch state.appearance {
+        case .system: style = .unspecified
+        case .light: style = .light
+        case .dark: style = .dark
+        }
+        if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
         if selectedIndex != state.selectedTab.rawValue { selectedIndex = state.selectedTab.rawValue }
         if detailPresented != state.isDetailPresented {
             detailPresented = state.isDetailPresented

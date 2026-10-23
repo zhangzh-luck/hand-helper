@@ -211,6 +211,34 @@ final class ProfileTests: XCTestCase {
         XCTAssertNil(ProfileDraftState.candidate(original: original, name: "航的助手", avatar: nil).displayName)
         XCTAssertTrue(ProfileDraftState.isDirty(original: original, name: "小航", avatar: nil))
         XCTAssertEqual(original, .empty) // Cancelling discards the candidate without mutating the source.
+
+        let saved = LocalProfile(displayName: "原名称", avatarData: Data([1]))
+        let newAvatar = Data([2])
+        let draft = ProfileDraftState.candidate(original: saved, name: "新名称", avatar: newAvatar)
+        XCTAssertTrue(ProfileDraftState.isDirty(original: saved, name: "新名称", avatar: newAvatar))
+        XCTAssertEqual(draft.avatarData, newAvatar)
+        XCTAssertEqual(saved.avatarData, Data([1]))
+        XCTAssertEqual(saved.displayName, "原名称")
+        XCTAssertNil(ProfileDraftState.candidate(original: saved, name: "原名称", avatar: nil).avatarData)
+    }
+
+    func testAvatarPreviewPanIsBoundedAndReclampsForRotation() {
+        let image = CGSize(width: 512, height: 512)
+        let portrait = CGSize(width: 300, height: 500)
+        XCTAssertEqual(AvatarPreviewGeometry.boundedOffset(
+            CGSize(width: 100, height: 100), image: image, viewport: portrait, scale: 1), .zero)
+        XCTAssertEqual(AvatarPreviewGeometry.boundedOffset(
+            CGSize(width: 500, height: -500), image: image, viewport: portrait, scale: 2),
+            CGSize(width: 150, height: -50))
+        let landscape = CGSize(width: 500, height: 300)
+        XCTAssertEqual(AvatarPreviewGeometry.boundedOffset(
+            CGSize(width: 150, height: -50), image: image, viewport: landscape, scale: 2),
+            CGSize(width: 50, height: -50))
+        XCTAssertEqual(AvatarPreviewGeometry.boundedOffset(
+            CGSize(width: 50, height: 50), image: .zero, viewport: portrait, scale: 2), .zero)
+        XCTAssertEqual(AvatarPreviewGeometry.boundedOffset(
+            CGSize(width: 500, height: 500), image: CGSize(width: 1200, height: 600),
+            viewport: portrait, scale: 2), CGSize(width: 150, height: 0))
     }
 
     @MainActor

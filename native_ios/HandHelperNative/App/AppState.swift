@@ -22,7 +22,7 @@ enum AppTab: Int, CaseIterable {
     }
 }
 
-enum AppearanceMode: String, CaseIterable {
+enum AppearanceMode: String, CaseIterable, Hashable {
     case system, light, dark
 
     var colorScheme: ColorScheme? {
