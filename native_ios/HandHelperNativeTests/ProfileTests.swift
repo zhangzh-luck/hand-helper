@@ -1,4 +1,5 @@
 import XCTest
+import ImageIO
 import UIKit
 @testable import HandHelperNative
 
@@ -15,7 +16,7 @@ final class ProfileTests: XCTestCase {
         XCTAssertEqual(try store.load(), .empty)
         XCTAssertEqual(try store.load().resolvedDisplayName, "航的助手")
 
-        let avatar = sampleAvatar()
+        let avatar = try sampleAvatar()
         let saved = try store.save(LocalProfile(displayName: "  小航  ", avatarData: avatar))
         XCTAssertEqual(saved.displayName, "小航")
         XCTAssertEqual(saved.avatarData, avatar)
@@ -35,7 +36,7 @@ final class ProfileTests: XCTestCase {
         let store = LocalProfileStore(session: session, account: account, directory: folder)
         session.save(cookie: "session=alice")
         try account.confirm(username: "alice", cookie: "session=alice")
-        try store.save(LocalProfile(displayName: "Alice", avatarData: sampleAvatar()))
+        try store.save(LocalProfile(displayName: "Alice", avatarData: try sampleAvatar()))
 
         session.save(cookie: "session=rotated")
         XCTAssertThrowsError(try store.load())
@@ -99,7 +100,7 @@ final class ProfileTests: XCTestCase {
         await state.restoreSession()
         XCTAssertEqual(state.entry, .main)
         let aliceRevision = state.authenticationRevision
-        let avatar = sampleAvatar()
+        let avatar = try sampleAvatar()
         try state.saveLocalProfile(LocalProfile(displayName: "Alice", avatarData: avatar), revision: aliceRevision)
         XCTAssertEqual(state.currentProfile.displayName, "Alice")
         XCTAssertNotNil(state.homeAvatar)
@@ -151,7 +152,7 @@ final class ProfileTests: XCTestCase {
                              authentication: ProfileTestAuthentication(),
                              preferences: preferences, profileDirectory: folder)
         await state.login(username: "alice", password: "fixture")
-        try state.saveLocalProfile(LocalProfile(displayName: "Alice", avatarData: sampleAvatar()),
+        try state.saveLocalProfile(LocalProfile(displayName: "Alice", avatarData: try sampleAvatar()),
                                    revision: state.authenticationRevision)
         let previousRevision = state.authenticationRevision
         session.save(cookie: "session=rotated")
@@ -248,12 +249,24 @@ final class ProfileTests: XCTestCase {
         preferences.dictionaryRepresentation()["profile_test_suite"] as? String ?? ""
     }
 
-    private func sampleAvatar() -> Data {
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512)).image { context in
+    @MainActor
+    private func sampleAvatar() throws -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512), format: format).image { context in
             UIColor.systemTeal.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
         }
-        return image.jpegData(compressionQuality: 0.8)!
+        let data = try XCTUnwrap(image.jpegData(compressionQuality: 0.8))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let type = try XCTUnwrap(CGImageSourceGetType(source))
+        XCTAssertTrue(CFEqual(type, "public.jpeg" as CFString))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 512)
+        XCTAssertEqual(decoded.height, 512)
+        XCTAssertLessThanOrEqual(data.count, 1_000_000)
+        return data
     }
 }
 
