@@ -75,25 +75,34 @@ final class APIClient: APIClientProtocol {
             throw APIError.connection
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 {
+            let error = try? decoder.decode(APIEnvelope<APIEmptyResponse>.self, from: data)
+            let message = error?.error?.message ?? "登录状态已失效，请重新登录"
+            if sessionStore.cookie == requestCookie &&
+                !(preserveSessionOnPasswordError && message == "当前密码错误") {
+                sessionStore.clear()
+            }
+            throw APIError.unauthorized(message: message)
+        }
         let envelope: APIEnvelope<Value>
         do { envelope = try decoder.decode(APIEnvelope<Value>.self, from: data) }
         catch { throw APIError.invalidData(status: http.statusCode) }
         let serverMessage = envelope.error?.message
-        if http.statusCode == 401 {
-            if sessionStore.cookie == requestCookie &&
-                !(preserveSessionOnPasswordError && serverMessage == "当前密码错误") {
-                sessionStore.clear()
-            }
-            throw APIError.unauthorized(message: serverMessage ?? "登录状态已失效")
-        }
         guard (200..<300).contains(http.statusCode), envelope.success else {
             throw APIError.server(status: http.statusCode, message: serverMessage ?? "请求失败（HTTP \(http.statusCode)）。")
         }
         if sessionStore.cookie == requestCookie,
            let raw = http.value(forHTTPHeaderField: "Set-Cookie"),
            let first = raw.split(separator: ";", maxSplits: 1).first,
-           first.contains("=") {
-            sessionStore.save(cookie: String(first))
+           let equal = first.firstIndex(of: "="),
+           let requestCookie,
+           requestCookie.hasPrefix(String(first[..<equal]) + "=") {
+            let replacement = String(first)
+            sessionStore.save(cookie: replacement)
+            guard sessionStore.cookie == replacement else {
+                sessionStore.clear()
+                throw APIError.unauthorized(message: "无法保存更新后的登录状态")
+            }
         }
         if envelope.data == nil, Value.self == APIEmptyResponse.self {
             return APIEmptyResponse() as! Value

@@ -82,6 +82,21 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(swipe.reveal, 0)
     }
 
+    func testEditorDiscardStateForNewAndExistingSchedules() {
+        let day = localDate(2026, 10, 23, 12, 0)
+        XCTAssertFalse(ScheduleEditorState.isDirty(schedule: nil, title: "", date: day,
+                                               time: "09:00", now: day))
+        XCTAssertTrue(ScheduleEditorState.isDirty(schedule: nil, title: "提交作业", date: day,
+                                              time: "09:00", now: day))
+        let schedule = CustomSchedule(id: -1, title: "提交作业", date: "2026-10-23", time: "09:00")
+        XCTAssertFalse(ScheduleEditorState.isDirty(schedule: schedule, title: "提交作业", date: day,
+                                               time: "09:00", now: day))
+        XCTAssertTrue(ScheduleEditorState.isDirty(schedule: schedule, title: "复习考试", date: day,
+                                              time: "09:00", now: day))
+        XCTAssertTrue(ScheduleEditorState.isDirty(schedule: schedule, title: "提交作业", date: day,
+                                              time: "10:00", now: day))
+    }
+
     @MainActor
     func testCacheWallpaperRolloverAndClosingSwipeState() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -256,7 +271,7 @@ final class TodayTests: XCTestCase {
 private final class TodayTestSessionStore: SessionStore {
     private(set) var cookie: String?
     func save(cookie: String) { self.cookie = cookie }
-    func clear() { cookie = nil }
+    @discardableResult func clear() -> Bool { cookie = nil; return true }
 }
 
 private final class MutableTodayClock: TodayClock {

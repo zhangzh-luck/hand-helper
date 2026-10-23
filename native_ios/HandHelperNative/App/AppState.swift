@@ -50,6 +50,7 @@ final class AppState: ObservableObject {
     @Published var isLoginPresented = false
     @Published private(set) var isLoginSubmitting = false
     @Published private(set) var loginError: String?
+    @Published private(set) var credentialRemovalError: String?
 
     let api: any APIClientProtocol
     let sessionStore: any SessionStore
@@ -57,8 +58,10 @@ final class AppState: ObservableObject {
     private let authentication: any AuthenticationClientProtocol
     private let preferences: UserDefaults
     private var authenticationGeneration = 0
+    private var rotationExpectedOwner: String?
     private var didStartRestore = false
     private static let appearanceKey = "appearance_mode"
+    private static let pendingCredentialRemovalKey = "pending_session_credential_removal"
 
     init(
         api: (any APIClientProtocol)? = nil,
@@ -69,7 +72,8 @@ final class AppState: ObservableObject {
         self.sessionStore = sessionStore
         self.preferences = preferences
         appearance = AppearanceMode(rawValue: preferences.string(forKey: Self.appearanceKey) ?? "") ?? .system
-        authenticationStatus = sessionStore.cookie == nil ? .signedOut : .verifying
+        authenticationStatus = preferences.bool(forKey: Self.pendingCredentialRemovalKey)
+            ? .signedOut : (sessionStore.cookie == nil ? .signedOut : .verifying)
         self.api = api ?? APIClient(configuration: .development, sessionStore: sessionStore)
         self.authentication = authentication ?? AuthenticationClient()
     }
@@ -86,9 +90,31 @@ final class AppState: ObservableObject {
         return try verifiedAccount.requireOwner(cookie: sessionStore.cookie)
     }
 
+    var canAccessPrivateData: Bool {
+        isAuthenticated && (try? verifiedAccount.requireOwner(cookie: sessionStore.cookie)) != nil
+    }
+
+    @discardableResult
+    func retryCredentialRemoval() -> Bool {
+        guard !isAuthenticated else { return false }
+        guard sessionStore.clear() else {
+            preferences.set(true, forKey: Self.pendingCredentialRemovalKey)
+            credentialRemovalError = "无法清除设备钥匙串中的旧登录凭据，请重试。"
+            return false
+        }
+        preferences.removeObject(forKey: Self.pendingCredentialRemovalKey)
+        credentialRemovalError = nil
+        return true
+    }
+
     func restoreSession() async {
         guard !didStartRestore else { return }
         didStartRestore = true
+        if preferences.bool(forKey: Self.pendingCredentialRemovalKey) {
+            _ = retryCredentialRemoval()
+            authenticationStatus = .signedOut
+            return
+        }
         guard let cookie = sessionStore.cookie, !cookie.isEmpty else {
             authenticationStatus = .signedOut
             return
@@ -97,10 +123,21 @@ final class AppState: ObservableObject {
         let generation = authenticationGeneration
         authenticationStatus = .verifying
         do {
-            let identity = try await authentication.verify(cookie: cookie)
+            let verification = try await authentication.verifySession(cookie: cookie)
             guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
+            let identity = verification.identity
             guard identity.authenticated else { throw APIError.invalidResponse }
-            try verifiedAccount.confirm(username: identity.username, cookie: cookie)
+            if let rotationExpectedOwner,
+               rotationExpectedOwner != "user:\(identity.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())" {
+                handleUnauthorized()
+                return
+            }
+            if verification.cookie != cookie {
+                sessionStore.save(cookie: verification.cookie)
+                guard sessionStore.cookie == verification.cookie else { handleUnauthorized(); return }
+            }
+            try verifiedAccount.confirm(username: identity.username, cookie: verification.cookie)
+            rotationExpectedOwner = nil
             authenticationStatus = .signedIn(identity.username)
             isAuthenticated = true
             authenticationRevision += 1
@@ -123,7 +160,11 @@ final class AppState: ObservableObject {
     }
 
     func login(username: String, password: String) async {
-        guard !isLoginSubmitting else { return }
+        guard !Task.isCancelled, !isLoginSubmitting else { return }
+        guard !preferences.bool(forKey: Self.pendingCredentialRemovalKey) else {
+            loginError = credentialRemovalError ?? "请先清除旧登录凭据。"
+            return
+        }
         let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !password.isEmpty else {
             loginError = "请输入账号和密码。"
@@ -146,6 +187,7 @@ final class AppState: ObservableObject {
                 return
             }
             try verifiedAccount.confirm(username: result.identity.username, cookie: result.cookie)
+            rotationExpectedOwner = nil
             authenticationStatus = .signedIn(result.identity.username)
             isAuthenticated = true
             authenticationRevision += 1
@@ -157,17 +199,66 @@ final class AppState: ObservableObject {
         }
     }
 
+    func cancelLogin() {
+        guard isLoginSubmitting else { isLoginPresented = false; return }
+        authenticationGeneration += 1
+        isLoginSubmitting = false
+        loginError = nil
+        isLoginPresented = false
+    }
+
+    func reverifyRotatedSession() async {
+        guard isAuthenticated, let cookie = sessionStore.cookie,
+              (try? verifiedAccount.requireOwner(cookie: cookie)) == nil,
+              let oldOwner = verifiedAccount.owner else { return }
+        authenticationGeneration += 1
+        let generation = authenticationGeneration
+        rotationExpectedOwner = oldOwner
+        verifiedAccount.clear()
+        isAuthenticated = false
+        authenticationStatus = .verifying
+        authenticationRevision += 1
+        do {
+            let verification = try await authentication.verifySession(cookie: cookie)
+            guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
+            let identity = verification.identity
+            let normalized = "user:\(identity.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            guard identity.authenticated, normalized == oldOwner else {
+                handleUnauthorized()
+                return
+            }
+            if verification.cookie != cookie {
+                sessionStore.save(cookie: verification.cookie)
+                guard sessionStore.cookie == verification.cookie else { handleUnauthorized(); return }
+            }
+            try verifiedAccount.confirm(username: identity.username, cookie: verification.cookie)
+            rotationExpectedOwner = nil
+            isAuthenticated = true
+            authenticationStatus = .signedIn(identity.username)
+            authenticationRevision += 1
+        } catch {
+            guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
+            if let apiError = error as? APIError, case .unauthorized = apiError {
+                handleUnauthorized()
+            } else {
+                authenticationStatus = .offline
+                authenticationRevision += 1
+            }
+        }
+    }
+
     func logout() async {
         let cookie = sessionStore.cookie
         authenticationGeneration += 1
         isLoginSubmitting = false
-        sessionStore.clear()
         verifiedAccount.clear()
+        rotationExpectedOwner = nil
         authenticationStatus = .signedOut
         isAuthenticated = false
         homeAvatar = nil
         loginError = nil
         authenticationRevision += 1
+        _ = retryCredentialRemoval()
         if let cookie { try? await authentication.logout(cookie: cookie) }
     }
 
@@ -175,10 +266,11 @@ final class AppState: ObservableObject {
         authenticationGeneration += 1
         isLoginSubmitting = false
         isAuthenticated = false
-        sessionStore.clear()
         verifiedAccount.clear()
+        rotationExpectedOwner = nil
         homeAvatar = nil
         authenticationStatus = .expired
         authenticationRevision += 1
+        _ = retryCredentialRemoval()
     }
 }

@@ -18,7 +18,15 @@ struct LoginCredentials: Encodable {
 protocol AuthenticationClientProtocol {
     func login(username: String, password: String) async throws -> (cookie: String, identity: VerifiedIdentity)
     func verify(cookie: String) async throws -> VerifiedIdentity
+    func verifySession(cookie: String) async throws -> (cookie: String, identity: VerifiedIdentity)
     func logout(cookie: String) async throws
+}
+
+extension AuthenticationClientProtocol {
+    func verifySession(cookie: String) async throws -> (cookie: String, identity: VerifiedIdentity) {
+        let identity = try await verify(cookie: cookie)
+        return (cookie, identity)
+    }
 }
 
 final class AuthenticationClient: AuthenticationClientProtocol {
@@ -40,20 +48,37 @@ final class AuthenticationClient: AuthenticationClientProtocol {
         let body = try JSONEncoder().encode(LoginCredentials(username: username, password: password))
         let (response, identity): (HTTPURLResponse, LoginResponse) = try await send("POST", path: "/api/v1/auth/login", body: body)
         guard identity.authenticated,
-              let header = response.value(forHTTPHeaderField: "Set-Cookie"),
-              let first = header.split(separator: ";", maxSplits: 1).first,
-              let equal = first.firstIndex(of: "="), equal != first.startIndex,
-              first[first.index(after: equal)...].isEmpty == false else { throw APIError.invalidResponse }
-        let cookie = String(first)
-        let confirmed = try await verify(cookie: cookie)
-        guard confirmed.authenticated, confirmed.username == identity.username else { throw APIError.invalidResponse }
-        return (cookie, confirmed)
+              let cookie = Self.responseCookie(response) else { throw APIError.invalidResponse }
+        let confirmed = try await verifySession(cookie: cookie)
+        guard confirmed.identity.authenticated,
+              confirmed.identity.username == identity.username else { throw APIError.invalidResponse }
+        return confirmed
     }
 
     func verify(cookie: String) async throws -> VerifiedIdentity {
-        let (_, identity): (HTTPURLResponse, VerifiedIdentity) = try await send("GET", path: "/api/v1/auth/me", cookie: cookie)
+        let result = try await verifySession(cookie: cookie)
+        return result.identity
+    }
+
+    func verifySession(cookie: String) async throws -> (cookie: String, identity: VerifiedIdentity) {
+        let (response, identity): (HTTPURLResponse, VerifiedIdentity) = try await send("GET", path: "/api/v1/auth/me", cookie: cookie)
         guard identity.authenticated, !identity.username.isEmpty else { throw APIError.invalidResponse }
-        return identity
+        if let header = response.value(forHTTPHeaderField: "Set-Cookie"),
+           let first = header.split(separator: ";", maxSplits: 1).first,
+           let equal = first.firstIndex(of: "="),
+           cookie.hasPrefix(String(first[..<equal]) + "=") {
+            guard let replacement = Self.responseCookie(response) else { throw APIError.invalidResponse }
+            return (replacement, identity)
+        }
+        return (cookie, identity)
+    }
+
+    private static func responseCookie(_ response: HTTPURLResponse) -> String? {
+        guard let header = response.value(forHTTPHeaderField: "Set-Cookie"),
+              let first = header.split(separator: ";", maxSplits: 1).first,
+              let equal = first.firstIndex(of: "="), equal != first.startIndex,
+              !first[first.index(after: equal)...].isEmpty else { return nil }
+        return String(first)
     }
 
     func logout(cookie: String) async throws {
@@ -88,11 +113,14 @@ final class AuthenticationClient: AuthenticationClientProtocol {
         catch let error as URLError { throw error.code == .timedOut ? APIError.timeout : APIError.connection }
         catch { throw APIError.connection }
         guard let response = raw as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if response.statusCode == 401 {
+            let error = try? JSONDecoder().decode(APIEnvelope<APIEmptyResponse>.self, from: data)
+            throw APIError.unauthorized(message: error?.error?.message ?? "登录状态已失效，请重新登录")
+        }
         let envelope: APIEnvelope<Value>
         do { envelope = try JSONDecoder().decode(APIEnvelope<Value>.self, from: data) }
         catch { throw APIError.invalidData(status: response.statusCode) }
         let message = envelope.error?.message ?? "请求失败（HTTP \(response.statusCode)）。"
-        if response.statusCode == 401 { throw APIError.unauthorized(message: message) }
         guard (200..<300).contains(response.statusCode), envelope.success else {
             throw APIError.server(status: response.statusCode, message: message)
         }

@@ -39,6 +39,19 @@ final class AuthenticationTests: XCTestCase {
         XCTAssertEqual(result.identity.username, "student")
     }
 
+    func testAuthMeReturnsRotatedCookieWithVerifiedIdentity() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/auth/me")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session=old")
+            return try self.response(request, 200,
+                #"{"success":true,"data":{"authenticated":true,"username":"student"}}"#,
+                cookie: "session=rotated; Path=/; HttpOnly")
+        }
+        let result = try await client.verifySession(cookie: "session=old")
+        XCTAssertEqual(result.cookie, "session=rotated")
+        XCTAssertEqual(result.identity.username, "student")
+    }
+
     func testWrongPasswordAndMissingCookie() async {
         let wrong = makeClient { request in
             try self.response(request, 401, #"{"success":false,"error":{"message":"用户名或密码错误"}}"#)
@@ -67,6 +80,18 @@ final class AuthenticationTests: XCTestCase {
         do { _ = try await connection.verify(cookie: "pending"); XCTFail("Expected connection error") }
         catch let error as APIError { XCTAssertEqual(error, .connection) }
         catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testAuthMeNonJSONUnauthorizedIsNotConnectionFailure() async {
+        let client = makeClient { request in
+            try self.response(request, 401, "not JSON")
+        }
+        do {
+            _ = try await client.verify(cookie: "session=expired")
+            XCTFail("Expected unauthorized")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .unauthorized(message: "登录状态已失效，请重新登录"))
+        } catch { XCTFail("Unexpected error: \(error)") }
     }
 
     @MainActor
@@ -157,6 +182,113 @@ final class AuthenticationTests: XCTestCase {
     }
 
     @MainActor
+    func testRotatedCookieRequiresReverificationAndSameAccount() async {
+        let session = TestSessionStore()
+        session.save(cookie: "session=old")
+        let auth = TestAuthenticationClient()
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        await state.restoreSession()
+        XCTAssertTrue(state.canAccessPrivateData)
+
+        session.save(cookie: "session=rotated")
+        XCTAssertFalse(state.canAccessPrivateData)
+        await state.reverifyRotatedSession()
+        XCTAssertTrue(state.canAccessPrivateData)
+        XCTAssertEqual(state.verifiedAccount.owner, "user:student")
+
+        session.save(cookie: "session=other")
+        auth.verifiedUsername = "other"
+        await state.reverifyRotatedSession()
+        XCTAssertFalse(state.canAccessPrivateData)
+        XCTAssertEqual(state.authenticationStatus, .expired)
+        XCTAssertNil(session.cookie)
+    }
+
+    @MainActor
+    func testRestorationPersistsCookieReturnedByAuthMe() async {
+        let session = TestSessionStore()
+        session.save(cookie: "session=old")
+        let auth = TestAuthenticationClient()
+        auth.rotationCookie = "session=renewed"
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        await state.restoreSession()
+        XCTAssertEqual(session.cookie, "session=renewed")
+        XCTAssertTrue(state.canAccessPrivateData)
+        XCTAssertEqual(try? state.requireCurrentAccount(revision: state.authenticationRevision), "user:student")
+    }
+
+    @MainActor
+    func testFailedCredentialRemovalBlocksRestorationUntilRetry() async {
+        let suite = "credential-removal-\(UUID().uuidString)"
+        guard let preferences = UserDefaults(suiteName: suite) else { XCTFail("Cannot create test defaults"); return }
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let session = TestSessionStore()
+        session.save(cookie: "session=old")
+        let auth = TestAuthenticationClient()
+        let state = AppState(api: MockAPIClient(), sessionStore: session,
+                             authentication: auth, preferences: preferences)
+        await state.restoreSession()
+        session.failClear = true
+        await state.logout()
+        XCTAssertFalse(state.canAccessPrivateData)
+        XCTAssertEqual(state.authenticationStatus, .signedOut)
+        XCTAssertNotNil(state.credentialRemovalError)
+        XCTAssertEqual(session.cookie, "session=old")
+
+        let relaunched = AppState(api: MockAPIClient(), sessionStore: session,
+                                  authentication: auth, preferences: preferences)
+        await relaunched.restoreSession()
+        XCTAssertFalse(relaunched.isAuthenticated)
+        XCTAssertNotNil(relaunched.credentialRemovalError)
+        session.failClear = false
+        XCTAssertTrue(relaunched.retryCredentialRemoval())
+        XCTAssertNil(session.cookie)
+        XCTAssertNil(relaunched.credentialRemovalError)
+    }
+
+    @MainActor
+    func testServerLogoutFailureDoesNotReportCredentialRemovalFailure() async {
+        let session = TestSessionStore()
+        session.save(cookie: "session=valid")
+        let auth = TestAuthenticationClient()
+        auth.logoutError = URLError(.notConnectedToInternet)
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        await state.restoreSession()
+        await state.logout()
+        XCTAssertFalse(state.isAuthenticated)
+        XCTAssertNil(session.cookie)
+        XCTAssertNil(state.credentialRemovalError)
+    }
+
+    @MainActor
+    func testClosingLoginInvalidatesLateResult() async {
+        let session = TestSessionStore()
+        let auth = TestAuthenticationClient()
+        auth.loginWait = true
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        state.isLoginPresented = true
+        let pending = Task { await state.login(username: "student", password: "example") }
+        await auth.waitForLoginStart()
+        state.cancelLogin()
+        auth.resumeLogin()
+        await pending.value
+        XCTAssertFalse(state.isLoginPresented)
+        XCTAssertFalse(state.isAuthenticated)
+        XCTAssertNil(session.cookie)
+    }
+
+    @MainActor
+    func testCancelledLoginTaskDoesNotStartRequest() async {
+        let auth = TestAuthenticationClient()
+        let state = AppState(api: MockAPIClient(), sessionStore: TestSessionStore(), authentication: auth)
+        let pending = Task { await state.login(username: "student", password: "example") }
+        pending.cancel()
+        await pending.value
+        XCTAssertEqual(auth.loginCount, 0)
+        XCTAssertFalse(state.isAuthenticated)
+    }
+
+    @MainActor
     func testUnauthorizedImmediatelyRevokesScheduleWrites() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -172,6 +304,30 @@ final class AuthenticationTests: XCTestCase {
         XCTAssertNil(state.verifiedAccount.owner)
         XCTAssertThrowsError(try store.all())
         XCTAssertThrowsError(try store.save(CustomSchedule(id: 0, title: "禁止写入", date: "2026-10-23", time: "10:00")))
+    }
+
+    @MainActor
+    func testEditorRevisionCannotWriteAfterLogoutAndAccountSwitch() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = TestSessionStore()
+        session.save(cookie: "session=alice")
+        let auth = TestAuthenticationClient()
+        auth.verifiedUsername = "alice"
+        let state = AppState(api: MockAPIClient(), sessionStore: session, authentication: auth)
+        await state.restoreSession()
+        let store = LocalScheduleStore(session: session, account: state.verifiedAccount, directory: folder)
+        let editorRevision = state.authenticationRevision
+        try store.save(CustomSchedule(id: 0, title: "Alice 安排", date: "2026-10-23", time: "09:00"))
+
+        await state.logout()
+        XCTAssertThrowsError(try state.requireCurrentAccount(revision: editorRevision))
+        XCTAssertThrowsError(try store.save(CustomSchedule(id: 0, title: "旧编辑器写入", date: "2026-10-23", time: "10:00")))
+
+        await state.login(username: "bob", password: "example")
+        XCTAssertTrue(state.canAccessPrivateData)
+        XCTAssertThrowsError(try state.requireCurrentAccount(revision: editorRevision))
+        XCTAssertTrue(try store.all().isEmpty)
     }
 
     @MainActor
@@ -241,7 +397,8 @@ final class AuthenticationTests: XCTestCase {
     private func makeClient(_ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)) -> AuthenticationClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthenticationURLProtocol.self]
-        AuthenticationURLProtocol.handler = handler
+        let identifier = AuthenticationURLProtocol.register(handler)
+        configuration.httpAdditionalHeaders = ["X-Authentication-Test-ID": identifier]
         return AuthenticationClient(session: URLSession(configuration: configuration))
     }
 
@@ -282,12 +439,30 @@ final class AuthenticationTests: XCTestCase {
 }
 
 private final class AuthenticationURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static let lock = NSLock()
+    private static var handlers: [String: (URLRequest) throws -> (HTTPURLResponse, Data)] = [:]
+
+    static func register(_ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)) -> String {
+        let identifier = UUID().uuidString
+        lock.lock()
+        handlers[identifier] = handler
+        lock.unlock()
+        return identifier
+    }
+
+    private static func handler(for identifier: String) -> ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        lock.lock()
+        defer { lock.unlock() }
+        return handlers[identifier]
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         do {
-            let handler = try XCTUnwrap(Self.handler, "Authentication URLProtocol handler is missing")
+            let identifier = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Authentication-Test-ID"),
+                                           "Authentication test request has no handler ID")
+            let handler = try XCTUnwrap(Self.handler(for: identifier),
+                                        "Authentication URLProtocol handler is missing")
             let (response, data) = try handler(request)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
@@ -299,8 +474,13 @@ private final class AuthenticationURLProtocol: URLProtocol {
 
 private final class TestSessionStore: SessionStore {
     private(set) var cookie: String?
+    var failClear = false
     func save(cookie: String) { self.cookie = cookie }
-    func clear() { cookie = nil }
+    @discardableResult func clear() -> Bool {
+        guard !failClear else { return false }
+        cookie = nil
+        return true
+    }
 }
 
 private final class AuthenticationRoutingAPIClient: APIClientProtocol {
@@ -358,6 +538,9 @@ private final class AuthenticationCourseRepository: CourseRepository {
 private final class TestAuthenticationClient: AuthenticationClientProtocol {
     var verifyError: Error?
     var loginError: Error?
+    var logoutError: Error?
+    var verifiedUsername = "student"
+    var rotationCookie: String?
     var loginWait = false
     var loginCount = 0
     var logoutCount = 0
@@ -371,9 +554,16 @@ private final class TestAuthenticationClient: AuthenticationClientProtocol {
     }
     func verify(cookie: String) async throws -> VerifiedIdentity {
         if let verifyError { throw verifyError }
-        return VerifiedIdentity(authenticated: true, username: "student")
+        return VerifiedIdentity(authenticated: true, username: verifiedUsername)
     }
-    func logout(cookie: String) async throws { logoutCount += 1 }
+    func verifySession(cookie: String) async throws -> (cookie: String, identity: VerifiedIdentity) {
+        let identity = try await verify(cookie: cookie)
+        return (rotationCookie ?? cookie, identity)
+    }
+    func logout(cookie: String) async throws {
+        logoutCount += 1
+        if let logoutError { throw logoutError }
+    }
     func resumeLogin() { continuation?.resume(); continuation = nil }
     func waitForLoginStart() async {
         for _ in 0..<1_000 {

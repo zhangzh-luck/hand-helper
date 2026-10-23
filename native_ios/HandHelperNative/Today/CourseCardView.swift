@@ -113,6 +113,7 @@ struct ScheduleCardView: View {
                     .clipped()
                     .allowsHitTesting(!swipe.dragging)
                     .accessibilityHidden(swipe.dragging)
+                    .zIndex(1)
                 }
                 TodayEntryFace(kind: "自定义安排", title: schedule.title, time: schedule.time,
                                detail: "", active: false, custom: true,
@@ -121,21 +122,28 @@ struct ScheduleCardView: View {
                     .offset(x: -swipe.reveal)
                     .contentShape(Rectangle())
                     .onTapGesture { if swipe.reveal > 0 { close(); model.closeActions() } }
-                    .simultaneousGesture(DragGesture(minimumDistance: 12)
-                        .onChanged { value in
-                            swipe.update(horizontal: value.translation.width, vertical: value.translation.height)
-                        }
-                        .onEnded { _ in
-                            guard swipe.dragging else { return }
-                            withAnimation(.timingCurve(0.215, 0.61, 0.355, 1, duration: 0.22)) {
-                                swipe.end()
-                            }
-                            if swipe.reveal > 0 { model.showActions(for: schedule.id) }
-                            else { model.closeActions() }
-                        })
             }
             .frame(width: geometry.size.width, height: 144)
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .simultaneousGesture(DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    swipe.update(horizontal: value.translation.width, vertical: value.translation.height)
+                }
+                .onEnded { _ in
+                    guard swipe.dragging else { return }
+                    withAnimation(.timingCurve(0.215, 0.61, 0.355, 1, duration: 0.22)) {
+                        swipe.end()
+                    }
+                    if swipe.reveal > 0 { model.showActions(for: schedule.id) }
+                    else { model.closeActions() }
+                })
+            .contextMenu {
+                Button("编辑安排", systemImage: "pencil") { close(); onEdit() }
+                Button(role: .destructive) { close(); onDelete() } label: {
+                    Label("删除安排", systemImage: "trash")
+                }
+            }
         }
         .frame(height: 144)
         .onChange(of: model.openScheduleID) { _, id in

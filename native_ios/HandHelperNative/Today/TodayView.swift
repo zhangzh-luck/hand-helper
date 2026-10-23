@@ -24,22 +24,22 @@ struct TodayView: View {
 
     private var dark: Bool { colorScheme == .dark }
     private var mayShowLocalSchedules: Bool {
-        state.isAuthenticated
+        state.canAccessPrivateData
     }
     private var visibleProfile: TodayProfile {
-        state.isAuthenticated ? model.profile : TodayProfile(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil)
+        state.canAccessPrivateData ? model.profile : TodayProfile(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil)
     }
     private var avatarData: Data? { WallpaperStore.decodeDataURL(visibleProfile.avatarDataURL) }
     private var entries: [TodayEntry] {
-        ((state.isAuthenticated ? model.courses : []).map(TodayEntry.course) +
-         (state.isAuthenticated ? model.schedules : []).map(TodayEntry.schedule))
+        ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
+         (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule))
             .sorted { ($0.sortTime, $0.id) < ($1.sortTime, $1.id) }
     }
 
     var body: some View {
         ZStack {
             TodayStyle.background(dark).ignoresSafeArea()
-            if state.isAuthenticated, let data = model.wallpaperData, let image = UIImage(data: data) {
+            if state.canAccessPrivateData, let data = model.wallpaperData, let image = UIImage(data: data) {
                 GeometryReader { geometry in
                     Image(uiImage: image)
                         .resizable()
@@ -60,7 +60,7 @@ struct TodayView: View {
                 HStack(spacing: 8) {
                     Text("今日安排")
                         .font(.system(size: 19, weight: .heavy))
-                    if state.isAuthenticated && !model.schedules.isEmpty {
+                    if state.canAccessPrivateData && !model.schedules.isEmpty {
                         Text("今天有 \(model.schedules.count) 项自定义安排")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x1d4ed8))
@@ -69,7 +69,7 @@ struct TodayView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if state.isAuthenticated {
+                    if state.canAccessPrivateData {
                         Button { editor = ScheduleEditorRoute(schedule: nil, revision: state.authenticationRevision) } label: {
                             Label("添加安排", systemImage: "plus").font(.system(size: 14, weight: .medium))
                         }
@@ -81,19 +81,21 @@ struct TodayView: View {
                     }
                 }
                 .padding(.top, 25)
-                if !entries.isEmpty && (state.isAuthenticated && (model.active != nil || model.upcoming != nil) || model.schedules.isEmpty) {
+                if !entries.isEmpty && (state.canAccessPrivateData && (model.active != nil || model.upcoming != nil) || model.schedules.isEmpty) {
                     statusCard
                         .padding(.top, 5).padding(.bottom, 9)
                 }
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        if !state.isAuthenticated || !model.hasCourseData {
+                        if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
                                 Text(courseMessage)
                                     .font(.system(size: 14))
                                     .foregroundStyle(TodayStyle.secondary(dark))
                                 Spacer()
-                                if state.isAuthenticated {
+                                if state.credentialRemovalError != nil {
+                                    Button("重试清理") { state.retryCredentialRemoval() }
+                                } else if state.canAccessPrivateData {
                                     Button("重试") { Task { await refreshCourses() } }
                                 } else if state.authenticationStatus != .verifying {
                                     Button("登录") { state.isLoginPresented = true }
@@ -114,10 +116,12 @@ struct TodayView: View {
                                 ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
                                                  dark: dark, model: model,
                                                  onEdit: {
+                                                     guard state.canAccessPrivateData else { return }
                                                      editor = ScheduleEditorRoute(schedule: schedule,
                                                                                   revision: state.authenticationRevision)
                                                  },
                                                  onDelete: {
+                                                     guard state.canAccessPrivateData else { return }
                                                      pendingDelete = PendingScheduleDelete(schedule: schedule,
                                                                                            revision: state.authenticationRevision)
                                                  })
@@ -134,14 +138,14 @@ struct TodayView: View {
             .padding(.top, 26)
         }
         .task {
-            model.load(allowPrivateCache: state.isAuthenticated, allowLocalSchedules: mayShowLocalSchedules)
-            if state.isAuthenticated { await refreshCourses() }
+            model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
+            if state.canAccessPrivateData { await refreshCourses() }
             while !Task.isCancelled {
                 let remainder = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
                 let delay = 60 - remainder + 0.05
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { break }
-                if model.tick(allowLocalSchedules: mayShowLocalSchedules) && state.isAuthenticated { await refreshCourses() }
+                if model.tick(allowLocalSchedules: mayShowLocalSchedules) && state.canAccessPrivateData { await refreshCourses() }
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
@@ -149,15 +153,15 @@ struct TodayView: View {
             pendingDelete = nil
             selectedPhoto = nil
             showAvatar = false
-            model.authenticationDidChange(allowPrivateCache: state.isAuthenticated,
+            model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
-            if state.isAuthenticated { Task { await refreshCourses() } }
+            if state.canAccessPrivateData { Task { await refreshCourses() } }
         }
         .onChange(of: state.selectedTab) { _, tab in if tab != .today { model.closeActions() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
-                if changed && state.isAuthenticated { Task { await refreshCourses() } }
+                if changed && state.canAccessPrivateData { Task { await refreshCourses() } }
                 if state.authenticationStatus == .offline { Task { await state.retrySessionVerification() } }
             }
         }
@@ -248,7 +252,7 @@ struct TodayView: View {
             TodayStyle.color(dark ? 0xffffff : 0x0f172a, alpha: 16.0 / 255)))
         .shadow(color: TodayStyle.color(0x0f172a, alpha: 18.0 / 255), radius: 11, x: 0, y: 8)
         .contextMenu {
-            if state.isAuthenticated {
+            if state.canAccessPrivateData {
                 Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right") {
                     Task { await state.logout() }
                 }
@@ -256,20 +260,20 @@ struct TodayView: View {
                 Button("登录", systemImage: "person.crop.circle") { state.isLoginPresented = true }
             }
             Button("更换今日壁纸", systemImage: "photo") { showPhotoPicker = true }
-                .disabled(!state.isAuthenticated)
+                .disabled(!state.canAccessPrivateData)
             Button("使用默认背景", systemImage: "rectangle.slash") {
                 do { try model.removeWallpaper() } catch { localError = error.localizedDescription }
             }
-            .disabled(!state.isAuthenticated || model.wallpaperData == nil)
+            .disabled(!state.canAccessPrivateData || model.wallpaperData == nil)
         }
     }
 
     private var courseMessage: String {
         switch state.authenticationStatus {
-        case .signedOut: return "登录后查看今日课程"
+        case .signedOut: return state.credentialRemovalError ?? "登录后查看今日课程"
         case .verifying: return "正在验证登录状态…"
         case .offline: return "网络暂不可用，登录状态尚未验证"
-        case .expired: return "登录状态已失效，请重新登录"
+        case .expired: return state.credentialRemovalError ?? "登录状态已失效，请重新登录"
         case .signedIn: return model.errorMessage ?? "今天暂无课程"
         }
     }
@@ -277,8 +281,12 @@ struct TodayView: View {
     private func refreshCourses() async {
         let revision = state.authenticationRevision
         let unauthorized = await model.refresh()
-        if unauthorized && revision == state.authenticationRevision && state.isAuthenticated &&
-            !state.isLoginSubmitting && (try? state.requireCurrentAccount(revision: revision)) == nil {
+        guard revision == state.authenticationRevision else { return }
+        if state.isAuthenticated && state.sessionStore.cookie != nil && !state.canAccessPrivateData {
+            await state.reverifyRotatedSession()
+            return
+        }
+        if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
             state.handleUnauthorized()
         }
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ScheduleEditorView: View {
     let schedule: CustomSchedule?
@@ -10,6 +11,8 @@ struct ScheduleEditorView: View {
     @State private var date: Date
     @State private var time: Date
     @State private var error: String?
+    @State private var showDiscardConfirmation = false
+    @State private var mayDismiss = false
 
     init(schedule: CustomSchedule?, now: Date,
          onSave: @escaping (Int?, String, Date, String) throws -> Void) {
@@ -78,16 +81,83 @@ struct ScheduleEditorView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(schedule == nil ? "添加安排" : "编辑安排")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { close() } } }
         }
+        .background(ScheduleDismissGuard(shouldConfirm: hasUnsavedChanges && !mayDismiss) {
+            showDiscardConfirmation = true
+        })
+        .interactiveDismissDisabled(hasUnsavedChanges && !mayDismiss)
+        .confirmationDialog("放弃未保存的更改？", isPresented: $showDiscardConfirmation) {
+            Button("放弃更改", role: .destructive) {
+                mayDismiss = true
+                dismiss()
+            }
+            Button("继续编辑", role: .cancel) {}
+        } message: { Text("当前填写的安排尚未保存。") }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        ScheduleEditorState.isDirty(schedule: schedule, title: title, date: date,
+                                    time: timeValue, now: now)
+    }
+
+    private var timeValue: String {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
+        return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+    }
+
+    private func close() {
+        if hasUnsavedChanges { showDiscardConfirmation = true }
+        else { mayDismiss = true; dismiss() }
     }
 
     private func save() {
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
-        let value = String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
         do {
-            try onSave(schedule?.id, title, date, value)
+            try onSave(schedule?.id, title, date, timeValue)
+            mayDismiss = true
             dismiss()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+enum ScheduleEditorState {
+    static func isDirty(schedule: CustomSchedule?, title: String, date: Date,
+                        time: String, now: Date) -> Bool {
+        let originalDate = schedule?.date ?? CourseScheduleCalculator.dateKey(now)
+        let originalTime = schedule?.time ?? "09:00"
+        return title.trimmingCharacters(in: .whitespacesAndNewlines) !=
+            (schedule?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ||
+            CourseScheduleCalculator.dateKey(date) != originalDate || time != originalTime
+    }
+}
+
+private struct ScheduleDismissGuard: UIViewControllerRepresentable {
+    let shouldConfirm: Bool
+    let onAttempt: () -> Void
+
+    func makeUIViewController(context: Context) -> UIViewController { UIViewController() }
+
+    func updateUIViewController(_ controller: UIViewController, context: Context) {
+        context.coordinator.shouldConfirm = shouldConfirm
+        context.coordinator.onAttempt = onAttempt
+        let coordinator = context.coordinator
+        DispatchQueue.main.async {
+            (controller.parent?.presentationController ?? controller.presentationController)?.delegate = coordinator
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIAdaptivePresentationControllerDelegate {
+        var shouldConfirm = false
+        var onAttempt: (() -> Void)?
+
+        func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
+            !shouldConfirm
+        }
+
+        func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
+            onAttempt?()
+        }
     }
 }
