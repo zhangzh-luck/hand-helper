@@ -7,7 +7,6 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var wallpaperData: Data?
     @Published private(set) var isLoading = false
-    @Published private(set) var openScheduleID: Int?
     @Published private(set) var localSchedules: [CustomSchedule] = []
 
     private let repository: any CourseRepository
@@ -88,7 +87,6 @@ final class TodayViewModel: ObservableObject {
         isLoading = false
         snapshot = nil
         wallpaperData = nil
-        closeActions()
         load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules)
     }
 
@@ -115,7 +113,6 @@ final class TodayViewModel: ObservableObject {
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 snapshot = nil
                 wallpaperData = nil
-                closeActions()
                 errorMessage = apiError.localizedDescription
                 return true
             }
@@ -128,13 +125,9 @@ final class TodayViewModel: ObservableObject {
         let previous = CourseScheduleCalculator.dateKey(now)
         now = clock.now
         let changed = previous != CourseScheduleCalculator.dateKey(now)
-        if changed { closeActions() }
         if changed && allowLocalSchedules { reloadSchedules() }
         return changed
     }
-
-    func showActions(for id: Int) { openScheduleID = id }
-    func closeActions() { openScheduleID = nil }
 
     func saveSchedule(id: Int?, title: String, date: Date, time: String) throws {
         guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后编辑本机安排。") }
@@ -150,14 +143,12 @@ final class TodayViewModel: ObservableObject {
         try repository.saveSchedule(CustomSchedule(id: id ?? 0, title: name,
                                                    date: CourseScheduleCalculator.dateKey(date), time: time))
         reloadSchedules()
-        closeActions()
     }
 
     func deleteSchedule(id: Int) throws {
         guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后编辑本机安排。") }
         try repository.deleteSchedule(id: id)
         reloadSchedules()
-        closeActions()
     }
 
     func setWallpaper(_ data: Data) throws {

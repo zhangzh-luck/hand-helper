@@ -86,83 +86,38 @@ struct ScheduleCardView: View {
     let schedule: CustomSchedule
     let hasWallpaper: Bool
     let dark: Bool
-    @ObservedObject var model: TodayViewModel
     let onEdit: () -> Void
     let onDelete: () -> Void
 
-    @State private var swipe = ScheduleSwipeState()
-
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .trailing) {
-                // The actions do not exist in the render tree at rest. The
-                // trailing viewport clips both pixels and touch targets.
-                if swipe.reveal > 0 {
-                    HStack(spacing: 0) {
-                        action("编辑", color: TodayStyle.color(0x8e8e93)) {
-                            close()
-                            onEdit()
-                        }
-                        action("删除", color: TodayStyle.color(0xff3b30)) {
-                            close()
-                            onDelete()
-                        }
-                    }
-                    .frame(width: ScheduleSwipeState.actionWidth, height: 144)
-                    .frame(width: swipe.reveal, alignment: .trailing)
-                    .clipped()
-                    .allowsHitTesting(!swipe.dragging)
-                    .accessibilityHidden(swipe.dragging)
-                    .zIndex(1)
-                }
-                TodayEntryFace(kind: "自定义安排", title: schedule.title, time: schedule.time,
-                               detail: "", active: false, custom: true,
-                               hasWallpaper: hasWallpaper && swipe.reveal == 0 && !swipe.dragging, dark: dark)
-                    .frame(width: geometry.size.width)
-                    .offset(x: -swipe.reveal)
-                    .contentShape(Rectangle())
-                    .onTapGesture { if swipe.reveal > 0 { close(); model.closeActions() } }
-            }
-            .frame(width: geometry.size.width, height: 144)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        TodayEntryFace(kind: "自定义安排", title: schedule.title, time: schedule.time,
+                       detail: "", active: false, custom: true,
+                       hasWallpaper: hasWallpaper, dark: dark)
             .contentShape(RoundedRectangle(cornerRadius: 16))
-            .simultaneousGesture(DragGesture(minimumDistance: 12)
-                .onChanged { value in
-                    swipe.update(horizontal: value.translation.width, vertical: value.translation.height)
-                }
-                .onEnded { _ in
-                    guard swipe.dragging else { return }
-                    withAnimation(.timingCurve(0.215, 0.61, 0.355, 1, duration: 0.22)) {
-                        swipe.end()
-                    }
-                    if swipe.reveal > 0 { model.showActions(for: schedule.id) }
-                    else { model.closeActions() }
-                })
             .contextMenu {
-                Button("编辑安排", systemImage: "pencil") { close(); onEdit() }
-                Button(role: .destructive) { close(); onDelete() } label: {
-                    Label("删除安排", systemImage: "trash")
+                ForEach(ScheduleCardAction.allCases) { action in
+                    Button(role: action.role) {
+                        action.perform(onEdit: onEdit, onDelete: onDelete)
+                    } label: {
+                        Label(action.title, systemImage: action.symbol)
+                    }
                 }
             }
-        }
-        .frame(height: 144)
-        .onChange(of: model.openScheduleID) { _, id in
-            if id != schedule.id { close() }
-        }
-        .onDisappear { close() }
     }
+}
 
-    private func action(_ title: String, color: Color, perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(color)
+enum ScheduleCardAction: CaseIterable, Identifiable, Hashable {
+    case edit, delete
+
+    var id: Self { self }
+    var title: String { self == .edit ? "编辑" : "删除" }
+    var symbol: String { self == .edit ? "pencil" : "trash" }
+    var role: ButtonRole? { self == .delete ? .destructive : nil }
+
+    func perform(onEdit: () -> Void, onDelete: () -> Void) {
+        switch self {
+        case .edit: onEdit()
+        case .delete: onDelete()
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title + "“" + schedule.title + "”")
-    }
-
-    private func close() {
-        withAnimation(.timingCurve(0.215, 0.61, 0.355, 1, duration: 0.22)) { swipe.close() }
     }
 }

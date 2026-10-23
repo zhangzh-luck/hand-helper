@@ -67,19 +67,21 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(CourseScheduleCalculator.countdown(until: date("2026-10-23T10:01:01Z"), from: date("2026-10-23T09:00:00Z")), "1 小时 2 分钟")
     }
 
-    func testSwipeThresholdBounceAndClose() {
-        var swipe = ScheduleSwipeState()
-        XCTAssertEqual(swipe.reveal, 0)
-        swipe.update(horizontal: -70, vertical: 2)
-        swipe.end()
-        XCTAssertEqual(swipe.reveal, 0)
-        swipe.update(horizontal: -74, vertical: 2)
-        swipe.end()
-        XCTAssertEqual(swipe.reveal, 168)
-        swipe.close()
-        XCTAssertEqual(swipe.reveal, 0)
-        swipe.update(horizontal: -40, vertical: -100)
-        XCTAssertEqual(swipe.reveal, 0)
+    func testScheduleMenuHasOnlyEditAndDestructiveDelete() {
+        XCTAssertEqual(ScheduleCardAction.allCases.count, 2)
+        XCTAssertEqual(ScheduleCardAction.edit.title, "编辑")
+        XCTAssertEqual(ScheduleCardAction.edit.symbol, "pencil")
+        XCTAssertNil(ScheduleCardAction.edit.role)
+        XCTAssertEqual(ScheduleCardAction.delete.title, "删除")
+        XCTAssertEqual(ScheduleCardAction.delete.symbol, "trash")
+        XCTAssertEqual(ScheduleCardAction.delete.role, .destructive)
+
+        var performed: [ScheduleCardAction] = []
+        ScheduleCardAction.edit.perform(onEdit: { performed.append(.edit) },
+                                        onDelete: { performed.append(.delete) })
+        ScheduleCardAction.delete.perform(onEdit: { performed.append(.edit) },
+                                          onDelete: { performed.append(.delete) })
+        XCTAssertEqual(performed, [.edit, .delete])
     }
 
     func testEditorDiscardStateForNewAndExistingSchedules() {
@@ -98,7 +100,7 @@ final class TodayTests: XCTestCase {
     }
 
     @MainActor
-    func testCacheWallpaperRolloverAndClosingSwipeState() async throws {
+    func testCacheWallpaperAndDayRollover() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let sessionStore = TodayTestSessionStore()
@@ -121,14 +123,8 @@ final class TodayTests: XCTestCase {
         model.load()
         XCTAssertEqual(model.schedules, [schedule])
         XCTAssertEqual(model.wallpaperData, Data([1, 2, 3]))
-        model.showActions(for: -1)
-        XCTAssertEqual(model.openScheduleID, -1)
-        model.closeActions() // Leaving the Today tab uses the same transition.
-        XCTAssertNil(model.openScheduleID)
-        model.showActions(for: -1)
         clock.now = localDate(2026, 10, 24, 0, 1)
         XCTAssertTrue(model.tick())
-        XCTAssertNil(model.openScheduleID)
         XCTAssertTrue(model.schedules.isEmpty)
         let restored = TodayViewModel(repository: repository, wallpaperStore: wallpaper, clock: clock)
         restored.load()

@@ -109,18 +109,7 @@ struct TodayView: View {
                                 CourseCardView(course: course, active: model.active?.id == course.id,
                                                hasWallpaper: model.wallpaperData != nil, dark: dark)
                             case .schedule(let schedule):
-                                ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
-                                                 dark: dark, model: model,
-                                                 onEdit: {
-                                                     guard state.canAccessPrivateData else { return }
-                                                     editor = ScheduleEditorRoute(schedule: schedule,
-                                                                                  revision: state.authenticationRevision)
-                                                 },
-                                                 onDelete: {
-                                                     guard state.canAccessPrivateData else { return }
-                                                     pendingDelete = PendingScheduleDelete(schedule: schedule,
-                                                                                           revision: state.authenticationRevision)
-                                                 })
+                                scheduleCard(schedule, revision: state.authenticationRevision)
                             }
                         }
                     }
@@ -153,14 +142,12 @@ struct TodayView: View {
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
         }
-        .onChange(of: state.selectedTab) { _, tab in if tab != .today { model.closeActions() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if changed && state.canAccessPrivateData { Task { await refreshCourses() } }
             }
         }
-        .onDisappear { model.closeActions() }
         .sheet(item: $editor) { route in
             ScheduleEditorView(schedule: route.schedule, now: model.now) { id, title, date, time in
                 _ = try state.requireCurrentAccount(revision: route.revision)
@@ -204,6 +191,18 @@ struct TodayView: View {
                     .background(TodayStyle.background(dark))
             }
         }
+    }
+
+    private func scheduleCard(_ schedule: CustomSchedule, revision: Int) -> some View {
+        ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil, dark: dark,
+                         onEdit: {
+                             guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
+                             editor = ScheduleEditorRoute(schedule: schedule, revision: revision)
+                         },
+                         onDelete: {
+                             guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
+                             pendingDelete = PendingScheduleDelete(schedule: schedule, revision: revision)
+                         })
     }
 
     private var hero: some View {
