@@ -5,8 +5,7 @@ import UIKit
 final class ProfileTests: XCTestCase {
     @MainActor
     func testDefaultSaveAvatarRemovalAndRestart() throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let session = ProfileTestSessionStore()
         let account = VerifiedAccountContext()
         let store = LocalProfileStore(session: session, account: account, directory: folder)
@@ -30,8 +29,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testVerifiedOwnerIsolationAndCookieRotation() throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let session = ProfileTestSessionStore()
         let account = VerifiedAccountContext()
         let store = LocalProfileStore(session: session, account: account, directory: folder)
@@ -64,8 +62,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testInvalidNameCorruptFileAndFailedWrite() throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let session = ProfileTestSessionStore()
         let account = VerifiedAccountContext()
         session.save(cookie: "session=alice")
@@ -88,8 +85,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testAppStateLoadsOnlyAfterVerificationAndClearsOnLogoutAndSwitch() async throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let preferences = testPreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuite(preferences)) }
         let session = ProfileTestSessionStore()
@@ -124,8 +120,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testFailedSaveDoesNotPublishDraftAndOldRevisionIsRejected() async throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let preferences = testPreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuite(preferences)) }
         let session = ProfileTestSessionStore()
@@ -148,8 +143,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testAppStateCookieRotationReloadsOnlyVerifiedOwnerProfile() async throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let preferences = testPreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuite(preferences)) }
         let session = ProfileTestSessionStore()
@@ -172,9 +166,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testAppStateWriteFailureKeepsPublishedProfile() async throws {
-        let root = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let root = try temporaryFolder()
         let invalidDirectory = root.appendingPathComponent("file-instead-of-directory")
         try Data([1]).write(to: invalidDirectory)
         let preferences = testPreferences()
@@ -192,8 +184,7 @@ final class ProfileTests: XCTestCase {
 
     @MainActor
     func testCorruptProfileFallsBackWithoutBlockingVerifiedAccount() async throws {
-        let folder = temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        let folder = try temporaryFolder()
         let preferences = testPreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuite(preferences)) }
         let session = ProfileTestSessionStore()
@@ -239,8 +230,11 @@ final class ProfileTests: XCTestCase {
         catch AvatarImageError.oversizedSource {} catch { XCTFail("Unexpected error: \(error)") }
     }
 
-    private func temporaryFolder() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    private func temporaryFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        addTeardownBlock { try FileManager.default.removeItem(at: folder) }
+        return folder
     }
 
     private func testPreferences() -> UserDefaults {

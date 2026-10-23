@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import ImageIO
 
@@ -78,7 +79,27 @@ final class LocalProfileStore {
         let normalized = LocalProfile(displayName: name, avatarData: profile.avatarData)
         let data = try JSONEncoder().encode(Document(version: 1, owner: owner, profile: normalized))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try writeProtectedAtomically(data, to: file)
         return normalized
+    }
+
+    private func writeProtectedAtomically(_ data: Data, to file: URL) throws {
+        // The temporary file is protected before it becomes the visible profile.
+        // A same-directory rename atomically replaces an existing profile as well.
+        let prefix = ".\(file.lastPathComponent).tmp-"
+        for item in try FileManager.default.contentsOfDirectory(at: directory,
+                       includingPropertiesForKeys: nil) where item.lastPathComponent.hasPrefix(prefix) {
+            try FileManager.default.removeItem(at: item)
+        }
+        let temporary = directory.appendingPathComponent(prefix + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try data.write(to: temporary, options: .completeFileProtectionUntilFirstUserAuthentication)
+        let result = temporary.path.withCString { source in
+            file.path.withCString { destination in Darwin.rename(source, destination) }
+        }
+        guard result == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                          userInfo: [NSFilePathErrorKey: file.path])
+        }
     }
 }
