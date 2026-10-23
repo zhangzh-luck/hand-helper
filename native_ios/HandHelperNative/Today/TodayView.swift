@@ -7,6 +7,9 @@ struct TodayView: View {
     @StateObject private var model: TodayViewModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ScaledMetric(relativeTo: .title) private var avatarDimension: CGFloat = 60
     @State private var editor: ScheduleEditorRoute?
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var showPhotoPicker = false
@@ -38,8 +41,9 @@ struct TodayView: View {
 
     var body: some View {
         ZStack {
-            TodayStyle.background(dark).ignoresSafeArea()
-            if state.canAccessPrivateData, let data = model.wallpaperData, let image = UIImage(data: data) {
+            TodayStyle.background.ignoresSafeArea()
+            if !reduceTransparency, state.canAccessPrivateData,
+               let data = model.wallpaperData, let image = UIImage(data: data) {
                 GeometryReader { geometry in
                     Image(uiImage: image)
                         .resizable()
@@ -57,30 +61,7 @@ struct TodayView: View {
             }
             VStack(spacing: 0) {
                 hero
-                HStack(spacing: 8) {
-                    Text("今日安排")
-                        .font(.system(size: 19, weight: .heavy))
-                    if state.canAccessPrivateData && !model.schedules.isEmpty {
-                        Text("今天有 \(model.schedules.count) 项自定义安排")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x1d4ed8))
-                            .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(TodayStyle.color(dark ? 0x17263c : 0xdbeafe), in: Capsule())
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    if state.canAccessPrivateData {
-                        Button { editor = ScheduleEditorRoute(schedule: nil, revision: state.authenticationRevision) } label: {
-                            Label("添加安排", systemImage: "plus").font(.system(size: 14, weight: .medium))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x2563eb))
-                        .padding(.horizontal, 8).padding(.vertical, 8)
-                        .background(TodayStyle.color(dark ? 0x17263c : 0xe8f1ff), in: RoundedRectangle(cornerRadius: 8))
-                        .disabled(!model.canEditSchedules)
-                    }
-                }
-                .padding(.top, 25)
+                scheduleHeader.padding(.top, 24)
                 if !entries.isEmpty && (state.canAccessPrivateData && (model.active != nil || model.upcoming != nil) || model.schedules.isEmpty) {
                     statusCard
                         .padding(.top, 5).padding(.bottom, 9)
@@ -90,8 +71,8 @@ struct TodayView: View {
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
                                 Text(courseMessage)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(TodayStyle.secondary(dark))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
                                 if state.canAccessPrivateData {
                                     Button("重试") { Task { await refreshCourses() } }
@@ -99,15 +80,15 @@ struct TodayView: View {
                             }
                             .padding(.top, 12)
                         } else if let error = model.errorMessage {
-                            Text(error).font(.system(size: 13))
-                                .foregroundStyle(TodayStyle.secondary(dark))
+                            Text(error).font(.subheadline)
+                                .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         ForEach(entries) { entry in
                             switch entry {
                             case .course(let course):
                                 CourseCardView(course: course, active: model.active?.id == course.id,
-                                               hasWallpaper: model.wallpaperData != nil, dark: dark)
+                                               hasWallpaper: model.wallpaperData != nil)
                             case .schedule(let schedule):
                                 scheduleCard(schedule, revision: state.authenticationRevision)
                             }
@@ -188,13 +169,13 @@ struct TodayView: View {
             if let avatarData, let image = UIImage(data: avatarData) {
                 Image(uiImage: image).resizable().scaledToFit()
                     .padding(20)
-                    .background(TodayStyle.background(dark))
+                    .background(TodayStyle.background)
             }
         }
     }
 
     private func scheduleCard(_ schedule: CustomSchedule, revision: Int) -> some View {
-        ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil, dark: dark,
+        ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
                          onEdit: {
                              guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
                              editor = ScheduleEditorRoute(schedule: schedule, revision: revision)
@@ -205,45 +186,73 @@ struct TodayView: View {
                          })
     }
 
-    private var hero: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                badge("今日 · \(greeting)")
-                Text(visibleProfile.displayName)
-                    .font(.system(size: 31, weight: .heavy))
-                    .foregroundStyle(TodayStyle.color(dark ? 0xffffff : 0x172033))
-                    .lineLimit(1)
-                badge(dateLabel)
+    private var scheduleHeading: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("今日安排")
+                .font(.title3.weight(.semibold))
+            if state.canAccessPrivateData && !model.schedules.isEmpty {
+                Text("今天有 \(model.schedules.count) 项自定义安排")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
-            Button { if avatarData != nil { showAvatar = true } } label: {
-                Group {
-                    if let avatarData, let image = UIImage(data: avatarData) {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else {
-                        Text(visibleProfile.displayName == "航的助手" ? "航" : String(visibleProfile.displayName.suffix(1)))
-                            .font(.system(size: 28, weight: .bold))
-                    }
-                }
-                .frame(width: 74, height: 74)
-                .background(dark ? Color.black : Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 17))
-                .padding(3)
-                .background(dark ? Color.black : Color.white, in: RoundedRectangle(cornerRadius: 20))
-                .shadow(color: TodayStyle.color(0x0f172a, alpha: 38.0 / 255), radius: 8, x: 0, y: 6)
-            }
-            .buttonStyle(.plain)
-            .disabled(avatarData == nil)
         }
-        .padding(.horizontal, 22).padding(.vertical, 26)
-        .frame(maxWidth: .infinity, minHeight: 158, alignment: .leading)
-        .background(LinearGradient(colors: dark
-            ? [TodayStyle.color(0x202228), TodayStyle.color(0x121418)]
-            : [TodayStyle.color(0xfbfcfe), TodayStyle.color(0xeaf2f9)],
-            startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 24))
-        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(
-            TodayStyle.color(dark ? 0xffffff : 0x0f172a, alpha: 16.0 / 255)))
-        .shadow(color: TodayStyle.color(0x0f172a, alpha: 18.0 / 255), radius: 11, x: 0, y: 8)
+    }
+
+    @ViewBuilder
+    private var scheduleHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) {
+                scheduleHeading
+                if state.canAccessPrivateData { addScheduleButton }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .center, spacing: 12) {
+                scheduleHeading
+                Spacer(minLength: 0)
+                if state.canAccessPrivateData { addScheduleButton }
+            }
+        }
+    }
+
+    private var addScheduleButton: some View {
+        let button = Button {
+            editor = ScheduleEditorRoute(schedule: nil, revision: state.authenticationRevision)
+        } label: {
+            Label("添加安排", systemImage: "plus")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonBorderShape(.capsule)
+        .disabled(!model.canEditSchedules)
+
+        return Group {
+            if #available(iOS 26.0, *) {
+                button.buttonStyle(.glassProminent)
+            } else {
+                button.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var hero: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 16) {
+                    heroInformation
+                    avatarButton
+                }
+            } else {
+                HStack(alignment: .center, spacing: 16) {
+                    heroInformation
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    avatarButton
+                }
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(TodayHeroSurface())
         .contextMenu {
             if state.canAccessPrivateData {
                 Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right") {
@@ -257,6 +266,40 @@ struct TodayView: View {
             }
             .disabled(!state.canAccessPrivateData || model.wallpaperData == nil)
         }
+    }
+
+    private var heroInformation: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("今日 · \(greeting)")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(visibleProfile.displayName)
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(dateLabel)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var avatarButton: some View {
+        Button { if avatarData != nil { showAvatar = true } } label: {
+            Group {
+                if let avatarData, let image = UIImage(data: avatarData) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Text(visibleProfile.displayName == "航的助手" ? "航" : String(visibleProfile.displayName.suffix(1)))
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .frame(width: min(avatarDimension, 88), height: min(avatarDimension, 88))
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(avatarData == nil)
     }
 
     private var courseMessage: String {
@@ -278,16 +321,6 @@ struct TodayView: View {
         }
     }
 
-    private func badge(_ value: String) -> some View {
-        Text(value).font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(TodayStyle.color(dark ? 0xe0e5ec : 0x475b74))
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(TodayStyle.color(dark ? 0x000000 : 0xffffff, alpha: dark ? 56.0 / 255 : 120.0 / 255),
-                        in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(
-                TodayStyle.color(0xffffff, alpha: dark ? 32.0 / 255 : 153.0 / 255)))
-    }
-
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: model.now)
         return hour < 10 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好"
@@ -302,14 +335,9 @@ struct TodayView: View {
     private var statusCard: some View {
         let complete = model.active == nil && model.upcoming == nil
         return Text(model.status)
-            .font(.system(size: complete ? 13 : 14, weight: .bold))
-            .foregroundStyle(TodayStyle.color(dark ? 0xbfdbfe : 0x1d4ed8))
-            .frame(maxWidth: complete ? nil : .infinity, minHeight: complete ? nil : 62, alignment: .leading)
-            .padding(.horizontal, complete ? 11 : 15).padding(.vertical, complete ? 7 : 13)
-            .background(TodayStyle.color(dark ? 0x102642 : 0xe8f1ff),
-                        in: RoundedRectangle(cornerRadius: complete ? 11 : 14))
-            .overlay(RoundedRectangle(cornerRadius: complete ? 11 : 14).strokeBorder(
-                TodayStyle.color(dark ? 0x234671 : 0xdbeafe)))
+            .font(.subheadline.weight(complete ? .medium : .semibold))
+            .foregroundStyle(complete ? Color.secondary : Color.accentColor)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

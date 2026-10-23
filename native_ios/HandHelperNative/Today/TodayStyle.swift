@@ -7,7 +7,22 @@ enum TodayStyle {
               blue: Double(hex & 0xff) / 255).opacity(alpha)
     }
 
-    static func background(_ dark: Bool) -> Color { dark ? .black : color(0xf7f9fc) }
-    static func secondary(_ dark: Bool) -> Color { color(dark ? 0xb2b8c2 : 0x64748b) }
-    static let shadow = color(0x0f172a, alpha: 18.0 / 255)
+    static let background = Color(uiColor: .systemGroupedBackground)
+}
+
+struct TodayHeroSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        if reduceTransparency || contrast == .increased {
+            content.background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
+    }
 }
