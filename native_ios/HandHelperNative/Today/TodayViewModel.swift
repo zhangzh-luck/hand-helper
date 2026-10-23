@@ -8,6 +8,7 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var wallpaperData: Data?
     @Published private(set) var isLoading = false
     @Published private(set) var openScheduleID: Int?
+    @Published private(set) var localSchedules: [CustomSchedule] = []
 
     private let repository: any CourseRepository
     private let wallpaperStore: WallpaperStore
@@ -38,7 +39,7 @@ final class TodayViewModel: ObservableObject {
 
     var schedules: [CustomSchedule] {
         let key = CourseScheduleCalculator.dateKey(now)
-        return snapshot?.schedules.filter { $0.date == key }.sorted { ($0.time, $0.id) < ($1.time, $1.id) } ?? []
+        return localSchedules.filter { $0.date == key }.sorted { ($0.time, $0.id) < ($1.time, $1.id) }
     }
 
     var active: CourseSession? { CourseScheduleCalculator.active(in: courses, at: now) }
@@ -56,46 +57,79 @@ final class TodayViewModel: ObservableObject {
     }
 
     var hasCourseData: Bool { snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false }
-    var canEditSchedules: Bool { snapshot != nil }
+    var canEditSchedules: Bool { repository.canEditSchedules }
 
-    func load() {
+    private func reloadSchedules() {
+        localSchedules = []
+        guard repository.canEditSchedules else { return }
+        do { localSchedules = try repository.allLocalSchedules() }
+        catch { errorMessage = "本机安排无法读取：\(error.localizedDescription)" }
+    }
+
+    func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true) {
+        errorMessage = nil
+        if allowLocalSchedules { reloadSchedules() } else { localSchedules = [] }
+        guard allowPrivateCache else {
+            snapshot = nil
+            wallpaperData = nil
+            return
+        }
         do {
             snapshot = try repository.cached()
             wallpaperData = try wallpaperStore.load() ?? WallpaperStore.decodeDataURL(snapshot?.profile.homeWallpaperDataURL)
-            errorMessage = snapshot == nil ? "课程数据暂不可用" : nil
+            if errorMessage == nil { errorMessage = snapshot == nil ? "课程数据暂不可用" : nil }
         } catch {
             errorMessage = "本机数据无法读取：\(error.localizedDescription)"
         }
     }
 
-    func refresh() async {
+    func authenticationDidChange(allowPrivateCache: Bool, allowLocalSchedules: Bool = true) {
+        refreshGeneration += 1
+        isLoading = false
+        snapshot = nil
+        wallpaperData = nil
+        closeActions()
+        load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules)
+    }
+
+    @discardableResult
+    func refresh() async -> Bool {
+        guard let requestCookie = repository.sessionCookie else { return false }
         refreshGeneration += 1
         let generation = refreshGeneration
         isLoading = true
         defer { if generation == refreshGeneration { isLoading = false } }
         do {
             let fresh = try await repository.refresh(on: clock.now)
-            guard generation == refreshGeneration else { return }
+            guard generation == refreshGeneration, repository.sessionCookie == requestCookie else { return false }
             snapshot = fresh
+            reloadSchedules()
             now = clock.now
             wallpaperData = (try? wallpaperStore.load()) ?? WallpaperStore.decodeDataURL(fresh.profile.homeWallpaperDataURL)
             errorMessage = nil
+            return false
         } catch {
-            guard generation == refreshGeneration else { return }
+            guard generation == refreshGeneration else { return false }
+            guard repository.sessionCookie == requestCookie || repository.sessionCookie == nil else { return false }
+            reloadSchedules()
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 snapshot = nil
                 wallpaperData = nil
                 closeActions()
+                errorMessage = apiError.localizedDescription
+                return true
             }
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
-    func tick() -> Bool {
+    func tick(allowLocalSchedules: Bool = true) -> Bool {
         let previous = CourseScheduleCalculator.dateKey(now)
         now = clock.now
         let changed = previous != CourseScheduleCalculator.dateKey(now)
         if changed { closeActions() }
+        if changed && allowLocalSchedules { reloadSchedules() }
         return changed
     }
 
@@ -103,34 +137,37 @@ final class TodayViewModel: ObservableObject {
     func closeActions() { openScheduleID = nil }
 
     func saveSchedule(id: Int?, title: String, date: Date, time: String) throws {
+        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后编辑本机安排。") }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 200 else { throw TodayInputError.invalidTitle }
         let parts = time.split(separator: ":")
         guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
               let hour = Int(parts[0]), let minute = Int(parts[1]),
               (0...23).contains(hour), (0...59).contains(minute) else { throw TodayInputError.invalidTime }
-        if let id, snapshot?.schedules.contains(where: { $0.id == id }) != true {
+        if let id, !localSchedules.contains(where: { $0.id == id }) {
             throw TodayInputError.missingSchedule
         }
-        let nextID = (snapshot?.schedules.map(\.id).filter { $0 < 0 }.min() ?? 0) - 1
-        try repository.saveSchedule(CustomSchedule(id: id ?? nextID, title: name,
+        try repository.saveSchedule(CustomSchedule(id: id ?? 0, title: name,
                                                    date: CourseScheduleCalculator.dateKey(date), time: time))
-        snapshot = try repository.cached()
+        reloadSchedules()
         closeActions()
     }
 
     func deleteSchedule(id: Int) throws {
+        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后编辑本机安排。") }
         try repository.deleteSchedule(id: id)
-        snapshot = try repository.cached()
+        reloadSchedules()
         closeActions()
     }
 
     func setWallpaper(_ data: Data) throws {
+        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后设置壁纸。") }
         try wallpaperStore.save(data)
         wallpaperData = data
     }
 
     func removeWallpaper() throws {
+        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后设置壁纸。") }
         try wallpaperStore.remove()
         if var profile = snapshot?.profile {
             profile.homeWallpaperDataURL = nil

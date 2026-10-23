@@ -8,7 +8,7 @@ struct TodayView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var editor: ScheduleEditorRoute?
-    @State private var pendingDelete: CustomSchedule?
+    @State private var pendingDelete: PendingScheduleDelete?
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showAvatar = false
@@ -16,22 +16,30 @@ struct TodayView: View {
 
     init(state: AppState) {
         self.state = state
-        let repository = DiskCourseRepository(api: state.api, session: state.sessionStore)
+        let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
+                                              account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore)
         _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
     }
 
     private var dark: Bool { colorScheme == .dark }
-    private var avatarData: Data? { WallpaperStore.decodeDataURL(model.profile.avatarDataURL) }
+    private var mayShowLocalSchedules: Bool {
+        state.isAuthenticated
+    }
+    private var visibleProfile: TodayProfile {
+        state.isAuthenticated ? model.profile : TodayProfile(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil)
+    }
+    private var avatarData: Data? { WallpaperStore.decodeDataURL(visibleProfile.avatarDataURL) }
     private var entries: [TodayEntry] {
-        (model.courses.map(TodayEntry.course) + model.schedules.map(TodayEntry.schedule))
+        ((state.isAuthenticated ? model.courses : []).map(TodayEntry.course) +
+         (state.isAuthenticated ? model.schedules : []).map(TodayEntry.schedule))
             .sorted { ($0.sortTime, $0.id) < ($1.sortTime, $1.id) }
     }
 
     var body: some View {
         ZStack {
             TodayStyle.background(dark).ignoresSafeArea()
-            if let data = model.wallpaperData, let image = UIImage(data: data) {
+            if state.isAuthenticated, let data = model.wallpaperData, let image = UIImage(data: data) {
                 GeometryReader { geometry in
                     Image(uiImage: image)
                         .resizable()
@@ -52,7 +60,7 @@ struct TodayView: View {
                 HStack(spacing: 8) {
                     Text("今日安排")
                         .font(.system(size: 19, weight: .heavy))
-                    if !model.schedules.isEmpty {
+                    if state.isAuthenticated && !model.schedules.isEmpty {
                         Text("今天有 \(model.schedules.count) 项自定义安排")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x1d4ed8))
@@ -61,29 +69,35 @@ struct TodayView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    Button { editor = .new } label: {
-                        Label("添加安排", systemImage: "plus").font(.system(size: 14, weight: .medium))
+                    if state.isAuthenticated {
+                        Button { editor = ScheduleEditorRoute(schedule: nil, revision: state.authenticationRevision) } label: {
+                            Label("添加安排", systemImage: "plus").font(.system(size: 14, weight: .medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x2563eb))
+                        .padding(.horizontal, 8).padding(.vertical, 8)
+                        .background(TodayStyle.color(dark ? 0x17263c : 0xe8f1ff), in: RoundedRectangle(cornerRadius: 8))
+                        .disabled(!model.canEditSchedules)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(TodayStyle.color(dark ? 0x9bc3ff : 0x2563eb))
-                    .padding(.horizontal, 8).padding(.vertical, 8)
-                    .background(TodayStyle.color(dark ? 0x17263c : 0xe8f1ff), in: RoundedRectangle(cornerRadius: 8))
-                    .disabled(!model.canEditSchedules)
                 }
                 .padding(.top, 25)
-                if !entries.isEmpty && (model.active != nil || model.upcoming != nil || model.schedules.isEmpty) {
+                if !entries.isEmpty && (state.isAuthenticated && (model.active != nil || model.upcoming != nil) || model.schedules.isEmpty) {
                     statusCard
                         .padding(.top, 5).padding(.bottom, 9)
                 }
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        if !model.hasCourseData {
-                            HStack {
-                                Text(model.errorMessage ?? "课程数据暂不可用")
+                        if !state.isAuthenticated || !model.hasCourseData {
+                            HStack(spacing: 12) {
+                                Text(courseMessage)
                                     .font(.system(size: 14))
                                     .foregroundStyle(TodayStyle.secondary(dark))
                                 Spacer()
-                                Button("重试") { Task { await model.refresh() } }
+                                if state.isAuthenticated {
+                                    Button("重试") { Task { await refreshCourses() } }
+                                } else if state.authenticationStatus != .verifying {
+                                    Button("登录") { state.isLoginPresented = true }
+                                }
                             }
                             .padding(.top, 12)
                         } else if let error = model.errorMessage {
@@ -99,8 +113,14 @@ struct TodayView: View {
                             case .schedule(let schedule):
                                 ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
                                                  dark: dark, model: model,
-                                                 onEdit: { editor = .existing(schedule) },
-                                                 onDelete: { pendingDelete = schedule })
+                                                 onEdit: {
+                                                     editor = ScheduleEditorRoute(schedule: schedule,
+                                                                                  revision: state.authenticationRevision)
+                                                 },
+                                                 onDelete: {
+                                                     pendingDelete = PendingScheduleDelete(schedule: schedule,
+                                                                                           revision: state.authenticationRevision)
+                                                 })
                             }
                         }
                     }
@@ -114,36 +134,50 @@ struct TodayView: View {
             .padding(.top, 26)
         }
         .task {
-            model.load()
-            await model.refresh()
+            model.load(allowPrivateCache: state.isAuthenticated, allowLocalSchedules: mayShowLocalSchedules)
+            if state.isAuthenticated { await refreshCourses() }
             while !Task.isCancelled {
                 let remainder = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
                 let delay = 60 - remainder + 0.05
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { break }
-                if model.tick() { await model.refresh() }
+                if model.tick(allowLocalSchedules: mayShowLocalSchedules) && state.isAuthenticated { await refreshCourses() }
             }
+        }
+        .onChange(of: state.authenticationRevision) { _, _ in
+            editor = nil
+            pendingDelete = nil
+            selectedPhoto = nil
+            showAvatar = false
+            model.authenticationDidChange(allowPrivateCache: state.isAuthenticated,
+                                          allowLocalSchedules: mayShowLocalSchedules)
+            if state.isAuthenticated { Task { await refreshCourses() } }
         }
         .onChange(of: state.selectedTab) { _, tab in if tab != .today { model.closeActions() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                let changed = model.tick()
-                if changed { Task { await model.refresh() } }
+                let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
+                if changed && state.isAuthenticated { Task { await refreshCourses() } }
+                if state.authenticationStatus == .offline { Task { await state.retrySessionVerification() } }
             }
         }
         .onDisappear { model.closeActions() }
         .sheet(item: $editor) { route in
             ScheduleEditorView(schedule: route.schedule, now: model.now) { id, title, date, time in
+                _ = try state.requireCurrentAccount(revision: route.revision)
                 try model.saveSchedule(id: id, title: title, date: date, time: time)
             }
             .presentationDetents([.medium, .large])
         }
-        .confirmationDialog("删除“\(pendingDelete?.title ?? "")”？", isPresented: Binding(
+        .confirmationDialog("删除“\(pendingDelete?.schedule.title ?? "")”？", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }
         )) {
             Button("删除安排", role: .destructive) {
-                if let id = pendingDelete?.id {
-                    do { try model.deleteSchedule(id: id) }
+                if let pendingDelete {
+                    do {
+                        _ = try state.requireCurrentAccount(revision: pendingDelete.revision)
+                        try model.deleteSchedule(id: pendingDelete.schedule.id)
+                    }
                     catch { localError = error.localizedDescription }
                 }
                 pendingDelete = nil
@@ -154,9 +188,13 @@ struct TodayView: View {
         } message: { Text(localError ?? "") }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images)
         .onChange(of: selectedPhoto) { _, item in
+            let revision = state.authenticationRevision
             Task {
                 guard let data = try? await item?.loadTransferable(type: Data.self) else { return }
-                do { try model.setWallpaper(data) }
+                do {
+                    _ = try state.requireCurrentAccount(revision: revision)
+                    try model.setWallpaper(data)
+                }
                 catch { localError = error.localizedDescription }
             }
         }
@@ -167,13 +205,14 @@ struct TodayView: View {
                     .background(TodayStyle.background(dark))
             }
         }
+        .sheet(isPresented: $state.isLoginPresented) { LoginView(state: state) }
     }
 
     private var hero: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 badge("今日 · \(greeting)")
-                Text(model.profile.displayName)
+                Text(visibleProfile.displayName)
                     .font(.system(size: 31, weight: .heavy))
                     .foregroundStyle(TodayStyle.color(dark ? 0xffffff : 0x172033))
                     .lineLimit(1)
@@ -185,7 +224,7 @@ struct TodayView: View {
                     if let avatarData, let image = UIImage(data: avatarData) {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
-                        Text(model.profile.displayName == "航的助手" ? "航" : String(model.profile.displayName.suffix(1)))
+                        Text(visibleProfile.displayName == "航的助手" ? "航" : String(visibleProfile.displayName.suffix(1)))
                             .font(.system(size: 28, weight: .bold))
                     }
                 }
@@ -209,12 +248,38 @@ struct TodayView: View {
             TodayStyle.color(dark ? 0xffffff : 0x0f172a, alpha: 16.0 / 255)))
         .shadow(color: TodayStyle.color(0x0f172a, alpha: 18.0 / 255), radius: 11, x: 0, y: 8)
         .contextMenu {
+            if state.isAuthenticated {
+                Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right") {
+                    Task { await state.logout() }
+                }
+            } else {
+                Button("登录", systemImage: "person.crop.circle") { state.isLoginPresented = true }
+            }
             Button("更换今日壁纸", systemImage: "photo") { showPhotoPicker = true }
-                .disabled(!model.canEditSchedules)
+                .disabled(!state.isAuthenticated)
             Button("使用默认背景", systemImage: "rectangle.slash") {
                 do { try model.removeWallpaper() } catch { localError = error.localizedDescription }
             }
-            .disabled(!model.canEditSchedules || model.wallpaperData == nil)
+            .disabled(!state.isAuthenticated || model.wallpaperData == nil)
+        }
+    }
+
+    private var courseMessage: String {
+        switch state.authenticationStatus {
+        case .signedOut: return "登录后查看今日课程"
+        case .verifying: return "正在验证登录状态…"
+        case .offline: return "网络暂不可用，登录状态尚未验证"
+        case .expired: return "登录状态已失效，请重新登录"
+        case .signedIn: return model.errorMessage ?? "今天暂无课程"
+        }
+    }
+
+    private func refreshCourses() async {
+        let revision = state.authenticationRevision
+        let unauthorized = await model.refresh()
+        if unauthorized && revision == state.authenticationRevision && state.isAuthenticated &&
+            !state.isLoginSubmitting && (try? state.requireCurrentAccount(revision: revision)) == nil {
+            state.handleUnauthorized()
         }
     }
 
@@ -276,13 +341,13 @@ private enum TodayEntry: Identifiable {
     }
 }
 
-private enum ScheduleEditorRoute: Identifiable {
-    case new, existing(CustomSchedule)
-    var id: String {
-        switch self { case .new: "new"; case .existing(let value): "edit-\(value.id)" }
-    }
-    var schedule: CustomSchedule? {
-        if case .existing(let value) = self { return value }
-        return nil
-    }
+private struct ScheduleEditorRoute: Identifiable {
+    let schedule: CustomSchedule?
+    let revision: Int
+    var id: String { "\(revision)-\(schedule?.id ?? 0)" }
+}
+
+private struct PendingScheduleDelete {
+    let schedule: CustomSchedule
+    let revision: Int
 }

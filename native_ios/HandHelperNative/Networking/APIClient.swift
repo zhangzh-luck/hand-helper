@@ -52,12 +52,14 @@ final class APIClient: APIClientProtocol {
 
         var request = URLRequest(url: url, timeoutInterval: configuration.timeout)
         request.httpMethod = method
+        request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if ["POST", "PUT", "PATCH", "DELETE"].contains(method) {
             let port = configuration.baseURL.port.map { ":\($0)" } ?? ""
             request.setValue("\(scheme)://\(host)\(port)", forHTTPHeaderField: "Origin")
         }
-        if let cookie = sessionStore.cookie { request.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        let requestCookie = sessionStore.cookie
+        if let requestCookie { request.setValue(requestCookie, forHTTPHeaderField: "Cookie") }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -73,24 +75,25 @@ final class APIClient: APIClientProtocol {
             throw APIError.connection
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        if let raw = http.value(forHTTPHeaderField: "Set-Cookie"),
-           let first = raw.split(separator: ";", maxSplits: 1).first,
-           first.contains("=") {
-            sessionStore.save(cookie: String(first))
-        }
-
         let envelope: APIEnvelope<Value>
         do { envelope = try decoder.decode(APIEnvelope<Value>.self, from: data) }
         catch { throw APIError.invalidData(status: http.statusCode) }
         let serverMessage = envelope.error?.message
         if http.statusCode == 401 {
-            if !(preserveSessionOnPasswordError && serverMessage == "当前密码错误") {
+            if sessionStore.cookie == requestCookie &&
+                !(preserveSessionOnPasswordError && serverMessage == "当前密码错误") {
                 sessionStore.clear()
             }
             throw APIError.unauthorized(message: serverMessage ?? "登录状态已失效")
         }
         guard (200..<300).contains(http.statusCode), envelope.success else {
             throw APIError.server(status: http.statusCode, message: serverMessage ?? "请求失败（HTTP \(http.statusCode)）。")
+        }
+        if sessionStore.cookie == requestCookie,
+           let raw = http.value(forHTTPHeaderField: "Set-Cookie"),
+           let first = raw.split(separator: ";", maxSplits: 1).first,
+           first.contains("=") {
+            sessionStore.save(cookie: String(first))
         }
         if envelope.data == nil, Value.self == APIEmptyResponse.self {
             return APIEmptyResponse() as! Value

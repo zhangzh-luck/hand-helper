@@ -9,6 +9,7 @@ struct HandHelperNativeApp: App {
             RootView()
                 .environmentObject(state)
                 .preferredColorScheme(state.appearance.colorScheme)
+                .task { await state.restoreSession() }
         }
     }
 }

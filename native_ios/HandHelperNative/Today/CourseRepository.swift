@@ -21,8 +21,12 @@ struct CourseSnapshot: Codable, Equatable {
 
 @MainActor
 protocol CourseRepository {
+    var sessionCookie: String? { get }
+    var canEditSchedules: Bool { get }
     func cached() throws -> CourseSnapshot?
     func refresh(on date: Date) async throws -> CourseSnapshot
+    func localSchedules(on date: Date) throws -> [CustomSchedule]
+    func allLocalSchedules() throws -> [CustomSchedule]
     func saveSchedule(_ schedule: CustomSchedule) throws
     func deleteSchedule(id: Int) throws
     func saveManualRule(_ rule: ManualCourseRule) throws
@@ -37,13 +41,21 @@ final class DiskCourseRepository: CourseRepository {
     private let directory: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let localStore: LocalScheduleStore
+    var sessionCookie: String? { session.cookie }
+    var canEditSchedules: Bool { (try? account.requireOwner(cookie: session.cookie)) != nil }
+    private let account: VerifiedAccountContext
 
-    init(api: any APIClientProtocol, session: any SessionStore, baseURL: URL = APIConfiguration.development.baseURL,
-         directory: URL? = nil) {
+    init(api: any APIClientProtocol, session: any SessionStore, account: VerifiedAccountContext,
+         baseURL: URL = APIConfiguration.development.baseURL,
+         directory: URL? = nil, localStore: LocalScheduleStore? = nil) {
         self.api = api
         self.session = session
+        self.account = account
         self.baseURL = baseURL
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        self.localStore = localStore ?? LocalScheduleStore(session: session, account: account,
+                                                           baseURL: baseURL, directory: directory)
     }
 
     private var file: URL? {
@@ -53,21 +65,33 @@ final class DiskCourseRepository: CourseRepository {
     }
 
     func cached() throws -> CourseSnapshot? {
+        _ = try account.requireOwner(cookie: session.cookie)
         guard let file, FileManager.default.fileExists(atPath: file.path) else { return nil }
         return try decoder.decode(CourseSnapshot.self, from: Data(contentsOf: file))
     }
 
     private func write(_ snapshot: CourseSnapshot) throws {
+        _ = try account.requireOwner(cookie: session.cookie)
         guard let file else { throw APIError.unauthorized(message: "请先登录后查看本机安排。") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try encoder.encode(snapshot).write(to: file, options: .atomic)
     }
 
     func refresh(on date: Date) async throws -> CourseSnapshot {
-        guard session.cookie != nil else { throw APIError.unauthorized(message: "请先登录后查看今日课程。") }
-        let _: AuthIdentity = try await api.request("GET", path: "/api/v1/auth/me", body: nil, preserveSessionOnPasswordError: false)
+        guard let originalCookie = session.cookie else { throw APIError.unauthorized(message: "请先登录后查看今日课程。") }
+        let expectedOwner = try account.requireOwner(cookie: originalCookie)
+        let identity: AuthIdentity = try await api.request("GET", path: "/api/v1/auth/me", body: nil, preserveSessionOnPasswordError: false)
+        guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
+        guard expectedOwner == "user:\(identity.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())" else {
+            session.clear()
+            throw APIError.unauthorized(message: "账号身份已变化")
+        }
         let sessions: [CourseSession] = try await api.request("GET", path: "/api/v1/timetable", body: nil, preserveSessionOnPasswordError: false)
+        guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
         var snapshot = (try? cached()) ?? .empty
+        if snapshot.serverSchedulesImported && !snapshot.schedules.isEmpty {
+            try? localStore.importServerOnce(snapshot.schedules)
+        }
         snapshot.calendarSessions = sessions
         snapshot.lastRefreshDate = CourseScheduleCalculator.dateKey(date)
         // These are the same timetable inputs Flutter uses for local manual
@@ -82,10 +106,13 @@ final class DiskCourseRepository: CourseRepository {
            let imported: [CustomSchedule] = try? await api.request("GET", path: "/api/v1/custom-schedules", body: nil, preserveSessionOnPasswordError: false) {
             let existing = Set(snapshot.schedules.map(\.id))
             let deleted = Set(snapshot.deletedRemoteScheduleIDs)
-            snapshot.schedules += imported.filter { !existing.contains($0.id) && !deleted.contains($0.id) }
+            let eligible = imported.filter { !deleted.contains($0.id) }
+            guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
+            try localStore.importServerOnce(eligible)
+            snapshot.schedules += eligible.filter { !existing.contains($0.id) }
             snapshot.serverSchedulesImported = true
         }
-        guard session.cookie != nil else {
+        guard session.cookie == originalCookie else {
             throw APIError.unauthorized(message: "登录状态已失效")
         }
         // MainActor methods can interleave at each await. Keep edits made while
@@ -105,20 +132,15 @@ final class DiskCourseRepository: CourseRepository {
     }
 
     func saveSchedule(_ schedule: CustomSchedule) throws {
-        var snapshot = try cached() ?? .empty
-        snapshot.schedules.removeAll { $0.id == schedule.id }
-        snapshot.schedules.append(schedule)
-        try write(snapshot)
+        try localStore.save(schedule)
     }
 
     func deleteSchedule(id: Int) throws {
-        var snapshot = try cached() ?? .empty
-        snapshot.schedules.removeAll { $0.id == id }
-        if id > 0 && !snapshot.deletedRemoteScheduleIDs.contains(id) {
-            snapshot.deletedRemoteScheduleIDs.append(id)
-        }
-        try write(snapshot)
+        try localStore.delete(id: id)
     }
+
+    func localSchedules(on date: Date) throws -> [CustomSchedule] { try localStore.forDate(date) }
+    func allLocalSchedules() throws -> [CustomSchedule] { try localStore.all() }
 
     func saveManualRule(_ rule: ManualCourseRule) throws {
         var snapshot = try cached() ?? .empty
