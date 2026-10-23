@@ -1,8 +1,27 @@
 import CryptoKit
 import XCTest
+import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    @MainActor
+    func testTodayAvatarPreviewRequiresVerifiedAccountAndValidImage() throws {
+        let avatar = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        XCTAssertNil(TodayAvatarPreviewRoute.make(avatarData: nil,
+            canAccessPrivateData: true, revision: 7))
+        XCTAssertNil(TodayAvatarPreviewRoute.make(avatarData: avatar,
+            canAccessPrivateData: false, revision: 7))
+        XCTAssertNil(TodayAvatarPreviewRoute.make(avatarData: Data([1, 2, 3]),
+            canAccessPrivateData: true, revision: 7))
+        let route = try XCTUnwrap(TodayAvatarPreviewRoute.make(avatarData: avatar,
+            canAccessPrivateData: true, revision: 7))
+        XCTAssertEqual(route.revision, 7)
+        XCTAssertEqual(route.image.size, CGSize(width: 2, height: 2))
+    }
+
     func testWallpaperDataURLDecoding() {
         XCTAssertEqual(WallpaperStore.decodeDataURL("data:image/png;base64,AQID"), Data([1, 2, 3]))
         XCTAssertNil(WallpaperStore.decodeDataURL("data:image/png;base64,not-base64!"))

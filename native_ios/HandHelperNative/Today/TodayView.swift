@@ -14,7 +14,7 @@ struct TodayView: View {
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var showProfile = false
+    @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var localError: String?
 
     init(state: AppState) {
@@ -31,6 +31,11 @@ struct TodayView: View {
     }
     private var displayName: String { state.currentProfile.resolvedDisplayName }
     private var avatarData: Data? { state.currentProfile.avatarData }
+    private var avatarPreviewRoute: TodayAvatarPreviewRoute? {
+        TodayAvatarPreviewRoute.make(avatarData: avatarData,
+                                     canAccessPrivateData: state.canAccessPrivateData,
+                                     revision: state.authenticationRevision)
+    }
     private var entries: [TodayEntry] {
         ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
          (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule))
@@ -116,7 +121,7 @@ struct TodayView: View {
             editor = nil
             pendingDelete = nil
             selectedPhoto = nil
-            showProfile = false
+            avatarPreview = nil
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
@@ -163,8 +168,15 @@ struct TodayView: View {
                 catch { localError = error.localizedDescription }
             }
         }
-        .sheet(isPresented: $showProfile) {
-            ProfileView(state: state, revision: state.authenticationRevision)
+        .fullScreenCover(item: $avatarPreview) { route in
+            Group {
+                if route.revision == state.authenticationRevision && state.canAccessPrivateData {
+                    TodayAvatarPreviewView(image: route.image)
+                } else {
+                    Color.black.ignoresSafeArea()
+                }
+            }
+            .presentationBackground(.clear)
         }
     }
 
@@ -278,7 +290,7 @@ struct TodayView: View {
     }
 
     private var avatarButton: some View {
-        Button { showProfile = true } label: {
+        Button { avatarPreview = avatarPreviewRoute } label: {
             Group {
                 if let avatarData, let image = UIImage(data: avatarData) {
                     Image(uiImage: image).resizable().scaledToFill()
@@ -293,7 +305,8 @@ struct TodayView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("打开个人资料")
+        .disabled(avatarPreviewRoute == nil)
+        .accessibilityLabel(avatarPreviewRoute == nil ? "尚未设置头像" : "查看头像大图")
     }
 
     private var courseMessage: String {
@@ -367,4 +380,54 @@ private struct ScheduleEditorRoute: Identifiable {
 private struct PendingScheduleDelete {
     let schedule: CustomSchedule
     let revision: Int
+}
+
+struct TodayAvatarPreviewRoute: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let revision: Int
+
+    static func make(avatarData: Data?, canAccessPrivateData: Bool,
+                     revision: Int) -> TodayAvatarPreviewRoute? {
+        guard canAccessPrivateData, let avatarData,
+              let image = UIImage(data: avatarData) else { return nil }
+        return TodayAvatarPreviewRoute(image: image, revision: revision)
+    }
+}
+
+private struct TodayAvatarPreviewView: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.84).ignoresSafeArea()
+            GeometryReader { geometry in
+                let side = max(1, min(geometry.size.width - 40,
+                                      geometry.size.height - 140, 520))
+                VStack(spacing: 24) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: side, height: side)
+                        .background(Color.black.opacity(0.25))
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .strokeBorder(.white, lineWidth: 3)
+                        }
+
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(width: 54, height: 54)
+                            .background(.white, in: Circle())
+                    }
+                    .accessibilityLabel("关闭头像预览")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
 }
