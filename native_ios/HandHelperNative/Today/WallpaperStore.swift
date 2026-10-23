@@ -37,6 +37,8 @@ final class WallpaperStore {
 
     nonisolated static func decodeDataURL(_ source: String?) -> Data? {
         guard let source, let comma = source.firstIndex(of: ",") else { return nil }
-        return Data(base64Encoded: source[source.index(after: comma)...])
+        let start = source.index(after: comma)
+        let encoded = String(source[start...])
+        return Data(base64Encoded: encoded)
     }
 }

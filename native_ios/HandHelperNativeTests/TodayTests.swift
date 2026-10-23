@@ -2,6 +2,12 @@ import XCTest
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testWallpaperDataURLDecoding() {
+        XCTAssertEqual(WallpaperStore.decodeDataURL("data:image/png;base64,AQID"), Data([1, 2, 3]))
+        XCTAssertNil(WallpaperStore.decodeDataURL("data:image/png;base64,not-base64!"))
+        XCTAssertNil(WallpaperStore.decodeDataURL("data:image/png;base64"))
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(secondsFromGMT: 0)!
