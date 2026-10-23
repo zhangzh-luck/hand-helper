@@ -14,7 +14,7 @@ struct TodayView: View {
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var showAvatar = false
+    @State private var showProfile = false
     @State private var localError: String?
 
     init(state: AppState) {
@@ -29,10 +29,8 @@ struct TodayView: View {
     private var mayShowLocalSchedules: Bool {
         state.canAccessPrivateData
     }
-    private var visibleProfile: TodayProfile {
-        state.canAccessPrivateData ? model.profile : TodayProfile(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil)
-    }
-    private var avatarData: Data? { WallpaperStore.decodeDataURL(visibleProfile.avatarDataURL) }
+    private var displayName: String { state.currentProfile.resolvedDisplayName }
+    private var avatarData: Data? { state.currentProfile.avatarData }
     private var entries: [TodayEntry] {
         ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
          (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule))
@@ -118,7 +116,7 @@ struct TodayView: View {
             editor = nil
             pendingDelete = nil
             selectedPhoto = nil
-            showAvatar = false
+            showProfile = false
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
@@ -165,12 +163,8 @@ struct TodayView: View {
                 catch { localError = error.localizedDescription }
             }
         }
-        .sheet(isPresented: $showAvatar) {
-            if let avatarData, let image = UIImage(data: avatarData) {
-                Image(uiImage: image).resizable().scaledToFit()
-                    .padding(20)
-                    .background(TodayStyle.background)
-            }
+        .sheet(isPresented: $showProfile) {
+            ProfileView(state: state, revision: state.authenticationRevision)
         }
     }
 
@@ -273,7 +267,7 @@ struct TodayView: View {
             Text("今日 · \(greeting)")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text(visibleProfile.displayName)
+            Text(displayName)
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -284,12 +278,12 @@ struct TodayView: View {
     }
 
     private var avatarButton: some View {
-        Button { if avatarData != nil { showAvatar = true } } label: {
+        Button { showProfile = true } label: {
             Group {
                 if let avatarData, let image = UIImage(data: avatarData) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
-                    Text(visibleProfile.displayName == "航的助手" ? "航" : String(visibleProfile.displayName.suffix(1)))
+                    Text(displayName == "航的助手" ? "航" : String(displayName.suffix(1)))
                         .font(.title.weight(.bold))
                         .foregroundStyle(Color.accentColor)
                 }
@@ -299,7 +293,7 @@ struct TodayView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(avatarData == nil)
+        .accessibilityLabel("打开个人资料")
     }
 
     private var courseMessage: String {

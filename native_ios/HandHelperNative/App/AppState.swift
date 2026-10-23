@@ -47,7 +47,8 @@ final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .today
     @Published private(set) var appearance: AppearanceMode
     @Published var isDetailPresented = false
-    @Published var homeAvatar: UIImage?
+    @Published private(set) var currentProfile: LocalProfile = .empty
+    @Published private(set) var profileError: String?
     @Published private(set) var isAuthenticated = false
     @Published private(set) var authenticationStatus: AuthenticationStatus = .signedOut
     @Published private(set) var authenticationRevision = 0
@@ -60,6 +61,8 @@ final class AppState: ObservableObject {
     let verifiedAccount = VerifiedAccountContext()
     private let authentication: any AuthenticationClientProtocol
     private let preferences: UserDefaults
+    private let profileDirectory: URL?
+    private var cachedHomeAvatar: UIImage?
     private var authenticationGeneration = 0
     private var rotationExpectedOwner: String?
     private var verifyingCookie: String?
@@ -71,10 +74,12 @@ final class AppState: ObservableObject {
         api: (any APIClientProtocol)? = nil,
         sessionStore: any SessionStore = KeychainSessionStore(),
         authentication: (any AuthenticationClientProtocol)? = nil,
-        preferences: UserDefaults = .standard
+        preferences: UserDefaults = .standard,
+        profileDirectory: URL? = nil
     ) {
         self.sessionStore = sessionStore
         self.preferences = preferences
+        self.profileDirectory = profileDirectory
         appearance = AppearanceMode(rawValue: preferences.string(forKey: Self.appearanceKey) ?? "") ?? .system
         authenticationStatus = preferences.bool(forKey: Self.pendingCredentialRemovalKey)
             ? .signedOut : (sessionStore.cookie == nil ? .signedOut : .verifying)
@@ -93,6 +98,54 @@ final class AppState: ObservableObject {
     func setAppearance(_ mode: AppearanceMode) {
         appearance = mode
         preferences.set(mode.rawValue, forKey: Self.appearanceKey)
+    }
+
+    var homeAvatar: UIImage? { cachedHomeAvatar }
+
+    private var profileStore: LocalProfileStore {
+        LocalProfileStore(session: sessionStore, account: verifiedAccount, directory: profileDirectory)
+    }
+
+    private func applyProfile(_ profile: LocalProfile) {
+        cachedHomeAvatar = Self.tabAvatar(from: profile.avatarData)
+        currentProfile = profile
+    }
+
+    private func clearProfile() {
+        cachedHomeAvatar = nil
+        currentProfile = .empty
+        profileError = nil
+    }
+
+    private func loadLocalProfile() {
+        do {
+            applyProfile(try profileStore.load())
+            profileError = nil
+        } catch {
+            applyProfile(.empty)
+            profileError = "本机个人资料无法读取：\(error.localizedDescription)"
+        }
+    }
+
+    func saveLocalProfile(_ profile: LocalProfile, revision: Int) throws {
+        _ = try requireCurrentAccount(revision: revision)
+        let saved = try profileStore.save(profile)
+        _ = try requireCurrentAccount(revision: revision)
+        applyProfile(saved)
+        profileError = nil
+    }
+
+    private static func tabAvatar(from data: Data?) -> UIImage? {
+        guard let data, let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
+        let side: CGFloat = 28
+        let scale = max(side / image.size.width, side / image.size.height)
+        let width = image.size.width * scale
+        let height = image.size.height * scale
+        let imageRect = CGRect(x: (side - width) / 2, y: (side - height) / 2, width: width, height: height)
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).addClip()
+            image.draw(in: imageRect)
+        }
     }
 
     func requireCurrentAccount(revision: Int) throws -> String {
@@ -146,6 +199,7 @@ final class AppState: ObservableObject {
     func restoreSession() async {
         guard !didStartRestore else { return }
         didStartRestore = true
+        clearProfile()
         if preferences.bool(forKey: Self.pendingCredentialRemovalKey) {
             _ = retryCredentialRemoval()
             authenticationStatus = .signedOut
@@ -179,6 +233,7 @@ final class AppState: ObservableObject {
             authenticationStatus = .signedIn(identity.username)
             isAuthenticated = true
             authenticationRevision += 1
+            loadLocalProfile()
         } catch {
             guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
             if let apiError = error as? APIError, case .unauthorized = apiError {
@@ -233,6 +288,7 @@ final class AppState: ObservableObject {
             authenticationStatus = .signedIn(result.identity.username)
             isAuthenticated = true
             authenticationRevision += 1
+            loadLocalProfile()
         } catch {
             guard generation == authenticationGeneration, !Task.isCancelled else { return }
             if isAuthenticated && sessionStore.cookie == nil { handleUnauthorized() }
@@ -252,6 +308,7 @@ final class AppState: ObservableObject {
         verifyingCookie = cookie
         verifiedAccount.clear()
         isAuthenticated = false
+        clearProfile()
         authenticationStatus = .verifying
         authenticationRevision += 1
         do {
@@ -273,6 +330,7 @@ final class AppState: ObservableObject {
             isAuthenticated = true
             authenticationStatus = .signedIn(identity.username)
             authenticationRevision += 1
+            loadLocalProfile()
         } catch {
             guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
             if let apiError = error as? APIError, case .unauthorized = apiError {
@@ -297,7 +355,7 @@ final class AppState: ObservableObject {
         isDetailPresented = false
         authenticationStatus = .signedOut
         isAuthenticated = false
-        homeAvatar = nil
+        clearProfile()
         loginError = nil
         authenticationRevision += 1
         _ = retryCredentialRemoval()
@@ -314,7 +372,7 @@ final class AppState: ObservableObject {
         verifyingCookie = nil
         selectedTab = .today
         isDetailPresented = false
-        homeAvatar = nil
+        clearProfile()
         authenticationStatus = .expired
         authenticationRevision += 1
         _ = retryCredentialRemoval()
