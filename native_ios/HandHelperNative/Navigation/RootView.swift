@@ -31,7 +31,8 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     init(state: AppState) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
-            let host = UIHostingController(rootView: PlaceholderPage(tab: tab))
+            let page = tab == .today ? AnyView(TodayView(state: state)) : AnyView(PlaceholderPage(tab: tab))
+            let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
             host.tabBarItem.accessibilityLabel = tab.title
             return host

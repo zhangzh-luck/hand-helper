@@ -1,6 +1,6 @@
 import Foundation
 
-enum APIError: Error, Equatable {
+enum APIError: LocalizedError, Equatable {
     case invalidConfiguration
     case invalidResponse
     case invalidData(status: Int)
@@ -18,4 +18,6 @@ enum APIError: Error, Equatable {
         case .unauthorized(let message), .server(_, let message): message
         }
     }
+
+    var errorDescription: String? { message }
 }
