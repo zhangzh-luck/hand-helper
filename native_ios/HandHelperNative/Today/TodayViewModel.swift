@@ -92,35 +92,51 @@ final class TodayViewModel: ObservableObject {
 
     @discardableResult
     func refresh() async -> Bool {
-        guard let requestCookie = repository.sessionCookie else { return false }
+        (await refreshInternal(strict: false, isCurrent: { true })).unauthorized
+    }
+
+    func refreshStrict(isCurrent: @escaping @MainActor () -> Bool) async -> (unauthorized: Bool, completed: Bool) {
+        await refreshInternal(strict: true, isCurrent: isCurrent)
+    }
+
+    private func refreshInternal(strict: Bool, isCurrent: @escaping @MainActor () -> Bool)
+        async -> (unauthorized: Bool, completed: Bool) {
+        guard let requestCookie = repository.sessionCookie, isCurrent() else { return (false, false) }
         refreshGeneration += 1
         let generation = refreshGeneration
         isLoading = true
         defer { if generation == refreshGeneration { isLoading = false } }
         do {
-            let fresh = try await repository.refresh(on: clock.now)
-            guard generation == refreshGeneration, repository.sessionCookie == requestCookie else { return false }
+            let fresh: CourseSnapshot
+            if strict {
+                fresh = try await repository.refreshStrict(on: clock.now, isCurrent: isCurrent)
+            } else {
+                fresh = try await repository.refresh(on: clock.now)
+            }
+            guard generation == refreshGeneration, repository.sessionCookie == requestCookie,
+                  isCurrent() else { return (false, false) }
             snapshot = fresh
             reloadSchedules()
             now = clock.now
             wallpaperData = (try? wallpaperStore.load()) ?? WallpaperStore.decodeDataURL(fresh.profile.homeWallpaperDataURL)
             errorMessage = nil
-            return false
+            return (false, true)
         } catch {
-            guard generation == refreshGeneration else { return false }
-            guard repository.sessionCookie == requestCookie || repository.sessionCookie == nil else { return false }
+            guard generation == refreshGeneration, isCurrent() else { return (false, false) }
+            guard repository.sessionCookie == requestCookie || repository.sessionCookie == nil else {
+                return (false, false)
+            }
             reloadSchedules()
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 snapshot = nil
                 wallpaperData = nil
                 errorMessage = apiError.localizedDescription
-                return true
+                return (true, false)
             }
             errorMessage = error.localizedDescription
-            return false
+            return (false, false)
         }
     }
-
     func tick(allowLocalSchedules: Bool = true) -> Bool {
         let previous = CourseScheduleCalculator.dateKey(now)
         now = clock.now

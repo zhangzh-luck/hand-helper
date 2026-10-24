@@ -33,6 +33,16 @@ struct SettingsView: View {
                     Text("头像和显示名称仅保存在此设备。")
                 }
 
+                Section {
+                    NavigationLink {
+                        AcademicTimeView(state: state)
+                    } label: {
+                        Label("时间设置", systemImage: "clock")
+                    }
+                } footer: {
+                    Text("调整学期第一周和节次时间。")
+                }
+
                 Section("外观") {
                     NavigationLink {
                         AppearanceSettingsView(state: state)

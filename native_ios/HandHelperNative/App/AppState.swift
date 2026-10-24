@@ -34,6 +34,20 @@ enum AppearanceMode: String, CaseIterable, Hashable {
     }
 }
 
+struct CourseDataInvalidation: Equatable {
+    let owner: String
+    let authenticationRevision: Int
+    let sequence: Int
+}
+
+struct PendingAcademicTimeWrite: Identifiable, Equatable {
+    enum Phase: Equatable { case submitting, awaitingConfirmation }
+    let id: UUID
+    let owner: String
+    let target: AcademicTimeWriteTarget
+    var phase: Phase
+    var message: String?
+}
 @MainActor
 final class AppState: ObservableObject {
     enum AuthenticationStatus: Equatable {
@@ -52,6 +66,12 @@ final class AppState: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var authenticationStatus: AuthenticationStatus = .signedOut
     @Published private(set) var authenticationRevision = 0
+    @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
+    private var courseDataSequence = 0
+    @Published private(set) var pendingAcademicTimeWrites: [PendingAcademicTimeWrite] = []
+    private var academicTimeReconcileInFlight = false
+    private var academicTimeReconcileRequested = false
+    private var rotationPendingCourseOwner: String?
     @Published private(set) var isLoginSubmitting = false
     @Published private(set) var loginError: String?
     @Published private(set) var credentialRemovalError: String?
@@ -155,6 +175,120 @@ final class AppState: ObservableObject {
         return try verifiedAccount.requireOwner(cookie: sessionStore.cookie)
     }
 
+    func invalidateCourses(for owner: String, authenticationRevision revision: Int) throws {
+        guard try requireCurrentAccount(revision: revision) == owner else {
+            throw APIError.unauthorized(message: "登录账号已变化。")
+        }
+        courseDataSequence += 1
+        courseDataInvalidation = CourseDataInvalidation(
+            owner: owner, authenticationRevision: revision, sequence: courseDataSequence)
+    }
+
+    func pendingCourseInvalidation(after appliedSequence: Int?) -> CourseDataInvalidation? {
+        guard let marker = courseDataInvalidation,
+              marker.sequence != appliedSequence,
+              marker.authenticationRevision == authenticationRevision,
+              (try? requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner else {
+            return nil
+        }
+        return marker
+    }
+
+    var visiblePendingAcademicTimeWrites: [PendingAcademicTimeWrite] {
+        guard let owner = try? requireCurrentAccount(revision: authenticationRevision) else { return [] }
+        return pendingAcademicTimeWrites.filter { $0.owner == owner && $0.phase == .awaitingConfirmation }
+    }
+
+    func beginAcademicTimeWrite(_ target: AcademicTimeWriteTarget, revision: Int) throws -> UUID {
+        let owner = try requireCurrentAccount(revision: revision)
+        guard !pendingAcademicTimeWrites.contains(where: {
+            $0.owner == owner && $0.target.key == target.key &&
+            ($0.phase == .submitting || $0.target == target)
+        }) else {
+            throw APIError.server(status: 409, message: "请先重新核对该项上次保存的结果。")
+        }
+        let id = UUID()
+        pendingAcademicTimeWrites.append(PendingAcademicTimeWrite(
+            id: id, owner: owner, target: target, phase: .submitting, message: nil))
+        return id
+    }
+
+    @discardableResult
+    func acceptAcademicTimeWrite(_ id: UUID) -> Bool {
+        guard let accepted = pendingAcademicTimeWrites.first(where: { $0.id == id }) else { return false }
+        // A newer accepted value supersedes an unresolved value for the same field.
+        pendingAcademicTimeWrites.removeAll {
+            $0.id != id && $0.owner == accepted.owner && $0.target.key == accepted.target.key
+        }
+        guard let index = pendingAcademicTimeWrites.firstIndex(where: { $0.id == id }) else { return false }
+        pendingAcademicTimeWrites[index].phase = .awaitingConfirmation
+        pendingAcademicTimeWrites[index].message = nil
+        return true
+    }
+
+    func abandonAcademicTimeWrite(_ id: UUID) {
+        pendingAcademicTimeWrites.removeAll { $0.id == id }
+    }
+
+    func hasPendingAcademicTimeWrite(_ id: UUID) -> Bool {
+        pendingAcademicTimeWrites.contains { $0.id == id }
+    }
+
+    func reconcilePendingAcademicTimeWrites() async {
+        if academicTimeReconcileInFlight {
+            academicTimeReconcileRequested = true
+            return
+        }
+        academicTimeReconcileInFlight = true
+        defer {
+            academicTimeReconcileInFlight = false
+            if academicTimeReconcileRequested {
+                academicTimeReconcileRequested = false
+                Task { await self.reconcilePendingAcademicTimeWrites() }
+            }
+        }
+        var attempted = Set<UUID>()
+        while let item = pendingAcademicTimeWrites.first(where: {
+            $0.phase == .awaitingConfirmation && !attempted.contains($0.id)
+        }) {
+            attempted.insert(item.id)
+            let revision = authenticationRevision
+            guard (try? requireCurrentAccount(revision: revision)) == item.owner else { return }
+            do {
+                let matched = try await AcademicTimeService(api: api).confirms(item.target)
+                guard !Task.isCancelled,
+                      (try? requireCurrentAccount(revision: revision)) == item.owner,
+                      let index = pendingAcademicTimeWrites.firstIndex(where: {
+                          $0.id == item.id && $0.phase == .awaitingConfirmation && $0.target == item.target
+                      }) else { return }
+                if matched {
+                    try invalidateCourses(for: item.owner, authenticationRevision: revision)
+                    pendingAcademicTimeWrites.remove(at: index)
+                } else {
+                    pendingAcademicTimeWrites[index].message = "服务端当前值与待确认值不一致，请稍后重新核对。"
+                }
+            } catch {
+                guard (try? requireCurrentAccount(revision: revision)) == item.owner,
+                      let index = pendingAcademicTimeWrites.firstIndex(where: { $0.id == item.id }) else { return }
+                pendingAcademicTimeWrites[index].message = "读回未确认：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func resumeAcademicTimeAfterVerification(owner: String) async {
+        pendingAcademicTimeWrites.removeAll { $0.owner != owner }
+        if courseDataInvalidation?.owner != owner { courseDataInvalidation = nil }
+        if rotationPendingCourseOwner == owner {
+            courseDataSequence += 1
+            courseDataInvalidation = CourseDataInvalidation(
+                owner: owner, authenticationRevision: authenticationRevision, sequence: courseDataSequence)
+        }
+        rotationPendingCourseOwner = nil
+        if pendingAcademicTimeWrites.contains(where: { $0.phase == .awaitingConfirmation }) {
+            await reconcilePendingAcademicTimeWrites()
+        }
+    }
+
     var canAccessPrivateData: Bool {
         isAuthenticated && (try? verifiedAccount.requireOwner(cookie: sessionStore.cookie)) != nil
     }
@@ -234,6 +368,7 @@ final class AppState: ObservableObject {
             isAuthenticated = true
             authenticationRevision += 1
             loadLocalProfile()
+            if let owner = verifiedAccount.owner { await resumeAcademicTimeAfterVerification(owner: owner) }
         } catch {
             guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
             if let apiError = error as? APIError, case .unauthorized = apiError {
@@ -289,6 +424,7 @@ final class AppState: ObservableObject {
             isAuthenticated = true
             authenticationRevision += 1
             loadLocalProfile()
+            if let owner = verifiedAccount.owner { await resumeAcademicTimeAfterVerification(owner: owner) }
         } catch {
             guard generation == authenticationGeneration, !Task.isCancelled else { return }
             if isAuthenticated && sessionStore.cookie == nil { handleUnauthorized() }
@@ -309,6 +445,8 @@ final class AppState: ObservableObject {
         verifiedAccount.clear()
         isAuthenticated = false
         clearProfile()
+        if let marker = courseDataInvalidation { rotationPendingCourseOwner = marker.owner }
+        courseDataInvalidation = nil
         authenticationStatus = .verifying
         authenticationRevision += 1
         do {
@@ -331,6 +469,7 @@ final class AppState: ObservableObject {
             authenticationStatus = .signedIn(identity.username)
             authenticationRevision += 1
             loadLocalProfile()
+            if let owner = verifiedAccount.owner { await resumeAcademicTimeAfterVerification(owner: owner) }
         } catch {
             guard generation == authenticationGeneration, sessionStore.cookie == cookie else { return }
             if let apiError = error as? APIError, case .unauthorized = apiError {
@@ -349,6 +488,9 @@ final class AppState: ObservableObject {
         (api as? APIClient)?.invalidatePendingSessionRequests()
         isLoginSubmitting = false
         verifiedAccount.clear()
+        courseDataInvalidation = nil
+        pendingAcademicTimeWrites = []
+        rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
         verifyingCookie = nil
         selectedTab = .today
@@ -368,6 +510,9 @@ final class AppState: ObservableObject {
         isLoginSubmitting = false
         isAuthenticated = false
         verifiedAccount.clear()
+        courseDataInvalidation = nil
+        pendingAcademicTimeWrites = []
+        rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
         verifyingCookie = nil
         selectedTab = .today

@@ -25,12 +25,19 @@ protocol CourseRepository {
     var canEditSchedules: Bool { get }
     func cached() throws -> CourseSnapshot?
     func refresh(on date: Date) async throws -> CourseSnapshot
+    func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot
     func localSchedules(on date: Date) throws -> [CustomSchedule]
     func allLocalSchedules() throws -> [CustomSchedule]
     func saveSchedule(_ schedule: CustomSchedule) throws
     func deleteSchedule(id: Int) throws
     func saveManualRule(_ rule: ManualCourseRule) throws
     func saveProfile(_ profile: TodayProfile) throws
+}
+
+extension CourseRepository {
+    func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
+        throw APIError.invalidResponse
+    }
 }
 
 @MainActor
@@ -45,6 +52,7 @@ final class DiskCourseRepository: CourseRepository {
     var sessionCookie: String? { session.cookie }
     var canEditSchedules: Bool { (try? account.requireOwner(cookie: session.cookie)) != nil }
     private let account: VerifiedAccountContext
+    private var refreshGeneration = 0
 
     init(api: any APIClientProtocol, session: any SessionStore, account: VerifiedAccountContext,
          baseURL: URL = APIConfiguration.development.baseURL,
@@ -78,8 +86,19 @@ final class DiskCourseRepository: CourseRepository {
     }
 
     func refresh(on date: Date) async throws -> CourseSnapshot {
+        try await refreshInternal(on: date, strict: false, isCurrent: { true })
+    }
+
+    func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
+        try await refreshInternal(on: date, strict: true, isCurrent: isCurrent)
+    }
+
+    private func refreshInternal(on date: Date, strict: Bool,
+                                 isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
         guard let originalCookie = session.cookie else { throw APIError.unauthorized(message: "请先登录后查看今日课程。") }
         let expectedOwner = try account.requireOwner(cookie: originalCookie)
+        refreshGeneration += 1
+        let requestGeneration = refreshGeneration
         let identity: AuthIdentity = try await api.request("GET", path: "/api/v1/auth/me", body: nil, preserveSessionOnPasswordError: false)
         guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
         guard expectedOwner == "user:\(identity.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())" else {
@@ -89,30 +108,49 @@ final class DiskCourseRepository: CourseRepository {
         let sessions: [CourseSession] = try await api.request("GET", path: "/api/v1/timetable", body: nil, preserveSessionOnPasswordError: false)
         guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
         var snapshot = (try? cached()) ?? .empty
-        if snapshot.serverSchedulesImported && !snapshot.schedules.isEmpty {
-            try? localStore.importServerOnce(snapshot.schedules)
-        }
         snapshot.calendarSessions = sessions
         snapshot.lastRefreshDate = CourseScheduleCalculator.dateKey(date)
         // These are the same timetable inputs Flutter uses for local manual
         // courses. A failure leaves the last valid terms and periods intact.
-        if let terms: [TermInfo] = try? await api.request("GET", path: "/api/v1/terms", body: nil, preserveSessionOnPasswordError: false) {
+        if strict {
+            let terms: [TermInfo] = try await api.request("GET", path: "/api/v1/terms", body: nil,
+                                                          preserveSessionOnPasswordError: false)
+            let periods: [PeriodInfo] = try await api.request("GET", path: "/api/v1/settings/period-times",
+                                                              body: nil, preserveSessionOnPasswordError: false)
             snapshot.terms = terms
-        }
-        if let periods: [PeriodInfo] = try? await api.request("GET", path: "/api/v1/settings/period-times", body: nil, preserveSessionOnPasswordError: false) {
             snapshot.periods = periods
+        } else {
+            if let terms: [TermInfo] = try? await api.request("GET", path: "/api/v1/terms", body: nil, preserveSessionOnPasswordError: false) {
+                snapshot.terms = terms
+            }
+            if let periods: [PeriodInfo] = try? await api.request("GET", path: "/api/v1/settings/period-times", body: nil, preserveSessionOnPasswordError: false) {
+                snapshot.periods = periods
+            }
+        }
+        guard !Task.isCancelled, requestGeneration == refreshGeneration, isCurrent(),
+              session.cookie == originalCookie,
+              (try? account.requireOwner(cookie: originalCookie)) == expectedOwner else {
+            throw APIError.unauthorized(message: "登录状态已变化")
+        }
+        if snapshot.serverSchedulesImported && !snapshot.schedules.isEmpty {
+            try? localStore.importServerOnce(snapshot.schedules)
         }
         if !snapshot.serverSchedulesImported,
            let imported: [CustomSchedule] = try? await api.request("GET", path: "/api/v1/custom-schedules", body: nil, preserveSessionOnPasswordError: false) {
             let existing = Set(snapshot.schedules.map(\.id))
             let deleted = Set(snapshot.deletedRemoteScheduleIDs)
             let eligible = imported.filter { !deleted.contains($0.id) }
-            guard session.cookie == originalCookie else { throw APIError.unauthorized(message: "登录状态已变化") }
+            guard !Task.isCancelled, requestGeneration == refreshGeneration, isCurrent(), session.cookie == originalCookie,
+                  (try? account.requireOwner(cookie: originalCookie)) == expectedOwner else {
+                throw APIError.unauthorized(message: "登录状态已变化")
+            }
             try localStore.importServerOnce(eligible)
             snapshot.schedules += eligible.filter { !existing.contains($0.id) }
             snapshot.serverSchedulesImported = true
         }
-        guard session.cookie == originalCookie else {
+        guard !Task.isCancelled, requestGeneration == refreshGeneration, isCurrent(),
+              session.cookie == originalCookie,
+              (try? account.requireOwner(cookie: originalCookie)) == expectedOwner else {
             throw APIError.unauthorized(message: "登录状态已失效")
         }
         // MainActor methods can interleave at each await. Keep edits made while
@@ -127,7 +165,11 @@ final class DiskCourseRepository: CourseRepository {
             }
             if latest.serverSchedulesImported { snapshot.serverSchedulesImported = true }
         }
-        try? write(snapshot) // Storage errors must not suppress live courses.
+        if strict {
+            try write(snapshot) // A pending time change is not complete until the new cache is durable.
+        } else {
+            try? write(snapshot) // Preserve the existing offline-tolerant normal refresh.
+        }
         return snapshot
     }
 

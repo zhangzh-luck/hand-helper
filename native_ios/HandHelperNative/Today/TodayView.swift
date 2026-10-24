@@ -16,6 +16,7 @@ struct TodayView: View {
     @State private var showPhotoPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var localError: String?
+    @State private var appliedCourseInvalidationSequence: Int?
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void) {
         self.state = state
@@ -109,7 +110,7 @@ struct TodayView: View {
         }
         .task {
             model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
-            if state.canAccessPrivateData { await refreshCourses() }
+            if state.canAccessPrivateData && state.selectedTab == .today { await refreshCourses() }
             while !Task.isCancelled {
                 let remainder = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
                 let delay = 60 - remainder + 0.05
@@ -119,6 +120,7 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            appliedCourseInvalidationSequence = nil
             editor = nil
             pendingDelete = nil
             selectedPhoto = nil
@@ -126,10 +128,22 @@ struct TodayView: View {
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
         }
+        .onChange(of: state.courseDataInvalidation) { _, _ in
+            if state.selectedTab == .today && pendingCourseInvalidation != nil {
+                Task { await refreshCourses() }
+            }
+        }
+        .onChange(of: state.selectedTab) { _, tab in
+            if tab == .today && pendingCourseInvalidation != nil {
+                Task { await refreshCourses() }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
-                if changed && state.canAccessPrivateData { Task { await refreshCourses() } }
+                if state.canAccessPrivateData && (changed || pendingCourseInvalidation != nil) {
+                    Task { await refreshCourses() }
+                }
             }
         }
         .sheet(item: $editor) { route in
@@ -311,12 +325,32 @@ struct TodayView: View {
         }
     }
 
+    private var pendingCourseInvalidation: CourseDataInvalidation? {
+        state.pendingCourseInvalidation(after: appliedCourseInvalidationSequence)
+    }
+
     private func refreshCourses() async {
         let revision = state.authenticationRevision
-        let unauthorized = await model.refresh()
-        guard revision == state.authenticationRevision else { return }
-        if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
-            state.handleUnauthorized()
+        if let marker = pendingCourseInvalidation {
+            let result = await model.refreshStrict(isCurrent: {
+                state.canAccessPrivateData &&
+                state.authenticationRevision == marker.authenticationRevision &&
+                state.courseDataInvalidation == marker &&
+                (try? state.requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner
+            })
+            guard revision == state.authenticationRevision else { return }
+            if result.completed && state.courseDataInvalidation == marker {
+                appliedCourseInvalidationSequence = marker.sequence
+            }
+            if result.unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
+                state.handleUnauthorized()
+            }
+        } else {
+            let unauthorized = await model.refresh()
+            guard revision == state.authenticationRevision else { return }
+            if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
+                state.handleUnauthorized()
+            }
         }
     }
 
