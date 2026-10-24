@@ -17,6 +17,23 @@ protocol APIClientProtocol {
         body: Data?,
         preserveSessionOnPasswordError: Bool
     ) async throws -> Value
+
+    func uploadMultipart<Value: Decodable>(
+        path: String,
+        file: MultipartFilePayload,
+        termID: String?
+    ) async throws -> Value
+}
+
+extension APIClientProtocol {
+    // Existing JSON-only test doubles remain valid. Upload tests supply an explicit mock.
+    func uploadMultipart<Value: Decodable>(
+        path: String,
+        file: MultipartFilePayload,
+        termID: String? = nil
+    ) async throws -> Value {
+        throw APIError.invalidConfiguration
+    }
 }
 
 enum APISessionEvent {
@@ -64,11 +81,9 @@ final class APIClient: APIClientProtocol {
         body: Data? = nil,
         preserveSessionOnPasswordError: Bool = false
     ) async throws -> Value {
-        guard path.hasPrefix("/"), !path.hasPrefix("//"),
-              let scheme = configuration.baseURL.scheme, scheme == "https",
-              let host = configuration.baseURL.host, !host.isEmpty,
-              let url = URL(string: path, relativeTo: configuration.baseURL)?.absoluteURL,
-              url.host == host else { throw APIError.invalidConfiguration }
+        let url = try validatedURL(path: path)
+        guard let scheme = configuration.baseURL.scheme,
+              let host = configuration.baseURL.host else { throw APIError.invalidConfiguration }
 
         var request = URLRequest(url: url, timeoutInterval: configuration.timeout)
         request.httpMethod = method
@@ -98,6 +113,92 @@ final class APIClient: APIClientProtocol {
         } catch {
             throw APIError.connection
         }
+        return try decodeResponse(data, response: response, requestEpoch: requestEpoch,
+                                  requestCookie: requestCookie,
+                                  preserveSessionOnPasswordError: preserveSessionOnPasswordError)
+    }
+
+    func uploadMultipart<Value: Decodable>(
+        path: String,
+        file: MultipartFilePayload,
+        termID: String? = nil
+    ) async throws -> Value {
+        // Recheck even when a caller somehow supplies a payload outside its initializer.
+        guard !file.data.isEmpty else { throw MultipartUploadError.emptyFile }
+        guard file.data.count <= MultipartFilePayload.maximumFileSize else {
+            throw MultipartUploadError.fileTooLarge
+        }
+        try Task.checkCancellation()
+
+        var url = try validatedURL(path: path)
+        if let termID {
+            guard termID.range(of: #"^20\d{2}-20\d{2}-[12]$"#,
+                               options: .regularExpression) != nil else {
+                throw MultipartUploadError.invalidTermID
+            }
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  components.queryItems == nil else { throw APIError.invalidConfiguration }
+            components.queryItems = [URLQueryItem(name: "term_id", value: termID)]
+            guard let encodedURL = components.url else { throw APIError.invalidConfiguration }
+            url = encodedURL
+        }
+
+        var boundary = "HandHelper-\(UUID().uuidString)"
+        while file.data.range(of: Data(boundary.utf8)) != nil {
+            boundary = "HandHelper-\(UUID().uuidString)"
+        }
+        var request = URLRequest(url: url, timeoutInterval: 45)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        guard let scheme = configuration.baseURL.scheme,
+              let host = configuration.baseURL.host else { throw APIError.invalidConfiguration }
+        let port = configuration.baseURL.port.map { ":\($0)" } ?? ""
+        request.setValue("\(scheme)://\(host)\(port)", forHTTPHeaderField: "Origin")
+
+        let requestEpoch = currentEpoch()
+        let requestCookie = sessionStore.cookie
+        guard currentEpoch() == requestEpoch else { throw MultipartUploadError.sessionChanged }
+        if let requestCookie { request.setValue(requestCookie, forHTTPHeaderField: "Cookie") }
+        request.httpBody = file.body(boundary: boundary)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            if error.code == .cancelled || Task.isCancelled { throw CancellationError() }
+            throw error.code == .timedOut ? APIError.timeout : APIError.connection
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            throw APIError.connection
+        }
+        try Task.checkCancellation()
+        guard currentEpoch() == requestEpoch, sessionStore.cookie == requestCookie else {
+            throw MultipartUploadError.sessionChanged
+        }
+        return try decodeResponse(data, response: response, requestEpoch: requestEpoch,
+                                  requestCookie: requestCookie,
+                                  preserveSessionOnPasswordError: false)
+    }
+
+    private func validatedURL(path: String) throws -> URL {
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              configuration.baseURL.scheme == "https",
+              let host = configuration.baseURL.host, !host.isEmpty,
+              let url = URL(string: path, relativeTo: configuration.baseURL)?.absoluteURL,
+              url.host == host else { throw APIError.invalidConfiguration }
+        return url
+    }
+
+    private func decodeResponse<Value: Decodable>(
+        _ data: Data,
+        response: URLResponse,
+        requestEpoch: Int,
+        requestCookie: String?,
+        preserveSessionOnPasswordError: Bool
+    ) throws -> Value {
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         if http.statusCode == 401 {
             let error = try? decoder.decode(APIEnvelope<APIEmptyResponse>.self, from: data)
