@@ -43,6 +43,16 @@ struct SettingsView: View {
                     Text("调整学期第一周和节次时间。")
                 }
 
+                Section {
+                    NavigationLink {
+                        DataImportView(state: state)
+                    } label: {
+                        Label("数据与导入", systemImage: "square.and.arrow.down")
+                    }
+                } footer: {
+                    Text("从教务系统导出的文件导入课表。")
+                }
+
                 Section("外观") {
                     NavigationLink {
                         AppearanceSettingsView(state: state)

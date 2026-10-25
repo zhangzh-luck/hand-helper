@@ -341,6 +341,7 @@ struct TodayView: View {
             guard revision == state.authenticationRevision else { return }
             if result.completed && state.courseDataInvalidation == marker {
                 appliedCourseInvalidationSequence = marker.sequence
+                state.acknowledgeCourseRefresh(marker)
             }
             if result.unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
                 state.handleUnauthorized()

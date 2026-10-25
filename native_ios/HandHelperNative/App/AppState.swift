@@ -68,6 +68,8 @@ final class AppState: ObservableObject {
     @Published private(set) var authenticationRevision = 0
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
     private var courseDataSequence = 0
+    @Published private(set) var pendingTimetableImport: PendingTimetableImport?
+    private var timetableUploadCancellation: (() -> Void)?
     @Published private(set) var pendingAcademicTimeWrites: [PendingAcademicTimeWrite] = []
     private var academicTimeReconcileInFlight = false
     private var academicTimeReconcileRequested = false
@@ -194,6 +196,94 @@ final class AppState: ObservableObject {
         return marker
     }
 
+    var visibleTimetableImport: PendingTimetableImport? {
+        guard let pendingTimetableImport,
+              (try? requireCurrentAccount(revision: authenticationRevision)) == pendingTimetableImport.owner else {
+            return nil
+        }
+        return pendingTimetableImport
+    }
+
+    func beginTimetableImport(revision: Int) throws -> UUID {
+        let owner = try requireCurrentAccount(revision: revision)
+        if let pendingTimetableImport {
+            guard case .refreshCompleted = pendingTimetableImport.phase else {
+                throw APIError.server(status: 409, message: "请先处理上一次课表导入的结果。")
+            }
+        }
+        let id = UUID()
+        pendingTimetableImport = PendingTimetableImport(id: id, owner: owner,
+                                                        phase: .uploading, inspection: nil)
+        return id
+    }
+
+    func setTimetableUploadCancellation(_ cancel: @escaping () -> Void, id: UUID) {
+        guard pendingTimetableImport?.id == id else { cancel(); return }
+        timetableUploadCancellation = cancel
+    }
+
+    func acceptTimetableImport(_ result: TimetableImportResult, id: UUID) {
+        guard let operation = pendingTimetableImport, operation.id == id,
+              case .uploading = operation.phase else { return }
+        timetableUploadCancellation = nil
+        pendingTimetableImport?.phase = .accepted(result)
+        reconcileTimetableImport()
+    }
+
+    func markTimetableImportUnconfirmed(_ message: String, id: UUID) {
+        guard let operation = pendingTimetableImport, operation.id == id,
+              case .uploading = operation.phase else { return }
+        timetableUploadCancellation = nil
+        pendingTimetableImport?.phase = .unconfirmed(message)
+        reconcileTimetableImport(forceUnconfirmedRefresh: true)
+    }
+
+    func noteTimetableInspection(_ inspection: TimetableImportInspection, id: UUID,
+                                 owner: String, revision: Int) {
+        guard (try? requireCurrentAccount(revision: revision)) == owner,
+              pendingTimetableImport?.id == id, pendingTimetableImport?.owner == owner else { return }
+        if let phase = pendingTimetableImport?.phase, case .unconfirmed = phase {
+            pendingTimetableImport?.inspection = inspection
+        }
+    }
+
+    func discardTimetableImport(id: UUID) {
+        guard pendingTimetableImport?.id == id else { return }
+        timetableUploadCancellation?()
+        timetableUploadCancellation = nil
+        pendingTimetableImport = nil
+    }
+
+    private func reconcileTimetableImport(forceUnconfirmedRefresh: Bool = false) {
+        guard let operation = pendingTimetableImport,
+              (try? requireCurrentAccount(revision: authenticationRevision)) == operation.owner else { return }
+        do {
+            switch operation.phase {
+            case .accepted(let result):
+                try invalidateCourses(for: operation.owner, authenticationRevision: authenticationRevision)
+                if let marker = courseDataInvalidation {
+                    pendingTimetableImport?.phase = .refreshPending(result, sequence: marker.sequence)
+                }
+            case .unconfirmed:
+                if forceUnconfirmedRefresh || courseDataInvalidation?.owner != operation.owner ||
+                    courseDataInvalidation?.authenticationRevision != authenticationRevision {
+                    try invalidateCourses(for: operation.owner, authenticationRevision: authenticationRevision)
+                }
+            case .uploading, .refreshPending, .refreshCompleted:
+                break
+            }
+        } catch { /* Keep the result pending until this account is verified again. */ }
+    }
+
+    func acknowledgeCourseRefresh(_ marker: CourseDataInvalidation) {
+        guard marker == courseDataInvalidation,
+              (try? requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner,
+              let operation = pendingTimetableImport, operation.owner == marker.owner,
+              case .refreshPending(let result, let sequence) = operation.phase,
+              marker.sequence >= sequence else { return }
+        pendingTimetableImport?.phase = .refreshCompleted(result)
+    }
+
     var visiblePendingAcademicTimeWrites: [PendingAcademicTimeWrite] {
         guard let owner = try? requireCurrentAccount(revision: authenticationRevision) else { return [] }
         return pendingAcademicTimeWrites.filter { $0.owner == owner && $0.phase == .awaitingConfirmation }
@@ -278,12 +368,24 @@ final class AppState: ObservableObject {
     private func resumeAcademicTimeAfterVerification(owner: String) async {
         pendingAcademicTimeWrites.removeAll { $0.owner != owner }
         if courseDataInvalidation?.owner != owner { courseDataInvalidation = nil }
-        if rotationPendingCourseOwner == owner {
+        if let pendingTimetableImport, pendingTimetableImport.owner != owner {
+            timetableUploadCancellation?()
+            timetableUploadCancellation = nil
+            self.pendingTimetableImport = nil
+        }
+        let acceptedImport: Bool
+        if let pendingTimetableImport, case .accepted = pendingTimetableImport.phase {
+            acceptedImport = true
+        } else {
+            acceptedImport = false
+        }
+        if rotationPendingCourseOwner == owner && !acceptedImport {
             courseDataSequence += 1
             courseDataInvalidation = CourseDataInvalidation(
                 owner: owner, authenticationRevision: authenticationRevision, sequence: courseDataSequence)
         }
         rotationPendingCourseOwner = nil
+        reconcileTimetableImport()
         if pendingAcademicTimeWrites.contains(where: { $0.phase == .awaitingConfirmation }) {
             await reconcilePendingAcademicTimeWrites()
         }
@@ -447,6 +549,10 @@ final class AppState: ObservableObject {
         clearProfile()
         if let marker = courseDataInvalidation { rotationPendingCourseOwner = marker.owner }
         courseDataInvalidation = nil
+        if let pendingTimetableImport,
+           case .refreshPending(let result, _) = pendingTimetableImport.phase {
+            self.pendingTimetableImport?.phase = .accepted(result)
+        }
         authenticationStatus = .verifying
         authenticationRevision += 1
         do {
@@ -486,6 +592,9 @@ final class AppState: ObservableObject {
         let cookie = sessionStore.cookie
         authenticationGeneration += 1
         (api as? APIClient)?.invalidatePendingSessionRequests()
+        timetableUploadCancellation?()
+        timetableUploadCancellation = nil
+        pendingTimetableImport = nil
         isLoginSubmitting = false
         verifiedAccount.clear()
         courseDataInvalidation = nil
@@ -507,6 +616,9 @@ final class AppState: ObservableObject {
     func handleUnauthorized() {
         authenticationGeneration += 1
         (api as? APIClient)?.invalidatePendingSessionRequests()
+        timetableUploadCancellation?()
+        timetableUploadCancellation = nil
+        pendingTimetableImport = nil
         isLoginSubmitting = false
         isAuthenticated = false
         verifiedAccount.clear()
