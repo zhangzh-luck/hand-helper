@@ -61,6 +61,40 @@ final class TimetableImportTests: XCTestCase {
     }
 
     @MainActor
+    func testCopiedPickerFileURLLoadsIntoVisibleSelection() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("printed.xls")
+        try Data([0xD0, 0xCF, 0x11, 0xE0]).write(to: url)
+        let state = await makeState()
+        let model = TimetableImportViewModel(state: state,
+                                             service: TimetableServiceStub(result: success))
+        await model.select(url)
+        XCTAssertEqual(model.selectedFileName, "printed.xls")
+        XCTAssertTrue(model.canUpload)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertNil(state.visibleTimetableImport)
+    }
+
+    @MainActor
+    func testWrongFormatAfterPickerReturnShowsErrorWithoutUpload() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("printed.txt")
+        try Data([1, 2, 3]).write(to: url)
+        let state = await makeState()
+        let service = TimetableServiceStub(result: success)
+        let model = TimetableImportViewModel(state: state, service: service)
+        await model.select(url)
+        XCTAssertNil(model.selectedFileName)
+        XCTAssertFalse(model.canUpload)
+        XCTAssertTrue(model.errorMessage?.contains(".xls") == true)
+        XCTAssertEqual(service.uploadCount, 0)
+    }
+
+    @MainActor
     func testReaderAcceptsXLSAndRejectsEmptyOversizeWrongExtensionAndMissingFile() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

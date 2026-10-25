@@ -10,8 +10,14 @@ enum TimetableImportPickerTypes {
 
 enum TimetableDocumentPickerError: LocalizedError {
     case noFileURL
+    case sessionChanged
 
-    var errorDescription: String? { "文件选择器没有返回可读取的文件。" }
+    var errorDescription: String? {
+        switch self {
+        case .noFileURL: "文件选择器没有返回可读取的文件。"
+        case .sessionChanged: "登录状态已变化，请重新选择文件。"
+        }
+    }
 }
 
 enum TimetableDocumentPickerOutcome {
@@ -76,8 +82,9 @@ struct TimetableImportView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: TimetableImportViewModel
     @State private var showingImporter = false
-    @State private var pickerOutcome: TimetableDocumentPickerOutcome?
     @State private var pickerRevision: Int?
+    @State private var pickerOwner: String?
+    @State private var readingPickedFile = false
     @State private var confirmingReplacement = false
 
     init(state: AppState) {
@@ -93,8 +100,10 @@ struct TimetableImportView: View {
 #if DEBUG
                     print("[TimetableImport] presenting file picker")
 #endif
-                    pickerOutcome = nil
-                    pickerRevision = state.authenticationRevision
+                    let revision = state.authenticationRevision
+                    guard let owner = try? state.requireCurrentAccount(revision: revision) else { return }
+                    pickerRevision = revision
+                    pickerOwner = owner
                     showingImporter = true
                 } label: {
                     Label("选择 XLS 课表文件", systemImage: "doc.badge.plus")
@@ -121,10 +130,13 @@ struct TimetableImportView: View {
         }
         .navigationTitle("导入课表")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showingImporter, onDismiss: finishFileSelection) {
+        .sheet(isPresented: $showingImporter, onDismiss: {
+#if DEBUG
+            print("[TimetableImport] UIKit picker sheet dismissed")
+#endif
+        }) {
             TimetableDocumentPicker { outcome in
-                pickerOutcome = outcome
-                showingImporter = false
+                handlePickerOutcome(outcome)
             }
         }
         .confirmationDialog("替换文件所属学期的课程？", isPresented: $confirmingReplacement) {
@@ -139,8 +151,9 @@ struct TimetableImportView: View {
 #endif
             model.authenticationDidChange()
             confirmingReplacement = false
-            pickerOutcome = nil
             pickerRevision = nil
+            pickerOwner = nil
+            readingPickedFile = false
             showingImporter = false
         }
         .onChange(of: showingImporter) { _, isPresented in
@@ -154,29 +167,38 @@ struct TimetableImportView: View {
 #if DEBUG
             print("[TimetableImport] import page disappeared")
 #endif
-            // Presenting the UIKit picker must not cancel the pending selection.
-            if !showingImporter { model.cancelFileSelection() }
+            // A picker presentation or its dismissal must not cancel a selected file.
+            if !showingImporter && !readingPickedFile { model.cancelFileSelection() }
             confirmingReplacement = false
         }
     }
 
-    private func finishFileSelection() {
-        defer {
-            pickerOutcome = nil
-            pickerRevision = nil
-        }
-        guard pickerRevision == state.authenticationRevision,
-              state.canAccessPrivateData else {
-            model.selectionCancelled()
-            return
-        }
-        switch pickerOutcome {
+    private func handlePickerOutcome(_ outcome: TimetableDocumentPickerOutcome) {
+        let revision = pickerRevision
+        let owner = pickerOwner
+        pickerRevision = nil
+        pickerOwner = nil
+        switch outcome {
         case .selected(let url):
 #if DEBUG
             print("[TimetableImport] UIKit picker returned a URL; starting validation")
 #endif
+            guard let revision, let owner,
+                  (try? state.requireCurrentAccount(revision: revision)) == owner else {
+                showingImporter = false
+                model.fileSelectionFailed(TimetableDocumentPickerError.sessionChanged)
+                return
+            }
+            readingPickedFile = true
+            showingImporter = false
             Task {
+                guard (try? state.requireCurrentAccount(revision: revision)) == owner else {
+                    readingPickedFile = false
+                    model.fileSelectionFailed(TimetableDocumentPickerError.sessionChanged)
+                    return
+                }
                 await model.select(url)
+                readingPickedFile = false
 #if DEBUG
                 print(model.selectedFileName == nil
                       ? "[TimetableImport] file validation did not complete"
@@ -184,8 +206,10 @@ struct TimetableImportView: View {
 #endif
             }
         case .failed(let error):
+            showingImporter = false
             model.fileSelectionFailed(error)
-        case .cancelled, .none:
+        case .cancelled:
+            showingImporter = false
             model.selectionCancelled()
         }
     }
