@@ -1,11 +1,21 @@
 import Combine
 import Foundation
+import UniformTypeIdentifiers
 import XCTest
 @testable import HandHelperNative
 
 final class TimetableImportTests: XCTestCase {
     private let success = TimetableImportResult(termID: "2026-2027-1", coursesImported: 3,
                                                 sessionsGenerated: 0, ignoredNotes: true)
+
+    func testPickerAcceptsLegacyExcelAndGenericDataProviderTypes() {
+        let allowed = TimetableImportPickerTypes.allowed
+        let legacyExcel = UTType(importedAs: "com.microsoft.excel.xls", conformingTo: .data)
+        XCTAssertEqual(legacyExcel.identifier, "com.microsoft.excel.xls")
+        XCTAssertTrue(allowed.contains { legacyExcel.conforms(to: $0) })
+        XCTAssertTrue(allowed.contains { UTType.data.conforms(to: $0) })
+        XCTAssertTrue(allowed.contains { $0 == .data })
+    }
 
     @MainActor
     func testReaderAcceptsXLSAndRejectsEmptyOversizeWrongExtensionAndMissingFile() async throws {

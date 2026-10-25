@@ -1,6 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum TimetableImportPickerTypes {
+    // Some file providers expose legacy Excel documents as generic data.
+    // ImportFileReader still enforces the .xls extension and byte limit.
+    static let allowed: [UTType] = [
+        UTType(importedAs: "com.microsoft.excel.xls", conformingTo: .data),
+        .data
+    ]
+}
+
 @MainActor
 struct TimetableImportView: View {
     @ObservedObject private var state: AppState
@@ -18,6 +27,9 @@ struct TimetableImportView: View {
         List {
             Section {
                 Button {
+#if DEBUG
+                    print("[TimetableImport] presenting file picker")
+#endif
                     showingImporter = true
                 } label: {
                     Label("选择 XLS 课表文件", systemImage: "doc.badge.plus")
@@ -45,11 +57,23 @@ struct TimetableImportView: View {
         .navigationTitle("导入课表")
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $showingImporter,
-                      allowedContentTypes: [UTType(filenameExtension: "xls") ?? .data]) { result in
+                      allowedContentTypes: TimetableImportPickerTypes.allowed) { result in
             Task { @MainActor in
                 switch result {
-                case .success(let url): await model.select(url)
+                case .success(let url):
+#if DEBUG
+                    print("[TimetableImport] file picker returned a URL; starting validation")
+#endif
+                    await model.select(url)
+#if DEBUG
+                    print(model.selectedFileName == nil
+                          ? "[TimetableImport] file validation did not complete"
+                          : "[TimetableImport] file validation completed")
+#endif
                 case .failure(let error):
+#if DEBUG
+                    print("[TimetableImport] file picker returned an error")
+#endif
                     if (error as NSError).code == NSUserCancelledError {
                         model.selectionCancelled()
                     } else {
