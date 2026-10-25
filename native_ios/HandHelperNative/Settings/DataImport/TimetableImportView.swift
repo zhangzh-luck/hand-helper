@@ -2,12 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum TimetableImportPickerTypes {
-    // Some file providers expose legacy Excel documents as generic data.
-    // ImportFileReader still enforces the .xls extension and byte limit.
-    static let allowed: [UTType] = [
-        UTType(importedAs: "com.microsoft.excel.xls", conformingTo: .data),
-        .data
-    ]
+    // File providers may advertise legacy .xls files under unrelated types.
+    // The picker permits items; ImportFileReader validates the extension and size.
+    static let allowed: [UTType] = [.item]
 }
 
 @MainActor
@@ -89,11 +86,24 @@ struct TimetableImportView: View {
             Text("导入后将替换文件所属学期已有的导入课程。手动添加的课程不属于本次替换范围。")
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+#if DEBUG
+            print("[TimetableImport] authentication changed; dismissing file picker")
+#endif
             model.authenticationDidChange()
             confirmingReplacement = false
             showingImporter = false
         }
+        .onChange(of: showingImporter) { _, isPresented in
+#if DEBUG
+            print(isPresented
+                  ? "[TimetableImport] file picker presented"
+                  : "[TimetableImport] file picker dismissed")
+#endif
+        }
         .onDisappear {
+#if DEBUG
+            print("[TimetableImport] import page disappeared")
+#endif
             model.cancelFileSelection()
             confirmingReplacement = false
         }

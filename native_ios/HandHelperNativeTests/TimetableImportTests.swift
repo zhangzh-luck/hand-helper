@@ -8,13 +8,13 @@ final class TimetableImportTests: XCTestCase {
     private let success = TimetableImportResult(termID: "2026-2027-1", coursesImported: 3,
                                                 sessionsGenerated: 0, ignoredNotes: true)
 
-    func testPickerAcceptsLegacyExcelAndGenericDataProviderTypes() {
+    func testPickerAllowsGenericItemsRegardlessOfProviderType() {
         let allowed = TimetableImportPickerTypes.allowed
         let legacyExcel = UTType(importedAs: "com.microsoft.excel.xls", conformingTo: .data)
-        XCTAssertEqual(legacyExcel.identifier, "com.microsoft.excel.xls")
+        XCTAssertEqual(allowed, [.item])
         XCTAssertTrue(allowed.contains { legacyExcel.conforms(to: $0) })
         XCTAssertTrue(allowed.contains { UTType.data.conforms(to: $0) })
-        XCTAssertTrue(allowed.contains { $0 == .data })
+        // The reader test below verifies that the broad picker does not relax uploads.
     }
 
     @MainActor
