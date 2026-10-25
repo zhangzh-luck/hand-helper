@@ -18,10 +18,10 @@ final class TimetableImportViewModel: ObservableObject {
     private var readTask: Task<MultipartFilePayload, Error>?
     private var uploadTask: Task<Void, Never>?
 
-    init(state: AppState, reader: any ImportFileReading = ImportFileReader(),
+    init(state: AppState, reader: (any ImportFileReading)? = nil,
          service: any TimetableImportServicing) {
         self.state = state
-        self.reader = reader
+        self.reader = reader ?? ImportFileReader()
         self.service = service
     }
 
