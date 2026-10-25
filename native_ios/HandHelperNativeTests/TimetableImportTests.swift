@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 import UniformTypeIdentifiers
 import XCTest
 @testable import HandHelperNative
@@ -15,6 +16,48 @@ final class TimetableImportTests: XCTestCase {
         XCTAssertTrue(allowed.contains { legacyExcel.conforms(to: $0) })
         XCTAssertTrue(allowed.contains { UTType.data.conforms(to: $0) })
         // The reader test below verifies that the broad picker does not relax uploads.
+    }
+
+    @MainActor
+    func testUIKitPickerDelegateReturnsSelectedFileOnlyOnce() throws {
+        var outcomes: [TimetableDocumentPickerOutcome] = []
+        let coordinator = TimetableDocumentPicker.Coordinator { outcomes.append($0) }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        let url = URL(fileURLWithPath: "/tmp/printed.xls")
+        coordinator.documentPicker(picker, didPickDocumentsAt: [url])
+        coordinator.documentPickerWasCancelled(picker)
+        XCTAssertEqual(outcomes.count, 1)
+        guard case .selected(let selected)? = outcomes.first else {
+            return XCTFail("Picker must return the selected file URL")
+        }
+        XCTAssertEqual(selected, url)
+    }
+
+    @MainActor
+    func testUIKitPickerDelegateReportsCancelAndInvalidSelection() throws {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        var cancelled: TimetableDocumentPickerOutcome?
+        let cancelCoordinator = TimetableDocumentPicker.Coordinator { cancelled = $0 }
+        cancelCoordinator.documentPickerWasCancelled(picker)
+        guard case .cancelled? = cancelled else {
+            return XCTFail("Picker cancellation must be reported")
+        }
+
+        var failed: TimetableDocumentPickerOutcome?
+        let failureCoordinator = TimetableDocumentPicker.Coordinator { failed = $0 }
+        failureCoordinator.documentPicker(picker, didPickDocumentsAt: [])
+        guard case .failed(let error)? = failed else {
+            return XCTFail("Missing file URL must be reported as an error")
+        }
+        XCTAssertTrue(error is TimetableDocumentPickerError)
+
+        var nonFile: TimetableDocumentPickerOutcome?
+        let nonFileCoordinator = TimetableDocumentPicker.Coordinator { nonFile = $0 }
+        let nonFileURL = try XCTUnwrap(URL(string: "https://example.invalid/file.xls"))
+        nonFileCoordinator.documentPicker(picker, didPickDocumentsAt: [nonFileURL])
+        guard case .failed? = nonFile else {
+            return XCTFail("Non-file URL must be rejected")
+        }
     }
 
     @MainActor

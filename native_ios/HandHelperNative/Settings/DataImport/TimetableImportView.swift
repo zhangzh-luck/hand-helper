@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 enum TimetableImportPickerTypes {
@@ -7,11 +8,76 @@ enum TimetableImportPickerTypes {
     static let allowed: [UTType] = [.item]
 }
 
+enum TimetableDocumentPickerError: LocalizedError {
+    case noFileURL
+
+    var errorDescription: String? { "文件选择器没有返回可读取的文件。" }
+}
+
+enum TimetableDocumentPickerOutcome {
+    case selected(URL)
+    case cancelled
+    case failed(Error)
+}
+
+@MainActor
+struct TimetableDocumentPicker: UIViewControllerRepresentable {
+    let onResult: (TimetableDocumentPickerOutcome) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // A copied URL remains readable after this picker is dismissed.
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: TimetableImportPickerTypes.allowed, asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) { }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onResult: onResult) }
+
+    @MainActor
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onResult: (TimetableDocumentPickerOutcome) -> Void
+        private var completed = false
+
+        init(onResult: @escaping (TimetableDocumentPickerOutcome) -> Void) {
+            self.onResult = onResult
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController,
+                            didPickDocumentsAt urls: [URL]) {
+            guard !completed else { return }
+            completed = true
+#if DEBUG
+            print("[TimetableImport] UIKit picker didPickDocumentsAt: \(urls.count) URL(s)")
+#endif
+            if let url = urls.first, url.isFileURL {
+                onResult(.selected(url))
+            } else {
+                onResult(.failed(TimetableDocumentPickerError.noFileURL))
+            }
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            guard !completed else { return }
+            completed = true
+#if DEBUG
+            print("[TimetableImport] UIKit picker cancelled")
+#endif
+            onResult(.cancelled)
+        }
+    }
+}
+
 @MainActor
 struct TimetableImportView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: TimetableImportViewModel
     @State private var showingImporter = false
+    @State private var pickerOutcome: TimetableDocumentPickerOutcome?
+    @State private var pickerRevision: Int?
     @State private var confirmingReplacement = false
 
     init(state: AppState) {
@@ -27,6 +93,8 @@ struct TimetableImportView: View {
 #if DEBUG
                     print("[TimetableImport] presenting file picker")
 #endif
+                    pickerOutcome = nil
+                    pickerRevision = state.authenticationRevision
                     showingImporter = true
                 } label: {
                     Label("选择 XLS 课表文件", systemImage: "doc.badge.plus")
@@ -53,30 +121,10 @@ struct TimetableImportView: View {
         }
         .navigationTitle("导入课表")
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $showingImporter,
-                      allowedContentTypes: TimetableImportPickerTypes.allowed) { result in
-            Task { @MainActor in
-                switch result {
-                case .success(let url):
-#if DEBUG
-                    print("[TimetableImport] file picker returned a URL; starting validation")
-#endif
-                    await model.select(url)
-#if DEBUG
-                    print(model.selectedFileName == nil
-                          ? "[TimetableImport] file validation did not complete"
-                          : "[TimetableImport] file validation completed")
-#endif
-                case .failure(let error):
-#if DEBUG
-                    print("[TimetableImport] file picker returned an error")
-#endif
-                    if (error as NSError).code == NSUserCancelledError {
-                        model.selectionCancelled()
-                    } else {
-                        model.fileSelectionFailed(error)
-                    }
-                }
+        .sheet(isPresented: $showingImporter, onDismiss: finishFileSelection) {
+            TimetableDocumentPicker { outcome in
+                pickerOutcome = outcome
+                showingImporter = false
             }
         }
         .confirmationDialog("替换文件所属学期的课程？", isPresented: $confirmingReplacement) {
@@ -91,6 +139,8 @@ struct TimetableImportView: View {
 #endif
             model.authenticationDidChange()
             confirmingReplacement = false
+            pickerOutcome = nil
+            pickerRevision = nil
             showingImporter = false
         }
         .onChange(of: showingImporter) { _, isPresented in
@@ -104,8 +154,39 @@ struct TimetableImportView: View {
 #if DEBUG
             print("[TimetableImport] import page disappeared")
 #endif
-            model.cancelFileSelection()
+            // Presenting the UIKit picker must not cancel the pending selection.
+            if !showingImporter { model.cancelFileSelection() }
             confirmingReplacement = false
+        }
+    }
+
+    private func finishFileSelection() {
+        defer {
+            pickerOutcome = nil
+            pickerRevision = nil
+        }
+        guard pickerRevision == state.authenticationRevision,
+              state.canAccessPrivateData else {
+            model.selectionCancelled()
+            return
+        }
+        switch pickerOutcome {
+        case .selected(let url):
+#if DEBUG
+            print("[TimetableImport] UIKit picker returned a URL; starting validation")
+#endif
+            Task {
+                await model.select(url)
+#if DEBUG
+                print(model.selectedFileName == nil
+                      ? "[TimetableImport] file validation did not complete"
+                      : "[TimetableImport] file validation completed")
+#endif
+            }
+        case .failed(let error):
+            model.fileSelectionFailed(error)
+        case .cancelled, .none:
+            model.selectionCancelled()
         }
     }
 
