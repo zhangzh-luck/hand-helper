@@ -222,6 +222,16 @@ final class ProfileTests: XCTestCase {
         XCTAssertNil(ProfileDraftState.candidate(original: saved, name: "原名称", avatar: nil).avatarData)
     }
 
+    func testAccountLogoutConfirmationWarnsAboutUnsavedProfileChanges() {
+        XCTAssertEqual(AccountSettingsConfirmation.logout.title, "退出当前账号？")
+        XCTAssertTrue(AccountSettingsConfirmation.logout.message(hasUnsavedChanges: true)
+            .contains("未保存的头像或显示名称修改将被放弃"))
+        XCTAssertTrue(AccountSettingsConfirmation.logout.message(hasUnsavedChanges: false)
+            .contains("本机已保存的个人资料会保留"))
+        XCTAssertNotEqual(AccountSettingsConfirmation.removeAvatar, .logout)
+        XCTAssertNotEqual(AccountSettingsConfirmation.discardChanges, .logout)
+    }
+
     func testAvatarPreviewPanIsBoundedAndReclampsForRotation() {
         let image = CGSize(width: 512, height: 512)
         let portrait = CGSize(width: 300, height: 500)

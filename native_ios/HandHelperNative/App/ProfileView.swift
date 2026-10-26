@@ -18,6 +18,27 @@ enum ProfilePresentation: Equatable {
     case sheet, navigation
 }
 
+enum AccountSettingsConfirmation: Equatable {
+    case removeAvatar, discardChanges, logout
+
+    var title: String {
+        switch self {
+        case .removeAvatar: "移除头像？"
+        case .discardChanges: "放弃未保存的修改？"
+        case .logout: "退出当前账号？"
+        }
+    }
+
+    func message(hasUnsavedChanges: Bool) -> String {
+        if self == .logout {
+            return hasUnsavedChanges
+                ? "未保存的头像或显示名称修改将被放弃。本机已保存的个人资料会保留。"
+                : "本机已保存的个人资料会保留，重新验证同一账号后可继续使用。"
+        }
+        return ""
+    }
+}
+
 @MainActor
 struct ProfileView: View {
     @ObservedObject var state: AppState
@@ -31,8 +52,7 @@ struct ProfileView: View {
     @State private var showPhotoPicker = false
     @State private var showPreview = false
     @State private var showCrop = false
-    @State private var showDiscard = false
-    @State private var showRemove = false
+    @State private var confirmation: AccountSettingsConfirmation?
     @State private var cropSource: Data?
     @State private var isBusy = false
     @State private var errorMessage: String?
@@ -65,7 +85,7 @@ struct ProfileView: View {
         .background {
             if presentation == .sheet {
                 ProfileDismissGuard(shouldConfirm: dirty && !mayDismiss) {
-                    showDiscard = true
+                    requestConfirmation(.discardChanges)
                 }
             }
         }
@@ -75,6 +95,7 @@ struct ProfileView: View {
         .onChange(of: state.authenticationRevision) { _, newRevision in
             if newRevision != revision {
                 selectionGeneration += 1
+                confirmation = nil
                 dismiss()
             }
         }
@@ -91,14 +112,30 @@ struct ProfileView: View {
                 }
             }
         }
-        .confirmationDialog("移除头像？", isPresented: $showRemove) {
-            Button("移除头像", role: .destructive) { avatar = nil }
-        }
-        .confirmationDialog("放弃未保存的修改？", isPresented: $showDiscard) {
-            Button("放弃修改", role: .destructive) {
-                selectionGeneration += 1
-                mayDismiss = true
-                dismiss()
+        .confirmationDialog(confirmation?.title ?? "", isPresented: Binding(
+            get: { confirmation != nil },
+            set: { if !$0 { confirmation = nil } }
+        ), titleVisibility: .visible) {
+            switch confirmation {
+            case .removeAvatar:
+                Button("移除头像", role: .destructive) { avatar = nil }
+            case .discardChanges:
+                Button("放弃修改", role: .destructive) {
+                    selectionGeneration += 1
+                    mayDismiss = true
+                    dismiss()
+                }
+            case .logout:
+                Button("退出登录", role: .destructive) {
+                    selectionGeneration += 1
+                    Task { await state.logout() }
+                }
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            if confirmation == .logout {
+                Text(AccountSettingsConfirmation.logout.message(hasUnsavedChanges: dirty))
             }
         }
         .alert("个人资料操作失败", isPresented: Binding(
@@ -120,7 +157,7 @@ struct ProfileView: View {
                     HStack(spacing: 12) {
                         Button("从相册选择") { showPhotoPicker = true }
                         if avatar != nil {
-                            Button("移除头像", role: .destructive) { showRemove = true }
+                            Button("移除头像", role: .destructive) { requestConfirmation(.removeAvatar) }
                         }
                     }
                     .buttonStyle(.bordered)
@@ -147,8 +184,15 @@ struct ProfileView: View {
                     Text(profileError).foregroundStyle(.red)
                 }
             }
+
+            Section {
+                Button(role: .destructive) { requestConfirmation(.logout) } label: {
+                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+                .disabled(isBusy || showPhotoPicker || showPreview || showCrop)
+            }
         }
-        .navigationTitle("个人资料")
+        .navigationTitle("账户设置")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(presentation == .navigation && (dirty || isBusy))
         .toolbar {
@@ -184,12 +228,18 @@ struct ProfileView: View {
     }
 
     private func close() {
-        if dirty { showDiscard = true }
+        guard !isBusy else { return }
+        if dirty { requestConfirmation(.discardChanges) }
         else {
             selectionGeneration += 1
             mayDismiss = true
             dismiss()
         }
+    }
+
+    private func requestConfirmation(_ choice: AccountSettingsConfirmation) {
+        guard confirmation == nil, !isBusy, !showPhotoPicker, !showPreview, !showCrop else { return }
+        confirmation = choice
     }
 
     private func save() {

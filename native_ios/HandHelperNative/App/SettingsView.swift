@@ -4,7 +4,6 @@ import UIKit
 @MainActor
 struct SettingsView: View {
     @ObservedObject var state: AppState
-    @State private var confirmLogout = false
 
     var body: some View {
         NavigationStack {
@@ -20,7 +19,7 @@ struct SettingsView: View {
                                 Text(state.currentProfile.resolvedDisplayName)
                                     .font(.headline)
                                     .foregroundStyle(.primary)
-                                Text("个人资料")
+                                Text("账户设置")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -73,21 +72,8 @@ struct SettingsView: View {
                         Label("关于航的助手", systemImage: "info.circle")
                     }
                 }
-
-                Section {
-                    Button(role: .destructive) { confirmLogout = true } label: {
-                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                }
             }
             .navigationTitle("设置")
-            .confirmationDialog("退出当前账号？", isPresented: $confirmLogout) {
-                Button("退出登录", role: .destructive) {
-                    Task { await state.logout() }
-                }
-            } message: {
-                Text("本机保存的个人资料会保留，重新验证同一账号后可继续使用。")
-            }
         }
     }
 
