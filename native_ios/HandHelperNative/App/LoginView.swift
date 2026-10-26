@@ -3,150 +3,209 @@ import SwiftUI
 @MainActor
 struct LoginView: View {
     @ObservedObject var state: AppState
-    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedField: Field?
     @State private var username = ""
     @State private var password = ""
     @State private var showsPassword = false
 
-    private enum Field { case username, password }
-    private var dark: Bool { colorScheme == .dark }
-    private let blue = Color(red: 10 / 255, green: 132 / 255, blue: 1)
+    private enum Field: Hashable { case username, password }
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                let compact = geometry.size.height < 700
+            ScrollViewReader { scroll in
                 ScrollView {
                     VStack(spacing: 0) {
-                        themeButton
+                        appearanceMenu
                             .frame(maxWidth: .infinity, alignment: .trailing)
+
                         Image("BrandMark")
-                            .resizable().scaledToFit()
-                            .frame(width: compact ? 64 : 76, height: compact ? 64 : 76)
-                            .clipShape(RoundedRectangle(cornerRadius: compact ? 19 : 22))
-                            .shadow(color: blue.opacity(dark ? 0.2 : 0.25), radius: 18, y: 12)
-                            .padding(.top, compact ? 19 : 37)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 72, height: 72)
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                            .accessibilityHidden(true)
+                            .padding(.top, 32)
+
                         Text("欢迎回来")
-                            .font(.system(size: 13, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundStyle(dark ? TodayStyle.color(0x69adff) : TodayStyle.color(0x3974bf))
-                            .padding(.top, 19)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.top, 22)
                         Text("航的助手")
-                            .font(.system(size: compact ? 27 : 30, weight: .heavy))
-                            .tracking(-0.9)
-                            .foregroundStyle(dark ? TodayStyle.color(0xf5f5f7) : TodayStyle.color(0x172033))
-                            .padding(.top, 7)
+                            .font(.largeTitle.bold())
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 6)
 
-                        VStack(spacing: 0) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "person").frame(width: 26)
-                                TextField("账号", text: $username)
-                                    .foregroundStyle(dark ? TodayStyle.color(0xf5f5f7) : TodayStyle.color(0x172033))
-                                    .textContentType(.username)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .submitLabel(.next)
-                                    .focused($focusedField, equals: .username)
-                                    .onSubmit { focusedField = .password }
-                            }
-                            .frame(height: 60)
-                            Divider().padding(.leading, 51)
-                            HStack(spacing: 12) {
-                                Image(systemName: "lock").frame(width: 26)
-                                Group {
-                                    if showsPassword {
-                                        TextField("密码", text: $password)
-                                    } else {
-                                        SecureField("密码", text: $password)
-                                    }
-                                }
-                                .foregroundStyle(dark ? TodayStyle.color(0xf5f5f7) : TodayStyle.color(0x172033))
-                                .textContentType(.password)
-                                .submitLabel(.go)
-                                .focused($focusedField, equals: .password)
-                                .onSubmit { submit() }
-                                Button { showsPassword.toggle(); focusedField = .password } label: {
-                                    Image(systemName: showsPassword ? "eye.slash" : "eye")
-                                        .frame(width: 36, height: 44)
-                                }
-                                .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
-                            }
-                            .frame(height: 60)
-                        }
-                        .padding(.horizontal, 13)
-                        .foregroundStyle(dark ? TodayStyle.color(0xa1a1a6) : TodayStyle.color(0x6b7d96))
-                        .background(dark ? TodayStyle.color(0x1c1c1e, alpha: 0.87) : .white.opacity(0.76),
-                                    in: RoundedRectangle(cornerRadius: 19))
-                        .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(
-                            dark ? .white.opacity(0.09) : TodayStyle.color(0x0f172a, alpha: 0.07)))
-                        .shadow(color: .black.opacity(dark ? 0.25 : 0.06), radius: 12, y: 8)
-                        .padding(.top, compact ? 38 : 60)
+                        credentials
+                            .padding(.top, 44)
 
-                        if let error = state.loginError {
-                            Text(error).font(.system(size: 13)).foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 12)
-                        }
-                        Button(action: submit) {
-                            Group {
-                                if state.isLoginSubmitting { ProgressView().tint(.white) }
-                                else { Text("登录").font(.system(size: 17, weight: .bold)) }
-                            }
-                            .frame(maxWidth: state.isLoginSubmitting ? 56 : .infinity, minHeight: 56)
-                            .foregroundStyle(.white)
-                            .background(blue, in: RoundedRectangle(cornerRadius: state.isLoginSubmitting ? 28 : 18))
-                            .shadow(color: blue.opacity(0.25), radius: 8, y: 5)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(state.isLoginSubmitting || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-                        .animation(.easeInOut(duration: 0.22), value: state.isLoginSubmitting)
-                        .padding(.top, 16)
+                        Text(state.loginError ?? " ")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
+                            .opacity(state.loginError == nil ? 0 : 1)
+                            .accessibilityHidden(state.loginError == nil)
+                            .padding(.top, 12)
+
+                        loginButton
                     }
-                    .frame(maxWidth: 400)
-                    .padding(.horizontal, 22)
+                    .frame(maxWidth: 420)
+                    .padding(.horizontal, 24)
                     .padding(.top, 16)
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 32)
                     .frame(maxWidth: .infinity)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .onChange(of: focusedField) { _, field in
+                    guard let field else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        scroll.scrollTo(field, anchor: .center)
+                    }
+                }
             }
-            .background {
-                LinearGradient(colors: dark
-                    ? [TodayStyle.color(0x080a0f), TodayStyle.color(0x10141b), TodayStyle.color(0x07080b)]
-                    : [TodayStyle.color(0xf9fbff), TodayStyle.color(0xf3f7fc), TodayStyle.color(0xedf3f9)],
-                    startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-                GeometryReader { geometry in
-                    Circle().fill(RadialGradient(colors: [blue.opacity(dark ? 0.17 : 0.22), .clear],
-                                                  center: .center, startRadius: 0, endRadius: 170))
-                        .frame(width: 340, height: 340)
-                        .position(x: 20, y: 0)
-                    Circle().fill(RadialGradient(colors: [TodayStyle.color(0x5b6fff).opacity(0.15), .clear],
-                                                  center: .center, startRadius: 0, endRadius: 170))
-                        .frame(width: 340, height: 340)
-                        .position(x: geometry.size.width, y: geometry.size.height)
-                }.ignoresSafeArea().allowsHitTesting(false)
-            }
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
     }
 
-    private var themeButton: some View {
-        Button {
-            state.setAppearance(dark ? .light : .dark)
-        } label: {
-            Image(systemName: dark ? "sun" : "moon")
-                .font(.system(size: 20))
-                .foregroundStyle(dark ? TodayStyle.color(0x69adff) : blue)
-                .frame(width: 40, height: 40)
-                .background(.white.opacity(dark ? 0.05 : 0.48), in: Circle())
+    private var credentials: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Image(systemName: "person")
+                    .frame(width: 24)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                TextField("账号", text: $username)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .username)
+                    .onSubmit { focusedField = .password }
+                    .id(Field.username)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+
+            Divider().padding(.leading, 56)
+
+            HStack(spacing: 14) {
+                Image(systemName: "lock")
+                    .frame(width: 24)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Group {
+                    if showsPassword {
+                        TextField("密码", text: $password)
+                            .textContentType(.password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.go)
+                            .focused($focusedField, equals: .password)
+                            .onSubmit(submit)
+                    } else {
+                        SecureField("密码", text: $password)
+                            .textContentType(.password)
+                            .submitLabel(.go)
+                            .focused($focusedField, equals: .password)
+                            .onSubmit(submit)
+                    }
+                }
+                .id(Field.password)
+
+                Button {
+                    let wasFocused = focusedField == .password
+                    showsPassword.toggle()
+                    if wasFocused {
+                        Task { @MainActor in
+                            await Task.yield()
+                            focusedField = .password
+                        }
+                    }
+                } label: {
+                    Image(systemName: showsPassword ? "eye.slash" : "eye")
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 6)
+            .padding(.vertical, 6)
         }
-        .accessibilityLabel(dark ? "切换为浅色模式" : "切换为深色模式")
+        .font(.body)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var loginButton: some View {
+        let button = Button(action: submit) {
+            ZStack {
+                Text("登录")
+                    .opacity(state.isLoginSubmitting ? 0 : 1)
+                ProgressView()
+                    .tint(.white)
+                    .opacity(state.isLoginSubmitting ? 1 : 0)
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity, minHeight: 56)
+        }
+        .disabled(state.isLoginSubmitting || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+        .accessibilityLabel(state.isLoginSubmitting ? "正在登录" : "登录")
+
+        return Group {
+            if #available(iOS 26.0, *) {
+                button.buttonStyle(.glassProminent)
+            } else {
+                button.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var appearanceMenu: some View {
+        let menu = Menu {
+            ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                Button {
+                    state.setAppearance(mode)
+                } label: {
+                    Label(appearanceTitle(for: mode), systemImage: state.appearance == mode ? "checkmark" : "circle")
+                }
+            }
+        } label: {
+            Label("外观", systemImage: "circle.lefthalf.filled")
+        }
+        .accessibilityLabel("外观设置")
+
+        return Group {
+            if #available(iOS 26.0, *) {
+                menu.buttonStyle(.glass)
+            } else {
+                menu.buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func appearanceTitle(for mode: AppearanceMode) -> String {
+        switch mode {
+        case .system: "跟随系统"
+        case .light: "浅色"
+        case .dark: "深色"
+        }
     }
 
     private func submit() {
         guard !state.isLoginSubmitting else { return }
+        guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            focusedField = .username
+            return
+        }
+        guard !password.isEmpty else {
+            focusedField = .password
+            return
+        }
         focusedField = nil
-        Task { await state.login(username: username, password: password) }
+        let enteredUsername = username
+        let enteredPassword = password
+        Task { await state.login(username: enteredUsername, password: enteredPassword) }
     }
 }
