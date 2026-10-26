@@ -19,23 +19,36 @@ enum ProfilePresentation: Equatable {
 }
 
 enum AccountSettingsConfirmation: Equatable {
-    case removeAvatar, discardChanges, logout
+    case removeAvatar, discardChanges
 
     var title: String {
         switch self {
         case .removeAvatar: "移除头像？"
         case .discardChanges: "放弃未保存的修改？"
+        }
+    }
+}
+
+enum AccountSettingsAlert: Equatable {
+    case logout(hasUnsavedChanges: Bool)
+    case profileError(String)
+
+    var title: String {
+        switch self {
         case .logout: "退出当前账号？"
+        case .profileError: "个人资料操作失败"
         }
     }
 
-    func message(hasUnsavedChanges: Bool) -> String {
-        if self == .logout {
+    var message: String {
+        switch self {
+        case .logout(let hasUnsavedChanges):
             return hasUnsavedChanges
                 ? "未保存的头像或显示名称修改将被放弃。本机已保存的个人资料会保留。"
                 : "本机已保存的个人资料会保留，重新验证同一账号后可继续使用。"
+        case .profileError(let message):
+            return message
         }
-        return ""
     }
 }
 
@@ -53,9 +66,10 @@ struct ProfileView: View {
     @State private var showPreview = false
     @State private var showCrop = false
     @State private var confirmation: AccountSettingsConfirmation?
+    @State private var activeAlert: AccountSettingsAlert?
     @State private var cropSource: Data?
     @State private var isBusy = false
-    @State private var errorMessage: String?
+    @State private var logoutRequested = false
     @State private var mayDismiss = false
     @State private var selectionGeneration = 0
 
@@ -96,6 +110,8 @@ struct ProfileView: View {
             if newRevision != revision {
                 selectionGeneration += 1
                 confirmation = nil
+                activeAlert = nil
+                logoutRequested = false
                 dismiss()
             }
         }
@@ -125,24 +141,37 @@ struct ProfileView: View {
                     mayDismiss = true
                     dismiss()
                 }
+            case nil:
+                EmptyView()
+            }
+        }
+        .alert(activeAlert?.title ?? "", isPresented: Binding(
+            get: { activeAlert != nil },
+            set: { if !$0 { activeAlert = nil } }
+        )) {
+            switch activeAlert {
             case .logout:
+                Button("取消", role: .cancel) { }
                 Button("退出登录", role: .destructive) {
-                    selectionGeneration += 1
-                    Task { await state.logout() }
+                    guard !logoutRequested else { return }
+                    logoutRequested = true
+                    Task {
+                        guard (try? state.requireCurrentAccount(revision: revision)) != nil else {
+                            logoutRequested = false
+                            return
+                        }
+                        selectionGeneration += 1
+                        await state.logout()
+                    }
                 }
+            case .profileError:
+                Button("确定", role: .cancel) { }
             case nil:
                 EmptyView()
             }
         } message: {
-            if confirmation == .logout {
-                Text(AccountSettingsConfirmation.logout.message(hasUnsavedChanges: dirty))
-            }
+            if let activeAlert { Text(activeAlert.message) }
         }
-        .alert("个人资料操作失败", isPresented: Binding(
-            get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("确定", role: .cancel) { errorMessage = nil }
-        } message: { Text(errorMessage ?? "") }
     }
 
     private var editor: some View {
@@ -186,10 +215,10 @@ struct ProfileView: View {
             }
 
             Section {
-                Button(role: .destructive) { requestConfirmation(.logout) } label: {
+                Button(role: .destructive) { requestLogoutAlert() } label: {
                     Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                 }
-                .disabled(isBusy || showPhotoPicker || showPreview || showCrop)
+                .disabled(isBusy || logoutRequested || showPhotoPicker || showPreview || showCrop)
             }
         }
         .navigationTitle("账户设置")
@@ -228,7 +257,7 @@ struct ProfileView: View {
     }
 
     private func close() {
-        guard !isBusy else { return }
+        guard !isBusy, !logoutRequested else { return }
         if dirty { requestConfirmation(.discardChanges) }
         else {
             selectionGeneration += 1
@@ -238,13 +267,24 @@ struct ProfileView: View {
     }
 
     private func requestConfirmation(_ choice: AccountSettingsConfirmation) {
-        guard confirmation == nil, !isBusy, !showPhotoPicker, !showPreview, !showCrop else { return }
+        guard confirmation == nil, activeAlert == nil, !logoutRequested,
+              !isBusy, !showPhotoPicker, !showPreview, !showCrop else { return }
         confirmation = choice
+    }
+
+    private func requestLogoutAlert() {
+        guard confirmation == nil, activeAlert == nil, !logoutRequested,
+              !isBusy, !showPhotoPicker, !showPreview, !showCrop,
+              (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
+        activeAlert = .logout(hasUnsavedChanges: dirty)
     }
 
     private func save() {
         guard !isBusy else { return }
-        guard validName else { errorMessage = LocalProfileError.invalidName.localizedDescription; return }
+        guard validName else {
+            activeAlert = .profileError(LocalProfileError.invalidName.localizedDescription)
+            return
+        }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -253,7 +293,7 @@ struct ProfileView: View {
             selectionGeneration += 1
             mayDismiss = true
             dismiss()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { activeAlert = .profileError(error.localizedDescription) }
     }
 
     private func selectPhoto(_ item: PhotosPickerItem?) {
@@ -276,7 +316,7 @@ struct ProfileView: View {
             } catch {
                 guard generation == selectionGeneration else { return }
                 guard (try? state.requireCurrentAccount(revision: selectedRevision)) != nil else { return }
-                errorMessage = error.localizedDescription
+                activeAlert = .profileError(error.localizedDescription)
             }
         }
     }
