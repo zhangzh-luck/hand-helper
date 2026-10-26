@@ -121,7 +121,8 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             switch tab {
             case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview))
             case .settings: page = AnyView(SettingsView(state: state))
-            case .timetable, .analysis: page = AnyView(PlaceholderPage(tab: tab))
+            case .analysis: page = AnyView(AnalysisView(state: state))
+            case .timetable: page = AnyView(PlaceholderPage(tab: tab))
             }
             let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)

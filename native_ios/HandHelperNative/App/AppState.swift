@@ -70,6 +70,8 @@ final class AppState: ObservableObject {
     private var courseDataSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
     private var timetableUploadCancellation: (() -> Void)?
+    @Published private(set) var pendingGradeImport: PendingGradeImport?
+    private var gradeUploadCancellation: (() -> Void)?
     @Published private(set) var pendingAcademicTimeWrites: [PendingAcademicTimeWrite] = []
     private var academicTimeReconcileInFlight = false
     private var academicTimeReconcileRequested = false
@@ -194,6 +196,52 @@ final class AppState: ObservableObject {
             return nil
         }
         return marker
+    }
+
+    var visibleGradeImport: PendingGradeImport? {
+        guard let pendingGradeImport,
+              (try? requireCurrentAccount(revision: authenticationRevision)) == pendingGradeImport.owner else {
+            return nil
+        }
+        return pendingGradeImport
+    }
+
+    func beginGradeImport(revision: Int) throws -> UUID {
+        let owner = try requireCurrentAccount(revision: revision)
+        guard pendingGradeImport == nil else {
+            throw APIError.server(status: 409, message: "请先关闭上一次成绩预览。")
+        }
+        let id = UUID()
+        pendingGradeImport = PendingGradeImport(id: id, owner: owner, phase: .uploading)
+        return id
+    }
+
+    func setGradeUploadCancellation(_ cancel: @escaping () -> Void, id: UUID) {
+        guard pendingGradeImport?.id == id else { cancel(); return }
+        gradeUploadCancellation = cancel
+    }
+
+    func acceptGradePreview(_ preview: GradeImportPreview, id: UUID) {
+        guard let pendingGradeImport, pendingGradeImport.id == id,
+              case .uploading = pendingGradeImport.phase else { return }
+        gradeUploadCancellation = nil
+        pendingGradeImport?.phase = .ready(preview)
+        // A rotated Cookie leaves the preview hidden until /auth/me verifies the
+        // original owner again. A different account can never adopt this ticket.
+    }
+
+    func failGradeImport(_ message: String, id: UUID) {
+        guard let pendingGradeImport, pendingGradeImport.id == id,
+              case .uploading = pendingGradeImport.phase else { return }
+        gradeUploadCancellation = nil
+        pendingGradeImport?.phase = .failed(message)
+    }
+
+    func discardGradeImport(id: UUID) {
+        guard pendingGradeImport?.id == id else { return }
+        gradeUploadCancellation?()
+        gradeUploadCancellation = nil
+        pendingGradeImport = nil
     }
 
     var visibleTimetableImport: PendingTimetableImport? {
@@ -595,6 +643,9 @@ final class AppState: ObservableObject {
         timetableUploadCancellation?()
         timetableUploadCancellation = nil
         pendingTimetableImport = nil
+        gradeUploadCancellation?()
+        gradeUploadCancellation = nil
+        pendingGradeImport = nil
         isLoginSubmitting = false
         verifiedAccount.clear()
         courseDataInvalidation = nil
@@ -619,6 +670,9 @@ final class AppState: ObservableObject {
         timetableUploadCancellation?()
         timetableUploadCancellation = nil
         pendingTimetableImport = nil
+        gradeUploadCancellation?()
+        gradeUploadCancellation = nil
+        pendingGradeImport = nil
         isLoginSubmitting = false
         isAuthenticated = false
         verifiedAccount.clear()
