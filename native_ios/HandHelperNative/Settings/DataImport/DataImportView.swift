@@ -12,8 +12,13 @@ struct DataImportView: View {
                 } label: {
                     Label("导入课表", systemImage: "calendar.badge.plus")
                 }
+                NavigationLink {
+                    GradeImportView(state: state)
+                } label: {
+                    Label("导入成绩", systemImage: "doc.badge.plus")
+                }
             } footer: {
-                Text("选择教务系统打印导出的 .xls 文件。导入结果会更新今日课程。")
+                Text("课表导入会更新今日课程；成绩导入目前仅解析并预览，不会写入成绩。")
             }
         }
         .navigationTitle("数据与导入")

@@ -50,7 +50,7 @@ struct SettingsView: View {
                         Label("数据与导入", systemImage: "square.and.arrow.down")
                     }
                 } footer: {
-                    Text("从教务系统导出的文件导入课表。")
+                    Text("从教务系统导出的文件导入课表，或解析并预览成绩。")
                 }
 
                 Section("外观") {
