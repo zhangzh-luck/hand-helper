@@ -6,7 +6,7 @@ struct PersonalizationView: View {
 
     var body: some View {
         Form {
-            Section("外观") {
+            Section {
                 Picker("显示模式", selection: Binding(
                     get: { state.appearance },
                     set: { state.setAppearance($0) }
@@ -16,16 +16,20 @@ struct PersonalizationView: View {
                     }
                 }
                 .pickerStyle(.inline)
+            } header: {
+                Text("外观")
             } footer: {
                 Text("跟随系统会使用设备当前的外观设置。")
             }
 
-            Section("壁纸") {
+            Section {
                 NavigationLink {
                     WallpaperSettingsView(state: state)
                 } label: {
                     Label("今日页壁纸", systemImage: "photo")
                 }
+            } header: {
+                Text("壁纸")
             } footer: {
                 Text("壁纸仅保存在此设备，今日页只负责显示。")
             }

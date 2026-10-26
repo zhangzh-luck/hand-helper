@@ -120,7 +120,7 @@ struct WallpaperSettingsView: View {
                 }
             }
 
-            Section("管理") {
+            Section {
                 PhotosPicker(selection: $selectedPhoto, matching: .images) {
                     Label("更换壁纸", systemImage: "photo.on.rectangle")
                 }
@@ -134,6 +134,8 @@ struct WallpaperSettingsView: View {
                 .disabled(model.isWorking || model.wallpaperData == nil)
 
                 if model.isWorking { ProgressView("正在保存壁纸") }
+            } header: {
+                Text("管理")
             } footer: {
                 Text("壁纸只保存在此设备，不会上传服务器。")
             }
