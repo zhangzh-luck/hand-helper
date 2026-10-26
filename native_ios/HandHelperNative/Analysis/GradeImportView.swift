@@ -17,7 +17,7 @@ struct GradeImportView: View {
 
     var body: some View {
         List {
-            Section("文件与学期") {
+            Section {
                 TextField("学期（可留空自动识别）", text: $model.termID)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -47,6 +47,8 @@ struct GradeImportView: View {
                     Button("上传并预览") { model.startUpload() }
                         .disabled(!model.canUpload)
                 }
+            } header: {
+                Text("文件与学期")
             } footer: {
                 Text("支持 .xls、.html、.htm，最大 2,000,000 字节。学期留空时由文件内容识别。上传仅生成预览，不保存成绩。")
             }
