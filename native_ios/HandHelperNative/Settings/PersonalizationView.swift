@@ -7,15 +7,20 @@ struct PersonalizationView: View {
     var body: some View {
         Form {
             Section {
-                Picker("显示模式", selection: Binding(
-                    get: { state.appearance },
-                    set: { state.setAppearance($0) }
-                )) {
-                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                        Text(mode.settingsTitle).tag(mode)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("显示模式")
+                        .font(.subheadline)
+                    Picker("显示模式", selection: Binding(
+                        get: { state.appearance },
+                        set: { state.setAppearance($0) }
+                    )) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                            Text(mode.settingsTitle).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.inline)
             } header: {
                 Text("外观")
             } footer: {
