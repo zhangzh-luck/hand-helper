@@ -52,16 +52,11 @@ struct SettingsView: View {
                     Text("从教务系统导出的文件导入课表，或解析并预览成绩。")
                 }
 
-                Section("外观") {
+                Section("个性化") {
                     NavigationLink {
-                        AppearanceSettingsView(state: state)
+                        PersonalizationView(state: state)
                     } label: {
-                        LabeledContent {
-                            Text(state.appearance.settingsTitle)
-                                .foregroundStyle(.secondary)
-                        } label: {
-                            Label("显示模式", systemImage: "circle.lefthalf.filled")
-                        }
+                        Label("个性化", systemImage: "paintpalette")
                     }
                 }
 
@@ -92,41 +87,6 @@ struct SettingsView: View {
         .background(Color.accentColor.opacity(0.12))
         .clipShape(Circle())
         .accessibilityHidden(true)
-    }
-}
-
-private extension AppearanceMode {
-    var settingsTitle: String {
-        switch self {
-        case .system: "跟随系统"
-        case .light: "浅色"
-        case .dark: "深色"
-        }
-    }
-}
-
-@MainActor
-private struct AppearanceSettingsView: View {
-    @ObservedObject var state: AppState
-
-    var body: some View {
-        Form {
-            Section {
-                Picker("显示模式", selection: Binding(
-                    get: { state.appearance },
-                    set: { state.setAppearance($0) }
-                )) {
-                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                        Text(mode.settingsTitle).tag(mode)
-                    }
-                }
-                .pickerStyle(.inline)
-            } footer: {
-                Text("跟随系统会使用设备当前的外观设置。")
-            }
-        }
-        .navigationTitle("外观")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

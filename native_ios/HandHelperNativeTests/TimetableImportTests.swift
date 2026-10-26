@@ -222,7 +222,7 @@ final class TimetableImportTests: XCTestCase {
         try account.confirm(username: "alice", cookie: "session=alice")
         let repository = DiskCourseRepository(api: api, session: session, account: account, directory: folder)
         let today = TodayViewModel(repository: repository,
-                                   wallpaperStore: WallpaperStore(session: session, directory: folder))
+                                   wallpaperStore: WallpaperStore(session: session, account: account, directory: folder))
         let importModel = TimetableImportViewModel(state: state, reader: TimetableReaderStub(),
                                                    service: TimetableImportService(api: api))
         await importModel.select(URL(fileURLWithPath: "/printed.xls"))

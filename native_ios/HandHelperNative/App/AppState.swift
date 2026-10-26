@@ -67,6 +67,7 @@ final class AppState: ObservableObject {
     @Published private(set) var authenticationStatus: AuthenticationStatus = .signedOut
     @Published private(set) var authenticationRevision = 0
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
+    @Published private(set) var wallpaperVersion = 0
     private var courseDataSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
     private var timetableUploadCancellation: (() -> Void)?
@@ -122,6 +123,11 @@ final class AppState: ObservableObject {
     func setAppearance(_ mode: AppearanceMode) {
         appearance = mode
         preferences.set(mode.rawValue, forKey: Self.appearanceKey)
+    }
+
+    func wallpaperDidChange(revision: Int) throws {
+        _ = try requireCurrentAccount(revision: revision)
+        wallpaperVersion += 1
     }
 
     var homeAvatar: UIImage? { cachedHomeAvatar }

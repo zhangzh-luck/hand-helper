@@ -406,7 +406,9 @@ final class AuthenticationTests: XCTestCase {
         alice.lastRefreshDate = "2026-10-23"
         repository.snapshots["alice"] = alice
         repository.snapshots["bob"] = .empty
-        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session, directory: folder))
+        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session,
+                                                                                        account: VerifiedAccountContext(),
+                                                                                        directory: folder))
 
         model.authenticationDidChange(allowPrivateCache: false)
         XCTAssertNil(model.snapshot)
@@ -439,7 +441,9 @@ final class AuthenticationTests: XCTestCase {
         let localStore = LocalScheduleStore(session: session, account: state.verifiedAccount, directory: folder)
         let repository = DiskCourseRepository(api: api, session: session, account: state.verifiedAccount,
                                               directory: folder, localStore: localStore)
-        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session, directory: folder))
+        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session,
+                                                                                        account: state.verifiedAccount,
+                                                                                        directory: folder))
 
         model.load(allowPrivateCache: false)
         XCTAssertNil(model.snapshot)

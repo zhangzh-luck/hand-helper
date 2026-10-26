@@ -40,6 +40,87 @@ final class TodayTests: XCTestCase {
         XCTAssertNil(WallpaperStore.decodeDataURL("data:image/png;base64"))
     }
 
+    @MainActor
+    func testDeviceWallpaperPersistsAcrossCookiesAndDefaultDoesNotRestoreOldImage() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = TodayTestSessionStore()
+        let account = VerifiedAccountContext()
+        let store = WallpaperStore(session: session, account: account, directory: folder)
+        session.save(cookie: "session=alice")
+        XCTAssertThrowsError(try store.load())
+        XCTAssertThrowsError(try store.save(Data([1])))
+        XCTAssertThrowsError(try store.remove())
+
+        try account.confirm(username: "alice", cookie: "session=alice")
+        try store.save(Data([1, 2, 3]))
+        XCTAssertEqual(try store.load(), Data([1, 2, 3]))
+        let restartedStore = WallpaperStore(session: session, account: account, directory: folder)
+        XCTAssertEqual(try restartedStore.load(), Data([1, 2, 3]))
+        account.clear()
+        session.clear()
+        XCTAssertThrowsError(try store.load())
+
+        session.save(cookie: "session=bob")
+        try account.confirm(username: "bob", cookie: "session=bob")
+        XCTAssertEqual(try store.load(), Data([1, 2, 3]))
+        try store.remove()
+        XCTAssertNil(try store.load())
+        account.clear()
+        session.save(cookie: "session=alice-new")
+        try account.confirm(username: "alice", cookie: "session=alice-new")
+        XCTAssertNil(try store.load())
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("today_wallpaper_device_v1.image")), Data())
+    }
+
+    @MainActor
+    func testCurrentCookieLegacyWallpaperMigratesOnlyWhenDeviceFileIsAbsent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TodayTestSessionStore()
+        let account = VerifiedAccountContext()
+        session.save(cookie: "session=legacy")
+        try account.confirm(username: "alice", cookie: "session=legacy")
+        let legacyKey = "\(APIConfiguration.development.baseURL.absoluteString)|session=legacy"
+        let digest = SHA256.hash(data: Data(legacyKey.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let legacyFile = folder.appendingPathComponent("today_wallpaper_\(digest).image")
+        try Data([4, 5]).write(to: legacyFile)
+        let store = WallpaperStore(session: session, account: account, directory: folder)
+        XCTAssertEqual(try store.load(), Data([4, 5]))
+        try store.save(Data([8, 9]))
+        XCTAssertEqual(try store.load(), Data([8, 9]))
+        try store.remove()
+        XCTAssertNil(try store.load())
+        XCTAssertEqual(try Data(contentsOf: legacyFile), Data([4, 5]))
+    }
+
+    @MainActor
+    func testOldSnapshotWallpaperCannotOverrideDefaultBackground() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = TodayTestSessionStore()
+        let account = VerifiedAccountContext()
+        session.save(cookie: "session=fixture")
+        try account.confirm(username: "tester", cookie: "session=fixture")
+        let repository = DiskCourseRepository(api: MockAPIClient(), session: session,
+                                              account: account, directory: folder)
+        try repository.saveProfile(TodayProfile(displayName: "航的助手", avatarDataURL: nil,
+                                                homeWallpaperDataURL: "data:image/png;base64,AQID"))
+        let store = WallpaperStore(session: session, account: account, directory: folder)
+        let model = TodayViewModel(repository: repository, wallpaperStore: store)
+        model.load()
+        XCTAssertNil(model.wallpaperData)
+        try store.save(Data([6, 7]))
+        try model.reloadWallpaper()
+        XCTAssertEqual(model.wallpaperData, Data([6, 7]))
+        try store.remove()
+        try model.reloadWallpaper()
+        XCTAssertNil(model.wallpaperData)
+        XCTAssertEqual(try repository.cached()?.profile.homeWallpaperDataURL, "data:image/png;base64,AQID")
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -140,7 +221,7 @@ final class TodayTests: XCTestCase {
         try account.confirm(username: "tester", cookie: "session=fixture")
         let api = MockAPIClient()
         let repository = DiskCourseRepository(api: api, session: sessionStore, account: account, directory: folder)
-        let wallpaper = WallpaperStore(session: sessionStore, directory: folder)
+        let wallpaper = WallpaperStore(session: sessionStore, account: account, directory: folder)
         let clock = MutableTodayClock(now: localDate(2026, 10, 23, 23, 59))
         let model = TodayViewModel(repository: repository, wallpaperStore: wallpaper, clock: clock)
         XCTAssertTrue(model.canEditSchedules)
@@ -162,13 +243,14 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(try repository.allLocalSchedules(), [schedule])
         XCTAssertEqual(try repository.cached()?.manualRules, [rule])
         XCTAssertEqual(restored.wallpaperData, Data([1, 2, 3]))
-        try restored.removeWallpaper()
+        try wallpaper.remove()
+        try restored.reloadWallpaper()
         XCTAssertNil(try wallpaper.load())
         XCTAssertNil(restored.wallpaperData)
         sessionStore.clear()
         account.clear()
         XCTAssertThrowsError(try repository.cached())
-        XCTAssertNil(try wallpaper.load())
+        XCTAssertThrowsError(try wallpaper.load())
         XCTAssertThrowsError(try repository.allLocalSchedules())
     }
 
@@ -182,7 +264,7 @@ final class TodayTests: XCTestCase {
         try account.confirm(username: "tester", cookie: "session=fixture")
         let api = MockAPIClient()
         let repository = DiskCourseRepository(api: api, session: sessionStore, account: account, directory: folder)
-        let wallpaper = WallpaperStore(session: sessionStore, directory: folder)
+        let wallpaper = WallpaperStore(session: sessionStore, account: account, directory: folder)
         let schedule = CustomSchedule(id: -1, title: "作业", date: "2026-10-23", time: "09:00")
         try repository.saveSchedule(CustomSchedule(id: 0, title: schedule.title, date: schedule.date, time: schedule.time))
         api.error = .connection
@@ -204,7 +286,7 @@ final class TodayTests: XCTestCase {
         let store = LocalScheduleStore(session: session, account: account, directory: folder)
         let repository = DiskCourseRepository(api: MockAPIClient(), session: session, account: account,
                                               directory: folder, localStore: store)
-        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session, directory: folder))
+        let model = TodayViewModel(repository: repository, wallpaperStore: WallpaperStore(session: session, account: account, directory: folder))
         let fixture = CustomSchedule(id: 0, title: "作业", date: "2026-10-23", time: "09:00")
         for cookie in ([nil, "session=unverified"] as [String?]) {
             if let cookie { session.save(cookie: cookie) } else { session.clear() }
@@ -235,7 +317,7 @@ final class TodayTests: XCTestCase {
         try account.confirm(username: " Alice ", cookie: "session=alice")
         let model = TodayViewModel(repository: DiskCourseRepository(api: MockAPIClient(), session: session,
                               account: account, directory: folder, localStore: store),
-                              wallpaperStore: WallpaperStore(session: session, directory: folder),
+                              wallpaperStore: WallpaperStore(session: session, account: account, directory: folder),
                               clock: MutableTodayClock(now: localDate(2026, 10, 23, 12, 0)))
         model.load()
         XCTAssertTrue(model.canEditSchedules)

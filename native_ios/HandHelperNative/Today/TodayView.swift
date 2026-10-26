@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 
 @MainActor
@@ -13,8 +12,6 @@ struct TodayView: View {
     @ScaledMetric(relativeTo: .title) private var avatarDimension: CGFloat = 60
     @State private var editor: ScheduleEditorRoute?
     @State private var pendingDelete: PendingScheduleDelete?
-    @State private var showPhotoPicker = false
-    @State private var selectedPhoto: PhotosPickerItem?
     @State private var localError: String?
     @State private var appliedCourseInvalidationSequence: Int?
 
@@ -23,7 +20,7 @@ struct TodayView: View {
         self.onAvatarPreview = onAvatarPreview
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
-        let wallpaper = WallpaperStore(session: state.sessionStore)
+        let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
     }
 
@@ -123,10 +120,14 @@ struct TodayView: View {
             appliedCourseInvalidationSequence = nil
             editor = nil
             pendingDelete = nil
-            selectedPhoto = nil
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
+        }
+        .onChange(of: state.wallpaperVersion) { _, _ in
+            guard state.canAccessPrivateData else { return }
+            do { try model.reloadWallpaper() }
+            catch { localError = "本机壁纸无法读取：\(error.localizedDescription)" }
         }
         .onChange(of: state.courseDataInvalidation) { _, _ in
             if state.selectedTab == .today && pendingCourseInvalidation != nil {
@@ -170,18 +171,6 @@ struct TodayView: View {
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
-        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images)
-        .onChange(of: selectedPhoto) { _, item in
-            let revision = state.authenticationRevision
-            Task {
-                guard let data = try? await item?.loadTransferable(type: Data.self) else { return }
-                do {
-                    _ = try state.requireCurrentAccount(revision: revision)
-                    try model.setWallpaper(data)
-                }
-                catch { localError = error.localizedDescription }
-            }
-        }
     }
 
     private func scheduleCard(_ schedule: CustomSchedule, revision: Int) -> some View {
@@ -269,12 +258,6 @@ struct TodayView: View {
                     Task { await state.logout() }
                 }
             }
-            Button("更换今日壁纸", systemImage: "photo") { showPhotoPicker = true }
-                .disabled(!state.canAccessPrivateData)
-            Button("使用默认背景", systemImage: "rectangle.slash") {
-                do { try model.removeWallpaper() } catch { localError = error.localizedDescription }
-            }
-            .disabled(!state.canAccessPrivateData || model.wallpaperData == nil)
         }
     }
 

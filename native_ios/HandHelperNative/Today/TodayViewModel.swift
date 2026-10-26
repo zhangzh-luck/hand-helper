@@ -75,7 +75,7 @@ final class TodayViewModel: ObservableObject {
         }
         do {
             snapshot = try repository.cached()
-            wallpaperData = try wallpaperStore.load() ?? WallpaperStore.decodeDataURL(snapshot?.profile.homeWallpaperDataURL)
+            wallpaperData = try? wallpaperStore.load()
             if errorMessage == nil { errorMessage = snapshot == nil ? "课程数据暂不可用" : nil }
         } catch {
             errorMessage = "本机数据无法读取：\(error.localizedDescription)"
@@ -118,7 +118,7 @@ final class TodayViewModel: ObservableObject {
             snapshot = fresh
             reloadSchedules()
             now = clock.now
-            wallpaperData = (try? wallpaperStore.load()) ?? WallpaperStore.decodeDataURL(fresh.profile.homeWallpaperDataURL)
+            wallpaperData = try? wallpaperStore.load()
             errorMessage = nil
             return (false, true)
         } catch {
@@ -167,21 +167,8 @@ final class TodayViewModel: ObservableObject {
         reloadSchedules()
     }
 
-    func setWallpaper(_ data: Data) throws {
-        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后设置壁纸。") }
-        try wallpaperStore.save(data)
-        wallpaperData = data
-    }
-
-    func removeWallpaper() throws {
-        guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后设置壁纸。") }
-        try wallpaperStore.remove()
-        if var profile = snapshot?.profile {
-            profile.homeWallpaperDataURL = nil
-            try repository.saveProfile(profile)
-            snapshot = try repository.cached()
-        }
-        wallpaperData = nil
+    func reloadWallpaper() throws {
+        wallpaperData = try wallpaperStore.load()
     }
 }
 

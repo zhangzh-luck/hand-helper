@@ -242,7 +242,7 @@ final class AcademicTimeTests: XCTestCase {
         } catch let error as APIError { XCTAssertEqual(error, .connection) }
         XCTAssertNil(try repository.cached())
         let today = TodayViewModel(repository: repository,
-                                   wallpaperStore: WallpaperStore(session: session, directory: folder))
+                                   wallpaperStore: WallpaperStore(session: session, account: account, directory: folder))
         today.load()
         let incomplete = await today.refreshStrict(isCurrent: { true })
         XCTAssertFalse(incomplete.completed)
@@ -535,7 +535,7 @@ final class AcademicTimeTests: XCTestCase {
         }
         let repository = DiskCourseRepository(api: api, session: session, account: account, directory: folder)
         let today = TodayViewModel(repository: repository,
-                                   wallpaperStore: WallpaperStore(session: session, directory: folder))
+                                   wallpaperStore: WallpaperStore(session: session, account: account, directory: folder))
         let strict = await today.refreshStrict(isCurrent: { true })
         XCTAssertFalse(strict.completed)
         XCTAssertNil(today.snapshot)
