@@ -225,7 +225,7 @@ final class AppState: ObservableObject {
         guard let pendingGradeImport, pendingGradeImport.id == id,
               case .uploading = pendingGradeImport.phase else { return }
         gradeUploadCancellation = nil
-        pendingGradeImport?.phase = .ready(preview)
+        self.pendingGradeImport?.phase = .ready(preview)
         // A rotated Cookie leaves the preview hidden until /auth/me verifies the
         // original owner again. A different account can never adopt this ticket.
     }
@@ -234,7 +234,7 @@ final class AppState: ObservableObject {
         guard let pendingGradeImport, pendingGradeImport.id == id,
               case .uploading = pendingGradeImport.phase else { return }
         gradeUploadCancellation = nil
-        pendingGradeImport?.phase = .failed(message)
+        self.pendingGradeImport?.phase = .failed(message)
     }
 
     func discardGradeImport(id: UUID) {
