@@ -25,6 +25,7 @@ protocol CourseRepository {
     var canEditSchedules: Bool { get }
     func cached() throws -> CourseSnapshot?
     func refresh(on date: Date) async throws -> CourseSnapshot
+    func refresh(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot
     func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot
     func localSchedules(on date: Date) throws -> [CustomSchedule]
     func allLocalSchedules() throws -> [CustomSchedule]
@@ -35,6 +36,13 @@ protocol CourseRepository {
 }
 
 extension CourseRepository {
+    func refresh(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
+        guard isCurrent() else { throw APIError.unauthorized(message: "登录状态已变化") }
+        let snapshot = try await refresh(on: date)
+        guard isCurrent() else { throw APIError.unauthorized(message: "登录状态已变化") }
+        return snapshot
+    }
+
     func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
         throw APIError.invalidResponse
     }
@@ -87,6 +95,10 @@ final class DiskCourseRepository: CourseRepository {
 
     func refresh(on date: Date) async throws -> CourseSnapshot {
         try await refreshInternal(on: date, strict: false, isCurrent: { true })
+    }
+
+    func refresh(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
+        try await refreshInternal(on: date, strict: false, isCurrent: isCurrent)
     }
 
     func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {

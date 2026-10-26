@@ -90,8 +90,8 @@ final class TodayViewModel: ObservableObject {
     }
 
     @discardableResult
-    func refresh() async -> Bool {
-        (await refreshInternal(strict: false, isCurrent: { true })).unauthorized
+    func refresh(isCurrent: @escaping @MainActor () -> Bool = { true }) async -> Bool {
+        (await refreshInternal(strict: false, isCurrent: isCurrent)).unauthorized
     }
 
     func refreshStrict(isCurrent: @escaping @MainActor () -> Bool) async -> (unauthorized: Bool, completed: Bool) {
@@ -110,7 +110,7 @@ final class TodayViewModel: ObservableObject {
             if strict {
                 fresh = try await repository.refreshStrict(on: clock.now, isCurrent: isCurrent)
             } else {
-                fresh = try await repository.refresh(on: clock.now)
+                fresh = try await repository.refresh(on: clock.now, isCurrent: isCurrent)
             }
             guard generation == refreshGeneration, repository.sessionCookie == requestCookie,
                   isCurrent() else { return (false, false) }

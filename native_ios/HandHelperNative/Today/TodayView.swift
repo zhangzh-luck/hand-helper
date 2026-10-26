@@ -134,6 +134,11 @@ struct TodayView: View {
                 Task { await refreshCourses() }
             }
         }
+        .onChange(of: state.completedCourseRefresh) { _, marker in
+            if state.selectedTab == .today && marker == pendingCourseInvalidation {
+                Task { await refreshCourses() }
+            }
+        }
         .onChange(of: state.selectedTab) { _, tab in
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }
@@ -315,8 +320,15 @@ struct TodayView: View {
     private func refreshCourses() async {
         let revision = state.authenticationRevision
         if let marker = pendingCourseInvalidation {
+            if state.completedCourseRefresh == marker {
+                model.load(allowPrivateCache: state.canAccessPrivateData,
+                           allowLocalSchedules: mayShowLocalSchedules)
+                if model.snapshot != nil { appliedCourseInvalidationSequence = marker.sequence }
+                return
+            }
             let result = await model.refreshStrict(isCurrent: {
                 state.canAccessPrivateData &&
+                state.selectedTab == .today &&
                 state.authenticationRevision == marker.authenticationRevision &&
                 state.courseDataInvalidation == marker &&
                 (try? state.requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner
@@ -330,7 +342,9 @@ struct TodayView: View {
                 state.handleUnauthorized()
             }
         } else {
-            let unauthorized = await model.refresh()
+            let unauthorized = await model.refresh(isCurrent: {
+                state.selectedTab == .today && state.authenticationRevision == revision && state.canAccessPrivateData
+            })
             guard revision == state.authenticationRevision else { return }
             if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
                 state.handleUnauthorized()

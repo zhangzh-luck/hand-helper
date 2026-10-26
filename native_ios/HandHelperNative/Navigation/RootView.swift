@@ -122,7 +122,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview))
             case .settings: page = AnyView(SettingsView(state: state))
             case .analysis: page = AnyView(AnalysisView(state: state))
-            case .timetable: page = AnyView(PlaceholderPage(tab: tab))
+            case .timetable: page = AnyView(TimetableView(state: state))
             }
             let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
@@ -191,24 +191,5 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         let overlap = view.bounds.intersection(frame)
         keyboardCoversBottom = !overlap.isNull && overlap.width > view.bounds.width / 2 && overlap.maxY >= view.bounds.maxY - 1 && overlap.height > 0
         updateTabVisibility()
-    }
-}
-
-private struct PlaceholderPage: View {
-    let tab: AppTab
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                Text("业务页面将在后续阶段实现")
-                    .font(.system(size: DesignTokens.bodySize))
-                    .foregroundStyle(colorScheme == .dark ? DesignTokens.darkSecondaryText : DesignTokens.lightSecondaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(DesignTokens.pageInset)
-            }
-            .background(colorScheme == .dark ? DesignTokens.darkBackground : DesignTokens.lightBackground)
-            .navigationTitle(tab.title)
-        }
     }
 }

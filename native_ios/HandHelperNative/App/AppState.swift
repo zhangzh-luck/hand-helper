@@ -67,6 +67,7 @@ final class AppState: ObservableObject {
     @Published private(set) var authenticationStatus: AuthenticationStatus = .signedOut
     @Published private(set) var authenticationRevision = 0
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
+    @Published private(set) var completedCourseRefresh: CourseDataInvalidation?
     @Published private(set) var wallpaperVersion = 0
     private var courseDataSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
@@ -192,6 +193,7 @@ final class AppState: ObservableObject {
         courseDataSequence += 1
         courseDataInvalidation = CourseDataInvalidation(
             owner: owner, authenticationRevision: revision, sequence: courseDataSequence)
+        completedCourseRefresh = nil
     }
 
     func pendingCourseInvalidation(after appliedSequence: Int?) -> CourseDataInvalidation? {
@@ -331,8 +333,9 @@ final class AppState: ObservableObject {
 
     func acknowledgeCourseRefresh(_ marker: CourseDataInvalidation) {
         guard marker == courseDataInvalidation,
-              (try? requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner,
-              let operation = pendingTimetableImport, operation.owner == marker.owner,
+              (try? requireCurrentAccount(revision: marker.authenticationRevision)) == marker.owner else { return }
+        completedCourseRefresh = marker
+        guard let operation = pendingTimetableImport, operation.owner == marker.owner,
               case .refreshPending(let result, let sequence) = operation.phase,
               marker.sequence >= sequence else { return }
         pendingTimetableImport?.phase = .refreshCompleted(result)
@@ -421,7 +424,10 @@ final class AppState: ObservableObject {
 
     private func resumeAcademicTimeAfterVerification(owner: String) async {
         pendingAcademicTimeWrites.removeAll { $0.owner != owner }
-        if courseDataInvalidation?.owner != owner { courseDataInvalidation = nil }
+        if courseDataInvalidation?.owner != owner {
+            courseDataInvalidation = nil
+            completedCourseRefresh = nil
+        }
         if let pendingTimetableImport, pendingTimetableImport.owner != owner {
             timetableUploadCancellation?()
             timetableUploadCancellation = nil
@@ -437,6 +443,7 @@ final class AppState: ObservableObject {
             courseDataSequence += 1
             courseDataInvalidation = CourseDataInvalidation(
                 owner: owner, authenticationRevision: authenticationRevision, sequence: courseDataSequence)
+            completedCourseRefresh = nil
         }
         rotationPendingCourseOwner = nil
         reconcileTimetableImport()
@@ -603,6 +610,7 @@ final class AppState: ObservableObject {
         clearProfile()
         if let marker = courseDataInvalidation { rotationPendingCourseOwner = marker.owner }
         courseDataInvalidation = nil
+        completedCourseRefresh = nil
         if let pendingTimetableImport,
            case .refreshPending(let result, _) = pendingTimetableImport.phase {
             self.pendingTimetableImport?.phase = .accepted(result)
@@ -655,6 +663,7 @@ final class AppState: ObservableObject {
         isLoginSubmitting = false
         verifiedAccount.clear()
         courseDataInvalidation = nil
+        completedCourseRefresh = nil
         pendingAcademicTimeWrites = []
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
@@ -683,6 +692,7 @@ final class AppState: ObservableObject {
         isAuthenticated = false
         verifiedAccount.clear()
         courseDataInvalidation = nil
+        completedCourseRefresh = nil
         pendingAcademicTimeWrites = []
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
