@@ -66,6 +66,15 @@ enum CourseScheduleCalculator {
         }.sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
     }
 
+    // Both Today and the weekly timetable must suppress the server copy of a
+    // manual course when its locally stored rule is the authoritative copy.
+    static func mergeManualCourses(remote: [CourseSession], local: [CourseSession],
+                                   rules: [ManualCourseRule]) -> [CourseSession] {
+        let localRemoteIDs = Set(rules.compactMap(\.remoteID))
+        return (remote.filter { $0.source != "MANUAL" || !localRemoteIDs.contains($0.manualCourseID ?? Int.min) } + local)
+            .sorted { ($0.start ?? .distantFuture, $0.id) < ($1.start ?? .distantFuture, $1.id) }
+    }
+
     static func dateTime(day: Date, clock: String, calendar: Calendar = .current) -> Date? {
         let parts = clock.split(separator: ":")
         guard parts.count >= 2, let hour = Int(parts[0]), let minute = Int(parts[1]) else { return nil }

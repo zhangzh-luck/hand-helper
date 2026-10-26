@@ -31,9 +31,8 @@ final class TodayViewModel: ObservableObject {
             on: now, rules: snapshot.manualRules, terms: snapshot.terms, periods: snapshot.periods
         )
         let remote = CourseScheduleCalculator.sessions(for: now, from: snapshot.calendarSessions)
-        let localRemoteIDs = Set(snapshot.manualRules.compactMap(\.remoteID))
-        return (remote.filter { $0.source != "MANUAL" || !localRemoteIDs.contains($0.manualCourseID ?? Int.min) } + local)
-            .sorted { ($0.start ?? .distantFuture, $0.id) < ($1.start ?? .distantFuture, $1.id) }
+        return CourseScheduleCalculator.mergeManualCourses(remote: remote, local: local,
+                                                           rules: snapshot.manualRules)
     }
 
     var schedules: [CustomSchedule] {
