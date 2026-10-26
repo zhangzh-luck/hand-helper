@@ -176,7 +176,47 @@ final class TimetableViewTests: XCTestCase {
         XCTAssertEqual(wide.frame(for: sunday).minY, wide.rowHeight)
         XCTAssertFalse(wide.shouldSummarize(first))
         XCTAssertTrue(narrow.shouldSummarize(crowded))
-        XCTAssertGreaterThanOrEqual(narrow.dayWidth, 80 * 1.5)
+        XCTAssertFalse(narrow.shouldSummarize(sunday))
+        XCTAssertEqual(narrow.width, 320)
+    }
+
+    func testSevenColumnsFitCommonPhoneWidthsAndAlignEveryLayer() {
+        let course = fixture().calendarSessions[0]
+        for width in [CGFloat(320), 375, 393, 430] {
+            let grid = TimetableGridMetrics(viewportWidth: width, rowCount: 13, dynamicScale: 1.7)
+            XCTAssertEqual(grid.width, width)
+            XCTAssertEqual(grid.dayOrigin(1), grid.railWidth)
+            XCTAssertEqual(grid.dayOrigin(7) + grid.dayWidth(7), width, accuracy: 0.0001)
+            for day in 1..<7 {
+                XCTAssertEqual(grid.dayOrigin(day) + grid.dayWidth(day), grid.dayOrigin(day + 1), accuracy: 0.0001)
+            }
+            let sunday = WeeklyCoursePlacement(course: course, weekday: 7, startPeriod: 1,
+                endPeriod: 2, startRow: 0, rowSpan: 2, conflictGroup: 0, laneIndex: 0, laneCount: 1)
+            XCTAssertEqual(grid.frame(for: sunday).maxX, width, accuracy: 0.0001)
+            XCTAssertEqual(grid.frame(for: sunday).height, grid.rowHeight * 2)
+            XCTAssertFalse(grid.shouldSummarize(sunday))
+        }
+    }
+
+    func testOverlapSummarizesOnlyMultipleCoursesAndCardContentHasBoundedLines() {
+        let course = fixture().calendarSessions[0]
+        let grid = TimetableGridMetrics(viewportWidth: 375, rowCount: 13)
+        let solo = WeeklyCoursePlacement(course: course, weekday: 1, startPeriod: 1,
+            endPeriod: 1, startRow: 0, rowSpan: 1, conflictGroup: 0, laneIndex: 0, laneCount: 1)
+        let overlap = WeeklyCoursePlacement(course: course, weekday: 1, startPeriod: 1,
+            endPeriod: 1, startRow: 0, rowSpan: 1, conflictGroup: 1, laneIndex: 0, laneCount: 2)
+        XCTAssertFalse(grid.shouldSummarize(solo))
+        XCTAssertTrue(grid.shouldSummarize(overlap))
+        XCTAssertEqual(TimetableCardContentPolicy(rowSpan: 1).titleLines, 3)
+        XCTAssertFalse(TimetableCardContentPolicy(rowSpan: 1).showsTeacher)
+        XCTAssertTrue(TimetableCardContentPolicy(rowSpan: 3).showsTeacher)
+    }
+
+    func testDateLabelsHandleMonthAndYearTransitions() {
+        XCTAssertEqual(TimetableDateLabel.month("2026-12-28"), "12月")
+        XCTAssertEqual(TimetableDateLabel.day("2026-12-31", previous: "2026-12-30"), "31")
+        XCTAssertEqual(TimetableDateLabel.day("2027-01-01", previous: "2026-12-31"), "1/1")
+        XCTAssertEqual(TimetableDateLabel.day("2027-01-02", previous: "2027-01-01"), "2")
     }
 }
 

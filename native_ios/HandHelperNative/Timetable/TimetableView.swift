@@ -1,21 +1,64 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct TimetableView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: TimetableViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var gridScale: CGFloat = 1
     @State private var selectedCourse: CourseSession?
     @State private var showingUnplaced = false
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
+    @State private var wallpaperData: Data?
+    @State private var wallpaperError: String?
 
     init(state: AppState) {
         self.state = state
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TimetableViewModel(state: state, repository: repository))
+    }
+
+    private var showsWallpaper: Bool {
+        wallpaperData != nil && !reduceTransparency && contrast != .increased
+    }
+
+    private func reloadWallpaper() {
+        guard state.canAccessPrivateData else { wallpaperData = nil; wallpaperError = nil; return }
+        do {
+            wallpaperData = try WallpaperStore(session: state.sessionStore,
+                                               account: state.verifiedAccount,
+                                               kind: .timetable).load()
+            wallpaperError = nil
+        } catch {
+            wallpaperData = nil
+            wallpaperError = "课表壁纸无法读取：\(error.localizedDescription)"
+        }
+    }
+
+    @ViewBuilder
+    private func gridBackground(size: CGSize) -> some View {
+        if showsWallpaper, let wallpaperData, let image = UIImage(data: wallpaperData) {
+            Image(uiImage: image)
+                .resizable().scaledToFill()
+                .frame(width: size.width, height: size.height)
+                .clipped()
+                .overlay(colorScheme == .dark ? Color.black.opacity(0.38) : Color.white.opacity(0.43))
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func safeTime(_ value: String) -> String {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
+              let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0..<24).contains(hour), (0..<60).contains(minute) else { return "—" }
+        return value
     }
 
     var body: some View {
@@ -37,15 +80,18 @@ struct TimetableView: View {
                             let metrics = TimetableGridMetrics(viewportWidth: geometry.size.width,
                                                                rowCount: model.periods.count,
                                                                dynamicScale: gridScale)
-                            ScrollView(.horizontal) {
+                            ZStack {
+                                gridBackground(size: geometry.size)
                                 VStack(spacing: 0) {
                                     dateHeader(projection, metrics: metrics)
                                     ScrollView(.vertical) {
                                         courseGrid(projection, metrics: metrics)
+                                            .padding(.bottom, 16)
                                     }
                                 }
                                 .frame(width: metrics.width)
                             }
+                            .clipped()
                         }
                     }
                 } else if model.isLoading && model.snapshot == nil {
@@ -59,6 +105,7 @@ struct TimetableView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("课程表")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -68,7 +115,7 @@ struct TimetableView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if let error = model.errorMessage, model.projection != nil {
+                if let error = model.errorMessage ?? wallpaperError, model.projection != nil {
                     Text(error).font(.footnote).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(8)
                         .background(.regularMaterial)
@@ -79,7 +126,10 @@ struct TimetableView: View {
             }
             .sheet(isPresented: $showingUnplaced) { unplacedList }
             .sheet(isPresented: $showingConflicts) { conflictList }
-            .task { await model.updateIfNeeded() }
+            .task {
+                reloadWallpaper()
+                await model.updateIfNeeded()
+            }
             .onChange(of: state.selectedTab) { _, tab in
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
             }
@@ -89,46 +139,52 @@ struct TimetableView: View {
             .onChange(of: state.completedCourseRefresh) { _, _ in
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
             }
+            .onChange(of: state.timetableWallpaperVersion) { _, _ in reloadWallpaper() }
             .onChange(of: state.authenticationRevision) { _, _ in
                 selectedCourse = nil
                 showingUnplaced = false
                 showingConflicts = false
                 model.clear()
+                wallpaperData = nil
+                wallpaperError = nil
+                reloadWallpaper()
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
             }
         }
     }
 
     private var controls: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Menu {
-                    ForEach(model.terms, id: \.id) { term in
-                        Button(term.displayName) { model.selectTerm(term.id) }
-                    }
-                } label: {
-                    Label(model.terms.first(where: { $0.id == model.selectedTermID })?.displayName ?? "选择学期",
-                          systemImage: "chevron.down")
-                        .lineLimit(1)
+        HStack(spacing: 6) {
+            Menu {
+                ForEach(model.terms, id: \.id) { term in
+                    Button(term.displayName) { model.selectTerm(term.id) }
                 }
-                .disabled(model.terms.isEmpty)
-                Spacer(minLength: 8)
-                Text("第 \(model.selectedWeek) 周").font(.headline).monospacedDigit()
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 2) {
+                        Text("第 \(model.selectedWeek) 周").font(.headline).monospacedDigit()
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
+                    Text(model.terms.first(where: { $0.id == model.selectedTermID })?.displayName ?? "选择学期")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(spacing: 18) {
-                Button { changeWeek(-1) } label: { Label("上一周", systemImage: "chevron.left") }
-                    .disabled(model.selectedWeek <= 1 || model.selectedTermID == nil)
-                Spacer()
-                Button("返回本周") { changeWeek(nil) }
-                    .disabled(model.isCurrentWeek || model.selectedTermID == nil)
-                Spacer()
-                Button { changeWeek(1) } label: { Label("下一周", systemImage: "chevron.right") }
-                    .disabled(model.selectedTermID == nil || model.selectedWeek >= 999)
-            }
-            .buttonStyle(.bordered)
+            .disabled(model.terms.isEmpty)
+            Button { changeWeek(-1) } label: { Image(systemName: "chevron.left") }
+                .accessibilityLabel("上一周")
+                .disabled(model.selectedWeek <= 1 || model.selectedTermID == nil)
+            Button("今天") { changeWeek(nil) }
+                .font(.subheadline.weight(.medium)).lineLimit(1)
+                .disabled(model.isCurrentWeek || model.selectedTermID == nil)
+            Button { changeWeek(1) } label: { Image(systemName: "chevron.right") }
+                .accessibilityLabel("下一周")
+                .disabled(model.selectedTermID == nil || model.selectedWeek >= 999)
         }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .padding(.horizontal)
-        .padding(.vertical, 12)
+        .padding(.vertical, 7)
     }
 
     private func changeWeek(_ delta: Int?) {
@@ -144,22 +200,29 @@ struct TimetableView: View {
     private func dateHeader(_ projection: WeeklyTimetableProjection,
                             metrics: TimetableGridMetrics) -> some View {
         HStack(spacing: 0) {
-            Text("节").frame(width: metrics.railWidth)
+            Text(TimetableDateLabel.month(projection.dates.first ?? ""))
+                .font(.caption2.weight(.semibold))
+                .frame(width: metrics.railWidth)
             ForEach(0..<7, id: \.self) { index in
                 let date = projection.dates[index]
                 VStack(spacing: 2) {
                     Text(["周一", "周二", "周三", "周四", "周五", "周六", "周日"][index])
-                        .font(.caption.weight(.medium))
-                    Text(String(date.dropFirst(5))).font(.caption2).monospacedDigit()
+                        .font(.caption2.weight(.medium))
+                    Text(TimetableDateLabel.day(date, previous: index == 0 ? nil : projection.dates[index - 1]))
+                        .font(.caption.weight(.semibold)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 2).padding(.vertical, 3)
+                        .background(date == CourseScheduleCalculator.dateKey(Date()) ?
+                                    Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                        .foregroundStyle(date == CourseScheduleCalculator.dateKey(Date()) ? Color.white : Color.primary)
                 }
-                .foregroundStyle(date == CourseScheduleCalculator.dateKey(Date()) ? Color.accentColor : Color.primary)
-                .frame(width: metrics.dayWidth, height: metrics.headerHeight)
-                .background(date == CourseScheduleCalculator.dateKey(Date()) ?
-                            Color.accentColor.opacity(0.12) : Color.clear)
+                .frame(width: metrics.dayWidth(index + 1), height: metrics.headerHeight)
+                .clipped()
+                .accessibilityLabel("\(["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][index])，\(date)")
             }
         }
         .frame(height: metrics.headerHeight)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
     }
 
     private func courseGrid(_ projection: WeeklyTimetableProjection,
@@ -167,14 +230,20 @@ struct TimetableView: View {
         ZStack(alignment: .topLeading) {
             ForEach(0..<model.periods.count, id: \.self) { row in
                 HStack(spacing: 0) {
-                    Text("\(model.periods[row].periodNumber)")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .frame(width: metrics.railWidth)
-                    ForEach(0..<7, id: \.self) { _ in
-                        Rectangle().fill(Color(uiColor: .secondarySystemGroupedBackground))
+                    VStack(spacing: 1) {
+                        Text("\(model.periods[row].periodNumber)").font(.caption.weight(.bold))
+                        Text(safeTime(model.periods[row].startTime)).font(.caption2).lineLimit(1)
+                        Text(safeTime(model.periods[row].endTime)).font(.caption2).lineLimit(1)
+                    }
+                        .foregroundStyle(.secondary)
+                        .frame(width: metrics.railWidth, height: metrics.rowHeight)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
+                        .accessibilityLabel("第 \(model.periods[row].periodNumber) 节，\(safeTime(model.periods[row].startTime)) 至 \(safeTime(model.periods[row].endTime))")
+                    ForEach(1...7, id: \.self) { day in
+                        Rectangle().fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.53 : 1))
                             .overlay(alignment: .bottom) { Divider() }
                             .overlay(alignment: .trailing) { Divider() }
-                            .frame(width: metrics.dayWidth, height: metrics.rowHeight)
+                            .frame(width: metrics.dayWidth(day), height: metrics.rowHeight)
                     }
                 }
                 .offset(y: CGFloat(row) * metrics.rowHeight)
@@ -182,7 +251,8 @@ struct TimetableView: View {
             ForEach(projection.placements.indices, id: \.self) { index in
                 let placement = projection.placements[index]
                 if !metrics.shouldSummarize(placement) {
-                    courseButton(placement.course, width: metrics.frame(for: placement).width - 4,
+                    courseButton(placement.course, rowSpan: placement.rowSpan,
+                                 width: metrics.frame(for: placement).width - 4,
                                  height: metrics.frame(for: placement).height - 4)
                         .offset(x: metrics.frame(for: placement).minX + 2,
                                 y: metrics.frame(for: placement).minY + 2)
@@ -199,32 +269,45 @@ struct TimetableView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(5)
-                    .background(Color.orange.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color.orange.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.7), lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
-                .frame(width: metrics.dayWidth - 4, height: group.height - 4)
-                .offset(x: metrics.railWidth + CGFloat(group.weekday - 1) * metrics.dayWidth + 2,
+                .frame(width: metrics.dayWidth(group.weekday) - 4, height: group.height - 4)
+                .offset(x: metrics.dayOrigin(group.weekday) + 2,
                         y: CGFloat(group.startRow) * metrics.rowHeight + 2)
             }
         }
         .frame(width: metrics.width, height: metrics.bodyHeight, alignment: .topLeading)
     }
 
-    private func courseButton(_ course: CourseSession, width: CGFloat, height: CGFloat) -> some View {
-        Button { selectedCourse = course } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(course.name).font(.caption.weight(.semibold)).lineLimit(3)
-                if let room = course.room, !room.isEmpty {
-                    Text(room).font(.caption2).lineLimit(2)
+    private func courseButton(_ course: CourseSession, rowSpan: Int,
+                              width: CGFloat, height: CGFloat) -> some View {
+        let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
+        return Button { selectedCourse = course } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(course.name).font(.caption2.weight(.bold))
+                    .lineLimit(policy.titleLines).truncationMode(.tail)
+                if policy.showsRoom, let room = course.room, !room.isEmpty {
+                    Text(room).font(.caption2).lineLimit(2).truncationMode(.tail)
+                }
+                if policy.showsTeacher, let teacher = course.teacher, !teacher.isEmpty {
+                    Spacer(minLength: 0)
+                    Text(teacher).font(.caption2).lineLimit(1).truncationMode(.tail)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(5)
-            .background(courseColor(course.name).opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
+            .padding(3)
+            .background(courseColor(course.name).opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.91 : 1),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(courseColor(course.name).opacity(0.55), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .frame(width: width, height: height)
-        .accessibilityLabel("\(course.name)，\(course.date)，\(course.room ?? "教室未提供")")
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("\(course.name)，\(course.date)，\(course.room ?? "教室未提供")，\(course.teacher ?? "教师未提供")")
     }
 
     private func courseColor(_ name: String) -> Color {

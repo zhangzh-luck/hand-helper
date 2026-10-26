@@ -1,25 +1,36 @@
 import CryptoKit
 import Foundation
 
+enum WallpaperKind: Hashable {
+    case today
+    case timetable
+}
+
 @MainActor
 final class WallpaperStore {
     private let session: any SessionStore
     private let account: VerifiedAccountContext
     private let directory: URL
     private let baseURL: URL
-    private let deviceFileName = "today_wallpaper_device_v1.image"
+    let kind: WallpaperKind
 
     init(session: any SessionStore, account: VerifiedAccountContext,
+         kind: WallpaperKind = .today,
          baseURL: URL = APIConfiguration.development.baseURL, directory: URL? = nil) {
         self.session = session
         self.account = account
+        self.kind = kind
         self.baseURL = baseURL
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
-    private var deviceFile: URL { directory.appendingPathComponent(deviceFileName) }
+    private var deviceFile: URL {
+        let name = kind == .today ? "today_wallpaper_device_v1.image" : "timetable_wallpaper_device_v1.image"
+        return directory.appendingPathComponent(name)
+    }
 
     private var legacyFile: URL? {
+        guard kind == .today else { return nil }
         guard let cookie = session.cookie, !cookie.isEmpty else { return nil }
         let digest = SHA256.hash(data: Data("\(baseURL.absoluteString)|\(cookie)".utf8))
         return directory.appendingPathComponent("today_wallpaper_\(digest.map { String(format: "%02x", $0) }.joined()).image")

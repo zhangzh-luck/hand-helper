@@ -38,14 +38,14 @@ struct PersonalizationView: View {
 
             Section {
                 NavigationLink {
-                    WallpaperSettingsView(state: state)
+                    WallpaperManagementView(state: state)
                 } label: {
-                    Label("今日页壁纸", systemImage: "photo")
+                    Label("壁纸", systemImage: "photo")
                 }
             } header: {
                 Text("壁纸")
             } footer: {
-                Text("壁纸仅保存在此设备，今日页只负责显示。")
+                Text("今日页和课程表壁纸分别保存在此设备。")
             }
         }
         .navigationTitle("个性化")

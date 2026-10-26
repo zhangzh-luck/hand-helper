@@ -121,6 +121,71 @@ final class WallpaperSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testTwoDeviceWallpapersPersistAndRestoreIndependently() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = WallpaperTestSession()
+        session.save(cookie: "session=first")
+        let account = VerifiedAccountContext()
+        try account.confirm(username: "tester", cookie: "session=first")
+        let today = WallpaperStore(session: session, account: account, directory: folder)
+        let timetable = WallpaperStore(session: session, account: account, kind: .timetable, directory: folder)
+        try today.save(Data([1]))
+        try timetable.save(Data([2]))
+        XCTAssertEqual(try today.load(), Data([1]))
+        XCTAssertEqual(try timetable.load(), Data([2]))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("today_wallpaper_device_v1.image").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("timetable_wallpaper_device_v1.image").path))
+        try timetable.remove()
+        XCTAssertNil(try timetable.load())
+        XCTAssertEqual(try today.load(), Data([1]))
+        session.save(cookie: "session=rotated")
+        XCTAssertThrowsError(try timetable.load()) // Cookie alone does not prove identity.
+        try account.confirm(username: "tester", cookie: "session=rotated")
+        XCTAssertEqual(try WallpaperStore(session: session, account: account, directory: folder).load(), Data([1]))
+        XCTAssertNil(try WallpaperStore(session: session, account: account, kind: .timetable, directory: folder).load())
+    }
+
+    @MainActor
+    func testTimetableWallpaperPublishesOnlyItsVersionAndRejectsLateSelection() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = WallpaperTestSession()
+        session.save(cookie: "session=fixture")
+        let suite = "wallpaper-settings-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let state = AppState(api: MockAPIClient(), sessionStore: session,
+                             authentication: WallpaperTestAuthentication(), preferences: preferences)
+        await state.restoreSession()
+        let todayStore = WallpaperStore(session: session, account: state.verifiedAccount, directory: folder)
+        let timetableStore = WallpaperStore(session: session, account: state.verifiedAccount,
+                                            kind: .timetable, directory: folder)
+        let model = WallpaperSettingsModel(state: state, revision: state.authenticationRevision,
+                                           store: timetableStore)
+        let image = sampleImage()
+        await model.replace { image }
+        XCTAssertEqual(state.timetableWallpaperVersion, 1)
+        XCTAssertEqual(state.wallpaperVersion, 0)
+        XCTAssertEqual(try timetableStore.load(), image)
+        XCTAssertNil(try todayStore.load())
+        model.restoreDefault()
+        XCTAssertEqual(state.timetableWallpaperVersion, 2)
+        XCTAssertNil(try timetableStore.load())
+
+        let gate = WallpaperPhotoGate()
+        let started = expectation(description: "Timetable photo loading started")
+        let pending = Task { await model.replace { await gate.wait(started: started) } }
+        await fulfillment(of: [started], timeout: 3)
+        await state.logout()
+        gate.finish(image)
+        await pending.value
+        XCTAssertEqual(state.timetableWallpaperVersion, 2)
+        XCTAssertEqual(state.wallpaperVersion, 0)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("timetable_wallpaper_device_v1.image")), Data())
+    }
+
+    @MainActor
     private func sampleImage() -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -146,7 +211,11 @@ private final class WallpaperPhotoGate {
 
     func cancel() {
         cancelled = true
-        continuation?.resume(returning: nil)
+        finish(nil)
+    }
+
+    func finish(_ data: Data?) {
+        continuation?.resume(returning: data)
         continuation = nil
     }
 }

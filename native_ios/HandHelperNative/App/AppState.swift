@@ -69,6 +69,7 @@ final class AppState: ObservableObject {
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
     @Published private(set) var completedCourseRefresh: CourseDataInvalidation?
     @Published private(set) var wallpaperVersion = 0
+    @Published private(set) var timetableWallpaperVersion = 0
     private var courseDataSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
     private var timetableUploadCancellation: (() -> Void)?
@@ -129,6 +130,11 @@ final class AppState: ObservableObject {
     func wallpaperDidChange(revision: Int) throws {
         _ = try requireCurrentAccount(revision: revision)
         wallpaperVersion += 1
+    }
+
+    func timetableWallpaperDidChange(revision: Int) throws {
+        _ = try requireCurrentAccount(revision: revision)
+        timetableWallpaperVersion += 1
     }
 
     var homeAvatar: UIImage? { cachedHomeAvatar }

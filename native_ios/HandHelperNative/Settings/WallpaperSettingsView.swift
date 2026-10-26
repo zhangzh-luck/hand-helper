@@ -16,13 +16,17 @@ final class WallpaperSettingsModel: ObservableObject {
 
     private let state: AppState
     private let store: WallpaperStore
+    private let kind: WallpaperKind
     private let revision: Int
     private var selectionGeneration = 0
 
-    init(state: AppState, revision: Int, store: WallpaperStore? = nil) {
+    init(state: AppState, revision: Int, kind: WallpaperKind = .today,
+         store: WallpaperStore? = nil) {
         self.state = state
         self.revision = revision
-        self.store = store ?? WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
+        self.store = store ?? WallpaperStore(session: state.sessionStore,
+                                             account: state.verifiedAccount, kind: kind)
+        self.kind = self.store.kind
     }
 
     func load() {
@@ -50,7 +54,7 @@ final class WallpaperSettingsModel: ObservableObject {
             guard UIImage(data: data) != nil else { throw WallpaperSelectionError.unreadableImage }
             try store.save(data)
             wallpaperData = data
-            try state.wallpaperDidChange(revision: revision)
+            try publishChange()
             errorMessage = nil
         } catch {
             guard generation == selectionGeneration, !Task.isCancelled else { return }
@@ -64,7 +68,7 @@ final class WallpaperSettingsModel: ObservableObject {
             _ = try state.requireCurrentAccount(revision: revision)
             try store.remove()
             wallpaperData = nil
-            try state.wallpaperDidChange(revision: revision)
+            try publishChange()
             errorMessage = nil
         } catch {
             errorMessage = "默认背景无法恢复：\(error.localizedDescription)"
@@ -83,20 +87,29 @@ final class WallpaperSettingsModel: ObservableObject {
     }
 
     func clearError() { errorMessage = nil }
+
+    private func publishChange() throws {
+        switch kind {
+        case .today: try state.wallpaperDidChange(revision: revision)
+        case .timetable: try state.timetableWallpaperDidChange(revision: revision)
+        }
+    }
 }
 
 @MainActor
 struct WallpaperSettingsView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: WallpaperSettingsModel
+    private let kind: WallpaperKind
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectionTask: Task<Void, Never>?
     @State private var showResetConfirmation = false
 
-    init(state: AppState) {
+    init(state: AppState, kind: WallpaperKind = .today) {
         self.state = state
+        self.kind = kind
         _model = StateObject(wrappedValue: WallpaperSettingsModel(
-            state: state, revision: state.authenticationRevision
+            state: state, revision: state.authenticationRevision, kind: kind
         ))
     }
 
@@ -113,7 +126,7 @@ struct WallpaperSettingsView: View {
                     }
                     .frame(height: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .accessibilityLabel("当前今日页壁纸预览")
+                    .accessibilityLabel(kind == .today ? "当前今日页壁纸预览" : "当前课程表壁纸预览")
                 } else {
                     Label("正在使用默认背景", systemImage: "photo")
                         .foregroundStyle(.secondary)
@@ -140,7 +153,7 @@ struct WallpaperSettingsView: View {
                 Text("壁纸只保存在此设备，不会上传服务器。")
             }
         }
-        .navigationTitle("今日页壁纸")
+        .navigationTitle(kind == .today ? "今日页壁纸" : "课程表壁纸")
         .navigationBarTitleDisplayMode(.inline)
         .task { model.load() }
         .onChange(of: selectedPhoto) { _, item in
@@ -163,7 +176,7 @@ struct WallpaperSettingsView: View {
         .confirmationDialog("恢复默认背景？", isPresented: $showResetConfirmation) {
             Button("恢复默认背景", role: .destructive) { model.restoreDefault() }
         } message: {
-            Text("今日页将使用系统背景。")
+            Text(kind == .today ? "今日页将使用系统背景。" : "课程表将使用系统背景。")
         }
         .alert("壁纸操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
