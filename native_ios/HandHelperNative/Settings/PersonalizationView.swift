@@ -8,14 +8,23 @@ struct PersonalizationView: View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("显示模式")
-                        .font(.subheadline)
+                    HStack {
+                        Text("显示模式")
+                        Spacer()
+                        Text(state.appearance.settingsTitle)
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.subheadline)
                     Picker("显示模式", selection: Binding(
                         get: { state.appearance },
                         set: { state.setAppearance($0) }
                     )) {
                         ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                            Text(mode.settingsTitle).tag(mode)
+                            Label(mode.settingsTitle, systemImage: mode.settingsSymbol)
+                                .labelStyle(.iconOnly)
+                                .font(.body)
+                                .symbolRenderingMode(.monochrome)
+                                .tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -45,6 +54,14 @@ struct PersonalizationView: View {
 }
 
 private extension AppearanceMode {
+    var settingsSymbol: String {
+        switch self {
+        case .system: "iphone"
+        case .light: "sun.max.fill"
+        case .dark: "moon.fill"
+        }
+    }
+
     var settingsTitle: String {
         switch self {
         case .system: "跟随系统"
