@@ -7,7 +7,7 @@ struct TimetableView: View {
     @StateObject private var model: TimetableViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var gridScale: CGFloat = 1
     @State private var selectedCourse: CourseSession?
