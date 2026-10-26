@@ -2,6 +2,9 @@ import SwiftUI
 
 @MainActor
 struct LoginView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject var state: AppState
     @FocusState private var focusedField: Field?
     @State private var username = ""
@@ -21,32 +24,33 @@ struct LoginView: View {
                         Image("BrandMark")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 72, height: 72)
-                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                             .accessibilityHidden(true)
-                            .padding(.top, 32)
+                            .padding(.top, 20)
 
                         Text("欢迎回来")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.top, 22)
+                            .foregroundStyle(DesignTokens.brand)
+                            .padding(.top, 18)
                         Text("航的助手")
-                            .font(.largeTitle.bold())
+                            .font(.title.bold())
                             .multilineTextAlignment(.center)
-                            .padding(.top, 6)
+                            .padding(.top, 4)
 
                         credentials
-                            .padding(.top, 44)
+                            .padding(.top, 32)
 
                         Text(state.loginError ?? " ")
-                            .font(.footnote)
+                            .font(.caption)
                             .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
+                            .frame(maxWidth: .infinity, minHeight: 20, alignment: .topLeading)
                             .opacity(state.loginError == nil ? 0 : 1)
                             .accessibilityHidden(state.loginError == nil)
-                            .padding(.top, 12)
+                            .padding(.top, 4)
 
                         loginButton
+                            .padding(.top, 4)
                     }
                     .frame(maxWidth: 420)
                     .padding(.horizontal, 24)
@@ -62,8 +66,21 @@ struct LoginView: View {
                     }
                 }
             }
-            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .background(loginBackground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    private var loginBackground: some View {
+        ZStack {
+            Color(uiColor: .systemGroupedBackground)
+            if !reduceTransparency && colorSchemeContrast != .increased {
+                LinearGradient(
+                    colors: [DesignTokens.brand.opacity(colorScheme == .dark ? 0.06 : 0.045), .clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
         }
     }
 
@@ -152,6 +169,7 @@ struct LoginView: View {
         }
         .disabled(state.isLoginSubmitting || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
         .accessibilityLabel(state.isLoginSubmitting ? "正在登录" : "登录")
+        .tint(DesignTokens.brand)
 
         return Group {
             if #available(iOS 26.0, *) {
@@ -172,9 +190,13 @@ struct LoginView: View {
                 }
             }
         } label: {
-            Label("外观", systemImage: "circle.lefthalf.filled")
+            Image(systemName: "circle.lefthalf.filled")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .accessibilityLabel("外观设置")
+        .buttonBorderShape(.circle)
 
         return Group {
             if #available(iOS 26.0, *) {
