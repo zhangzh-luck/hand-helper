@@ -64,6 +64,48 @@ final class TimetableViewTests: XCTestCase {
         XCTAssertEqual(repository.refreshCount, 0)
     }
 
+    func testWeekSwipeRequiresClearHorizontalIntentAwayFromSystemEdges() {
+        let width: CGFloat = 375
+        XCTAssertEqual(TimetableWeekSwipe.direction(translation: CGSize(width: -60, height: 0),
+                                                     startX: 180, width: width), 1)
+        XCTAssertEqual(TimetableWeekSwipe.direction(translation: CGSize(width: 60, height: 0),
+                                                     startX: 180, width: width), -1)
+        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: -59, height: 0),
+                                                   startX: 180, width: width))
+        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 10, height: 100),
+                                                   startX: 180, width: width))
+        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 75, height: 50),
+                                                   startX: 180, width: width))
+        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 100, height: 0),
+                                                   startX: 12, width: width))
+        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: -100, height: 0),
+                                                   startX: 365, width: width))
+    }
+
+    @MainActor
+    func testWeekSwipeUsesSameSingleStepProjectionAsButtonsAndRespectsFirstWeek() async throws {
+        let (_, repository, model) = try await setup()
+        model.loadCached()
+        let firstWeekDates = try XCTUnwrap(model.projection?.dates)
+        let previous = try XCTUnwrap(TimetableWeekSwipe.direction(
+            translation: CGSize(width: 90, height: 0), startX: 180, width: 375))
+        model.moveWeek(previous)
+        XCTAssertEqual(model.selectedWeek, 1)
+        XCTAssertEqual(model.projection?.dates, firstWeekDates)
+
+        let next = try XCTUnwrap(TimetableWeekSwipe.direction(
+            translation: CGSize(width: -300, height: 0), startX: 180, width: 375))
+        XCTAssertEqual(next, 1)
+        model.moveWeek(next)
+        let swipeDates = try XCTUnwrap(model.projection?.dates)
+        XCTAssertEqual(model.selectedWeek, 2)
+        model.moveWeek(-1)
+        model.moveWeek(1)
+        XCTAssertEqual(model.selectedWeek, 2)
+        XCTAssertEqual(model.projection?.dates, swipeDates)
+        XCTAssertEqual(repository.refreshCount, 0)
+    }
+
     @MainActor
     func testStrictRefreshReprojectsAndAcknowledgesOnlyAfterDurableSuccess() async throws {
         let (state, repository, model) = try await setup()

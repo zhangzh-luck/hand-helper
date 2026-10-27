@@ -91,6 +91,19 @@ struct TimetableView: View {
                                         courseGrid(projection, metrics: metrics)
                                             .padding(.bottom, viewport.safeAreaInsets.bottom + 12)
                                     }
+                                    .simultaneousGesture(
+                                        DragGesture(minimumDistance: TimetableWeekSwipe.minimumRecognitionDistance)
+                                            .onEnded { value in
+                                                guard state.canAccessPrivateData,
+                                                      state.selectedTab == .timetable,
+                                                      model.selectedTermID != nil,
+                                                      let delta = TimetableWeekSwipe.direction(
+                                                        translation: value.translation,
+                                                        startX: value.startLocation.x,
+                                                        width: metrics.width) else { return }
+                                                changeWeek(delta)
+                                            }
+                                    )
                                 }
                                 .frame(width: metrics.width)
                             }
@@ -192,9 +205,10 @@ struct TimetableView: View {
         }
     }
 
+    @ViewBuilder
     private func dateHeader(_ projection: WeeklyTimetableProjection,
                             metrics: TimetableGridMetrics) -> some View {
-        HStack(spacing: 0) {
+        let header = HStack(spacing: 0) {
             Text(TimetableDateLabel.month(projection.dates.first ?? ""))
                 .font(.caption2.weight(.semibold))
                 .frame(width: metrics.railWidth)
@@ -216,8 +230,15 @@ struct TimetableView: View {
                 .accessibilityLabel("\(["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][index])，\(date)")
             }
         }
-        .frame(height: metrics.headerHeight)
-        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
+        .frame(width: metrics.width, height: metrics.headerHeight)
+
+        if reduceTransparency || contrast == .increased {
+            header.background(Color(uiColor: .secondarySystemGroupedBackground))
+        } else if #available(iOS 26.0, *) {
+            header.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            header.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     private func courseGrid(_ projection: WeeklyTimetableProjection,
@@ -413,5 +434,22 @@ struct TimetableView: View {
         case .unmatchedStartTime: "开始时间未匹配节次"
         case .unmatchedEndTime: "结束时间未匹配节次"
         }
+    }
+}
+
+enum TimetableWeekSwipe {
+    static let minimumRecognitionDistance: CGFloat = 12
+    static let minimumHorizontalDistance: CGFloat = 60
+    static let horizontalToVerticalRatio: CGFloat = 1.5
+    static let systemEdgeInset: CGFloat = 24
+
+    static func direction(translation: CGSize, startX: CGFloat, width: CGFloat) -> Int? {
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        guard width > systemEdgeInset * 2,
+              startX >= systemEdgeInset, startX <= width - systemEdgeInset,
+              horizontal >= minimumHorizontalDistance,
+              horizontal > horizontalToVerticalRatio * vertical else { return nil }
+        return translation.width < 0 ? 1 : -1
     }
 }
