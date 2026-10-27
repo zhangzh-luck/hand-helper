@@ -12,6 +12,7 @@ struct TimetableView: View {
     @ScaledMetric(relativeTo: .body) private var gridScale: CGFloat = 1
     @State private var selectedCourse: CourseSession?
     @State private var showingUnplaced = false
+    @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
     @State private var wallpaperData: Data?
@@ -70,42 +71,27 @@ struct TimetableView: View {
                             .frame(maxWidth: .infinity).padding(.horizontal, 10).padding(.vertical, 4)
                             .background(.regularMaterial)
                     }
-                    if let projection = model.projection {
-                        if !projection.unplaced.isEmpty { unplacedButton(projection) }
-                        if projection.placements.isEmpty && projection.unplaced.isEmpty {
-                            Label("本周暂无课程", systemImage: "calendar.badge.checkmark")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                        }
+                    if model.projection != nil {
                         if model.periods.isEmpty {
                             ContentUnavailableView("节次尚未设置", systemImage: "clock.badge.questionmark",
                                                    description: Text("请在时间设置中配置课程节次。"))
                         } else {
-                            GeometryReader { geometry in
-                                let metrics = TimetableGridMetrics(viewportWidth: geometry.size.width,
-                                                                   rowCount: model.periods.count,
-                                                                   dynamicScale: gridScale)
-                                VStack(spacing: 0) {
-                                    dateHeader(projection, metrics: metrics)
-                                    ScrollView(.vertical) {
-                                        courseGrid(projection, metrics: metrics)
-                                            .padding(.bottom, viewport.safeAreaInsets.bottom + 12)
-                                    }
-                                    .simultaneousGesture(
-                                        DragGesture(minimumDistance: TimetableWeekSwipe.minimumRecognitionDistance)
-                                            .onEnded { value in
-                                                guard state.canAccessPrivateData,
-                                                      state.selectedTab == .timetable,
-                                                      model.selectedTermID != nil,
-                                                      let delta = TimetableWeekSwipe.direction(
-                                                        translation: value.translation,
-                                                        startX: value.startLocation.x,
-                                                        width: metrics.width) else { return }
-                                                changeWeek(delta)
-                                            }
-                                    )
-                                }
-                                .frame(width: metrics.width)
+                            TimetableWeekPager(model: model,
+                                               authenticationRevision: state.authenticationRevision,
+                                               renderRevision: state.timetableWallpaperVersion,
+                                               wallpaperVisible: showsWallpaper,
+                                               layoutScale: gridScale,
+                                               reduceMotion: reduceMotion) { projection in
+                                TimetableWeekPage(projection: projection,
+                                                  periodCount: model.periods.count,
+                                                  dynamicScale: gridScale,
+                                                  bottomPadding: viewport.safeAreaInsets.bottom + 12,
+                                                  header: { dateHeader($0, metrics: $1) },
+                                                  grid: { courseGrid($0, metrics: $1) },
+                                                  showUnplaced: { courses in
+                                                      unplacedCourses = courses
+                                                      showingUnplaced = true
+                                                  })
                             }
                         }
                     } else if model.isLoading && model.snapshot == nil {
@@ -143,6 +129,7 @@ struct TimetableView: View {
             .onChange(of: state.authenticationRevision) { _, _ in
                 selectedCourse = nil
                 showingUnplaced = false
+                unplacedCourses = []
                 showingConflicts = false
                 model.clear()
                 wallpaperData = nil
@@ -196,13 +183,7 @@ struct TimetableView: View {
     }
 
     private func changeWeek(_ delta: Int?) {
-        if reduceMotion {
-            if let delta { model.moveWeek(delta) } else { model.jumpToCurrentWeek() }
-        } else {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                if let delta { model.moveWeek(delta) } else { model.jumpToCurrentWeek() }
-            }
-        }
+        if let delta { model.moveWeek(delta) } else { model.jumpToCurrentWeek() }
     }
 
     @ViewBuilder
@@ -377,18 +358,9 @@ struct TimetableView: View {
         }
     }
 
-    private func unplacedButton(_ projection: WeeklyTimetableProjection) -> some View {
-        Button { showingUnplaced = true } label: {
-            Label("\(projection.unplaced.count) 门课程未能定位节次，点按查看", systemImage: "exclamationmark.circle")
-                .font(.footnote)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal).padding(.bottom, 8)
-    }
-
     private var unplacedList: some View {
         NavigationStack {
-            let items = model.projection?.unplaced ?? []
+            let items = unplacedCourses
             List {
                 ForEach(items.indices, id: \.self) { index in
                     let item = items[index]
@@ -434,22 +406,5 @@ struct TimetableView: View {
         case .unmatchedStartTime: "开始时间未匹配节次"
         case .unmatchedEndTime: "结束时间未匹配节次"
         }
-    }
-}
-
-enum TimetableWeekSwipe {
-    static let minimumRecognitionDistance: CGFloat = 12
-    static let minimumHorizontalDistance: CGFloat = 60
-    static let horizontalToVerticalRatio: CGFloat = 1.5
-    static let systemEdgeInset: CGFloat = 24
-
-    static func direction(translation: CGSize, startX: CGFloat, width: CGFloat) -> Int? {
-        let horizontal = abs(translation.width)
-        let vertical = abs(translation.height)
-        guard width > systemEdgeInset * 2,
-              startX >= systemEdgeInset, startX <= width - systemEdgeInset,
-              horizontal >= minimumHorizontalDistance,
-              horizontal > horizontalToVerticalRatio * vertical else { return nil }
-        return translation.width < 0 ? 1 : -1
     }
 }

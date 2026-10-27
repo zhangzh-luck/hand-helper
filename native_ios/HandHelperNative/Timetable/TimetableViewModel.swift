@@ -7,6 +7,7 @@ final class TimetableViewModel: ObservableObject {
     @Published private(set) var projection: WeeklyTimetableProjection?
     @Published private(set) var selectedTermID: Int?
     @Published private(set) var selectedWeek = 1
+    @Published private(set) var snapshotRevision = 0
     @Published private(set) var errorMessage: String?
     @Published private(set) var isLoading = false
 
@@ -38,6 +39,7 @@ final class TimetableViewModel: ObservableObject {
 
     func clear() {
         operation += 1
+        snapshotRevision += 1
         snapshot = nil
         projection = nil
         selectedTermID = nil
@@ -67,10 +69,20 @@ final class TimetableViewModel: ObservableObject {
     }
 
     func moveWeek(_ delta: Int) {
-        let next = selectedWeek + delta
-        guard next > 0, next <= 999 else { return }
-        selectedWeek = next
+        selectWeek(selectedWeek + delta)
+    }
+
+    func selectWeek(_ week: Int) {
+        guard (1...999).contains(week), selectedTermID != nil, week != selectedWeek else { return }
+        selectedWeek = week
         reproject()
+    }
+
+    func projection(for week: Int) -> WeeklyTimetableProjection? {
+        guard (1...999).contains(week), let snapshot, let selectedTermID else { return nil }
+        guard let ticket = try? access.ticket() else { return nil }
+        return try? access.project(snapshot, termID: selectedTermID, week: week,
+                                   calendar: calendar, ticket: ticket)
     }
 
     func jumpToCurrentWeek() {
@@ -107,7 +119,9 @@ final class TimetableViewModel: ObservableObject {
     private func accept(_ newSnapshot: CourseSnapshot, ticket: WeeklyTimetableAccountTicket) throws {
         _ = try state.requireCurrentAccount(revision: ticket.authenticationRevision)
         let oldTerm = selectedTermID
+        let contentChanged = snapshot != newSnapshot
         snapshot = newSnapshot
+        if contentChanged { snapshotRevision += 1 }
         selectedTermID = oldTerm.flatMap { id in newSnapshot.terms.contains(where: { $0.id == id }) ? id : nil }
             ?? newSnapshot.terms.first(where: \.isCurrent)?.id ?? newSnapshot.terms.first?.id
         if selectedTermID != oldTerm { jumpToCurrentWeek() }
@@ -115,18 +129,21 @@ final class TimetableViewModel: ObservableObject {
     }
 
     private func reproject() {
-        projection = nil
-        guard let snapshot, let selectedTermID else { return }
+        guard let snapshot, let selectedTermID else { projection = nil; return }
         do {
             let ticket = try access.ticket()
-            projection = try access.project(snapshot, termID: selectedTermID, week: selectedWeek,
-                                            calendar: calendar, ticket: ticket)
+            let next = try access.project(snapshot, termID: selectedTermID, week: selectedWeek,
+                                          calendar: calendar, ticket: ticket)
+            projection = next
             if projection != nil { errorMessage = nil }
         } catch WeeklyTimetableError.missingStartDate {
+            projection = nil
             errorMessage = "该学期尚未设置第一周日期。"
         } catch WeeklyTimetableError.invalidStartDate {
+            projection = nil
             errorMessage = "该学期的第一周日期无效。"
         } catch {
+            projection = nil
             errorMessage = "无法显示本周课程：\(error.localizedDescription)"
         }
     }

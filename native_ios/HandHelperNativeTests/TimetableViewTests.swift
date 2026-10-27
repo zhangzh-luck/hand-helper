@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import UIKit
 import XCTest
 @testable import HandHelperNative
 
@@ -64,45 +66,83 @@ final class TimetableViewTests: XCTestCase {
         XCTAssertEqual(repository.refreshCount, 0)
     }
 
-    func testWeekSwipeRequiresClearHorizontalIntentAwayFromSystemEdges() {
-        let width: CGFloat = 375
-        XCTAssertEqual(TimetableWeekSwipe.direction(translation: CGSize(width: -60, height: 0),
-                                                     startX: 180, width: width), 1)
-        XCTAssertEqual(TimetableWeekSwipe.direction(translation: CGSize(width: 60, height: 0),
-                                                     startX: 180, width: width), -1)
-        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: -59, height: 0),
-                                                   startX: 180, width: width))
-        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 10, height: 100),
-                                                   startX: 180, width: width))
-        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 75, height: 50),
-                                                   startX: 180, width: width))
-        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: 100, height: 0),
-                                                   startX: 12, width: width))
-        XCTAssertNil(TimetableWeekSwipe.direction(translation: CGSize(width: -100, height: 0),
-                                                   startX: 365, width: width))
+    func testPageDelegateCommitsOnlyCompletedAdjacentTransition() {
+        XCTAssertEqual(TimetablePageTransition.committedWeek(from: 2, to: 3, completed: true), 3)
+        XCTAssertEqual(TimetablePageTransition.committedWeek(from: 2, to: 1, completed: true), 1)
+        XCTAssertNil(TimetablePageTransition.committedWeek(from: 2, to: 3, completed: false))
+        XCTAssertNil(TimetablePageTransition.committedWeek(from: 2, to: 4, completed: true))
+        XCTAssertNil(TimetablePageTransition.committedWeek(from: nil, to: 2, completed: true))
     }
 
     @MainActor
-    func testWeekSwipeUsesSameSingleStepProjectionAsButtonsAndRespectsFirstWeek() async throws {
+    func testUIKitPagerPrefetchesNeighbourAndCommitsOnlyCompletedSwipe() async throws {
+        let (state, repository, model) = try await setup()
+        model.loadCached()
+        let pager = TimetableWeekPager(model: model,
+                                       authenticationRevision: state.authenticationRevision,
+                                       renderRevision: 0, wallpaperVisible: false,
+                                       layoutScale: 1,
+                                       reduceMotion: false) { projection in
+            Text("第 \(projection.week) 周")
+        }
+        let coordinator = pager.makeCoordinator()
+        let controller = UIPageViewController(transitionStyle: .scroll,
+                                              navigationOrientation: .horizontal)
+        controller.dataSource = coordinator
+        controller.delegate = coordinator
+        coordinator.install(in: controller)
+        let first = try XCTUnwrap(controller.viewControllers?.first)
+        let second = try XCTUnwrap(coordinator.pageViewController(controller, viewControllerAfter: first))
+        XCTAssertNil(coordinator.pageViewController(controller, viewControllerBefore: first))
+        XCTAssertEqual(model.selectedWeek, 1, "预取不能改变顶部周次")
+
+        coordinator.pageViewController(controller, willTransitionTo: [second])
+        coordinator.pageViewController(controller, didFinishAnimating: true,
+                                       previousViewControllers: [first], transitionCompleted: false)
+        XCTAssertEqual(model.selectedWeek, 1, "回弹不能提交周次")
+
+        coordinator.pageViewController(controller, willTransitionTo: [second])
+        controller.setViewControllers([second], direction: .forward, animated: false)
+        coordinator.pageViewController(controller, didFinishAnimating: true,
+                                       previousViewControllers: [first], transitionCompleted: true)
+        XCTAssertEqual(model.selectedWeek, 2)
+        XCTAssertEqual(model.projection?.week, 2)
+        XCTAssertEqual(repository.refreshCount, 0)
+    }
+
+    @MainActor
+    func testAdjacentPagesUseSameSnapshotAsButtonsAndRespectFirstWeek() async throws {
         let (_, repository, model) = try await setup()
         model.loadCached()
         let firstWeekDates = try XCTUnwrap(model.projection?.dates)
-        let previous = try XCTUnwrap(TimetableWeekSwipe.direction(
-            translation: CGSize(width: 90, height: 0), startX: 180, width: 375))
-        model.moveWeek(previous)
+        XCTAssertNil(model.projection(for: 0))
+        XCTAssertEqual(model.projection(for: 2)?.dates.count, 7)
+        XCTAssertEqual(model.selectedWeek, 1, "预取相邻周不能提前提交周次")
+        model.moveWeek(-1)
         XCTAssertEqual(model.selectedWeek, 1)
         XCTAssertEqual(model.projection?.dates, firstWeekDates)
 
-        let next = try XCTUnwrap(TimetableWeekSwipe.direction(
-            translation: CGSize(width: -300, height: 0), startX: 180, width: 375))
-        XCTAssertEqual(next, 1)
-        model.moveWeek(next)
-        let swipeDates = try XCTUnwrap(model.projection?.dates)
+        let next = try XCTUnwrap(TimetablePageTransition.committedWeek(from: 1, to: 2, completed: true))
+        model.selectWeek(next)
+        let pageDates = try XCTUnwrap(model.projection?.dates)
         XCTAssertEqual(model.selectedWeek, 2)
         model.moveWeek(-1)
         model.moveWeek(1)
         XCTAssertEqual(model.selectedWeek, 2)
-        XCTAssertEqual(model.projection?.dates, swipeDates)
+        XCTAssertEqual(model.projection?.dates, pageDates)
+        XCTAssertEqual(repository.refreshCount, 0)
+    }
+
+    @MainActor
+    func testRapidProgrammaticSelectionAndTermSwitchReprojectWithoutRequests() async throws {
+        let (_, repository, model) = try await setup()
+        model.loadCached()
+        for week in [2, 3, 4, 2, 1] { model.selectWeek(week) }
+        XCTAssertEqual(model.selectedWeek, 1)
+        XCTAssertEqual(model.projection?.placements.map(\.course.id), [1])
+        model.selectTerm(2)
+        XCTAssertEqual(model.selectedTermID, 2)
+        XCTAssertEqual(model.projection(for: 1)?.term.id, 2)
         XCTAssertEqual(repository.refreshCount, 0)
     }
 
@@ -159,6 +199,7 @@ final class TimetableViewTests: XCTestCase {
         model.loadCached()
         XCTAssertNotNil(model.projection)
         await state.logout()
+        XCTAssertNil(model.projection(for: 1), "登出后即使内存快照尚未清空也不得构建周页面")
         model.loadCached()
         XCTAssertNil(model.snapshot)
         XCTAssertNil(model.projection)
