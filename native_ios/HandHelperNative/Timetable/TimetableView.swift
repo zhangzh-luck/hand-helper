@@ -42,85 +42,72 @@ struct TimetableView: View {
     }
 
     @ViewBuilder
-    private func gridBackground(size: CGSize) -> some View {
-        if showsWallpaper, let wallpaperData, let image = UIImage(data: wallpaperData) {
-            Image(uiImage: image)
-                .resizable().scaledToFill()
-                .frame(width: size.width, height: size.height)
-                .clipped()
-                .overlay(colorScheme == .dark ? Color.black.opacity(0.38) : Color.white.opacity(0.43))
-                .allowsHitTesting(false)
+    private var pageBackground: some View {
+        ZStack {
+            if showsWallpaper, let wallpaperData, let image = UIImage(data: wallpaperData) {
+                GeometryReader { geometry in
+                    Image(uiImage: image)
+                        .resizable().scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .overlay(colorScheme == .dark ? Color.black.opacity(0.38) : Color.white.opacity(0.43))
+                }
+            } else {
+                Color(uiColor: .systemGroupedBackground)
+            }
         }
-    }
-
-    private func safeTime(_ value: String) -> String {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
-              let hour = Int(parts[0]), let minute = Int(parts[1]),
-              (0..<24).contains(hour), (0..<60).contains(minute) else { return "—" }
-        return value
+        .ignoresSafeArea(.container, edges: .bottom)
+        .allowsHitTesting(false)
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                controls
-                if let projection = model.projection {
-                    if !projection.unplaced.isEmpty { unplacedButton(projection) }
-                    if projection.placements.isEmpty && projection.unplaced.isEmpty {
-                        Label("本周暂无课程", systemImage: "calendar.badge.checkmark")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+            GeometryReader { viewport in
+                VStack(spacing: 0) {
+                    controls
+                    if let error = model.errorMessage ?? wallpaperError, model.projection != nil {
+                        Text(error).font(.footnote).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(.regularMaterial)
                     }
-                    if model.periods.isEmpty {
-                        ContentUnavailableView("节次尚未设置", systemImage: "clock.badge.questionmark",
-                                               description: Text("请在时间设置中配置课程节次。"))
-                    } else {
-                        GeometryReader { geometry in
-                            let metrics = TimetableGridMetrics(viewportWidth: geometry.size.width,
-                                                               rowCount: model.periods.count,
-                                                               dynamicScale: gridScale)
-                            ZStack {
-                                gridBackground(size: geometry.size)
+                    if let projection = model.projection {
+                        if !projection.unplaced.isEmpty { unplacedButton(projection) }
+                        if projection.placements.isEmpty && projection.unplaced.isEmpty {
+                            Label("本周暂无课程", systemImage: "calendar.badge.checkmark")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        }
+                        if model.periods.isEmpty {
+                            ContentUnavailableView("节次尚未设置", systemImage: "clock.badge.questionmark",
+                                                   description: Text("请在时间设置中配置课程节次。"))
+                        } else {
+                            GeometryReader { geometry in
+                                let metrics = TimetableGridMetrics(viewportWidth: geometry.size.width,
+                                                                   rowCount: model.periods.count,
+                                                                   dynamicScale: gridScale)
                                 VStack(spacing: 0) {
                                     dateHeader(projection, metrics: metrics)
                                     ScrollView(.vertical) {
                                         courseGrid(projection, metrics: metrics)
-                                            .padding(.bottom, 16)
+                                            .padding(.bottom, viewport.safeAreaInsets.bottom + 12)
                                     }
                                 }
                                 .frame(width: metrics.width)
                             }
-                            .clipped()
                         }
+                    } else if model.isLoading && model.snapshot == nil {
+                        ProgressView("正在加载课程表")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ContentUnavailableView(model.terms.isEmpty ? "暂无学期" : "暂无可显示的课程表",
+                                               systemImage: "calendar",
+                                               description: Text(model.errorMessage ?? "请选择学期，或检查学期第一周日期。"))
                     }
-                } else if model.isLoading && model.snapshot == nil {
-                    ProgressView("正在加载课程表")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ContentUnavailableView(model.terms.isEmpty ? "暂无学期" : "暂无可显示的课程表",
-                                           systemImage: "calendar",
-                                           description: Text(model.errorMessage ?? "请选择学期，或检查学期第一周日期。"))
                 }
+                .background { pageBackground }
+                .ignoresSafeArea(.container, edges: .bottom)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("课程表")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await model.refreshManually() }
-                    } label: { Label("刷新课程", systemImage: "arrow.clockwise") }
-                    .disabled(model.isLoading)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if let error = model.errorMessage ?? wallpaperError, model.projection != nil {
-                    Text(error).font(.footnote).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(8)
-                        .background(.regularMaterial)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedCourse) { course in
                 NavigationStack { TimetableCourseDetailView(course: course) }
             }
@@ -159,6 +146,13 @@ struct TimetableView: View {
                 ForEach(model.terms, id: \.id) { term in
                     Button(term.displayName) { model.selectTerm(term.id) }
                 }
+                Divider()
+                Button {
+                    Task { await model.refreshManually() }
+                } label: {
+                    Label("刷新课程", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.isLoading)
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 2) {
@@ -170,7 +164,7 @@ struct TimetableView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .disabled(model.terms.isEmpty)
+            .buttonStyle(.plain)
             Button { changeWeek(-1) } label: { Image(systemName: "chevron.left") }
                 .accessibilityLabel("上一周")
                 .disabled(model.selectedWeek <= 1 || model.selectedTermID == nil)
@@ -183,8 +177,9 @@ struct TimetableView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .padding(.horizontal)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
     }
 
     private func changeWeek(_ delta: Int?) {
@@ -229,25 +224,22 @@ struct TimetableView: View {
                             metrics: TimetableGridMetrics) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(0..<model.periods.count, id: \.self) { row in
-                HStack(spacing: 0) {
-                    VStack(spacing: 1) {
-                        Text("\(model.periods[row].periodNumber)").font(.caption.weight(.bold))
-                        Text(safeTime(model.periods[row].startTime)).font(.caption2).lineLimit(1)
-                        Text(safeTime(model.periods[row].endTime)).font(.caption2).lineLimit(1)
-                    }
-                        .foregroundStyle(.secondary)
-                        .frame(width: metrics.railWidth, height: metrics.rowHeight)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
-                        .accessibilityLabel("第 \(model.periods[row].periodNumber) 节，\(safeTime(model.periods[row].startTime)) 至 \(safeTime(model.periods[row].endTime))")
-                    ForEach(1...7, id: \.self) { day in
-                        Rectangle().fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.53 : 1))
-                            .overlay(alignment: .bottom) { Divider() }
-                            .overlay(alignment: .trailing) { Divider() }
-                            .frame(width: metrics.dayWidth(day), height: metrics.rowHeight)
-                    }
+                Rectangle()
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
+                    .frame(width: metrics.railWidth, height: metrics.rowHeight)
+                    .offset(y: metrics.rowOrigin(row))
+                periodLabel(model.periods[row])
+                    .frame(width: metrics.railWidth, height: metrics.rowHeight)
+                    .offset(y: metrics.rowOrigin(row))
+                ForEach(1...7, id: \.self) { day in
+                    let cell = metrics.cellFrame(weekday: day, row: row)
+                    Rectangle()
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.53 : 1))
+                        .frame(width: cell.width, height: cell.height)
+                        .offset(x: cell.minX, y: cell.minY)
                 }
-                .offset(y: CGFloat(row) * metrics.rowHeight)
             }
+            gridLines(metrics: metrics)
             ForEach(projection.placements.indices, id: \.self) { index in
                 let placement = projection.placements[index]
                 if !metrics.shouldSummarize(placement) {
@@ -275,10 +267,36 @@ struct TimetableView: View {
                 .buttonStyle(.plain)
                 .frame(width: metrics.dayWidth(group.weekday) - 4, height: group.height - 4)
                 .offset(x: metrics.dayOrigin(group.weekday) + 2,
-                        y: CGFloat(group.startRow) * metrics.rowHeight + 2)
+                        y: metrics.rowOrigin(group.startRow) + 2)
             }
         }
         .frame(width: metrics.width, height: metrics.bodyHeight, alignment: .topLeading)
+    }
+
+    private func periodLabel(_ period: PeriodInfo) -> some View {
+        VStack(spacing: 1) {
+            Text("\(period.periodNumber)").font(.caption.weight(.bold))
+            Text(TimetablePeriodLabel.safeTime(period.startTime)).font(.caption2).lineLimit(1)
+            Text(TimetablePeriodLabel.safeTime(period.endTime)).font(.caption2).lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("第 \(period.periodNumber) 节，\(TimetablePeriodLabel.safeTime(period.startTime)) 至 \(TimetablePeriodLabel.safeTime(period.endTime))")
+    }
+
+    private func gridLines(metrics: TimetableGridMetrics) -> some View {
+        Path { path in
+            for x in metrics.verticalBoundaries {
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: metrics.bodyHeight))
+            }
+            for y in metrics.horizontalBoundaries {
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: metrics.width, y: y))
+            }
+        }
+        .stroke(Color.primary.opacity(showsWallpaper ? 0.22 : 0.15), lineWidth: 0.5)
+        .frame(width: metrics.width, height: metrics.bodyHeight)
+        .allowsHitTesting(false)
     }
 
     private func courseButton(_ course: CourseSession, rowSpan: Int,

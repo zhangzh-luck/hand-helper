@@ -218,6 +218,66 @@ final class TimetableViewTests: XCTestCase {
         XCTAssertEqual(TimetableDateLabel.day("2027-01-01", previous: "2026-12-31"), "1/1")
         XCTAssertEqual(TimetableDateLabel.day("2027-01-02", previous: "2027-01-01"), "2")
     }
+
+    func testEveryTeachingPeriodHasSevenAlignedLogicalCellsAndSingleGridBoundaries() {
+        for width in [CGFloat(320), 375, 393, 430] {
+            let grid = TimetableGridMetrics(viewportWidth: width, rowCount: 11)
+            XCTAssertEqual(grid.verticalBoundaries.count, 9)
+            XCTAssertEqual(grid.horizontalBoundaries.count, 12)
+            XCTAssertEqual(grid.verticalBoundaries.first, 0)
+            XCTAssertEqual(grid.verticalBoundaries.last, width)
+            XCTAssertEqual(grid.horizontalBoundaries.first, 0)
+            XCTAssertEqual(grid.horizontalBoundaries.last, grid.bodyHeight)
+            for row in 0..<11 {
+                let cells = (1...7).map { grid.cellFrame(weekday: $0, row: row) }
+                XCTAssertTrue(cells.allSatisfy { $0.minY == grid.rowOrigin(row) && $0.maxY == grid.rowOrigin(row + 1) })
+                XCTAssertEqual(cells.first?.minX, grid.railWidth)
+                XCTAssertEqual(cells.last?.maxX, width)
+                for day in 0..<6 { XCTAssertEqual(cells[day].maxX, cells[day + 1].minX, accuracy: 0.0001) }
+            }
+        }
+    }
+
+    func testConsecutiveCourseSpansHaveNoInsertedBreakRows() {
+        let course = fixture().calendarSessions[0]
+        let grid = TimetableGridMetrics(viewportWidth: 375, rowCount: 11)
+        let spans = [(0, 2), (2, 2), (4, 3)]
+        for (start, span) in spans {
+            let placement = WeeklyCoursePlacement(course: course, weekday: 3,
+                startPeriod: start + 1, endPeriod: start + span,
+                startRow: start, rowSpan: span, conflictGroup: start,
+                laneIndex: 0, laneCount: 1)
+            let frame = grid.frame(for: placement)
+            XCTAssertEqual(frame.minY, grid.rowOrigin(start))
+            XCTAssertEqual(frame.maxY, grid.rowOrigin(start + span))
+            XCTAssertEqual(frame.height, CGFloat(span) * grid.rowHeight)
+        }
+        XCTAssertEqual(grid.rowOrigin(2), grid.rowOrigin(0) + 2 * grid.rowHeight)
+        XCTAssertEqual(grid.rowOrigin(4), grid.rowOrigin(2) + 2 * grid.rowHeight)
+    }
+
+    func testConflictingLanesSharePeriodCoordinatesWithoutDroppingSingleCourse() {
+        let course = fixture().calendarSessions[0]
+        let grid = TimetableGridMetrics(viewportWidth: 375, rowCount: 11)
+        let first = WeeklyCoursePlacement(course: course, weekday: 7, startPeriod: 3,
+            endPeriod: 4, startRow: 2, rowSpan: 2, conflictGroup: 1, laneIndex: 0, laneCount: 2)
+        let second = WeeklyCoursePlacement(course: course, weekday: 7, startPeriod: 3,
+            endPeriod: 4, startRow: 2, rowSpan: 2, conflictGroup: 1, laneIndex: 1, laneCount: 2)
+        let solo = WeeklyCoursePlacement(course: course, weekday: 7, startPeriod: 3,
+            endPeriod: 4, startRow: 2, rowSpan: 2, conflictGroup: 2, laneIndex: 0, laneCount: 1)
+        XCTAssertEqual(grid.frame(for: first).maxX, grid.frame(for: second).minX, accuracy: 0.0001)
+        XCTAssertEqual(grid.frame(for: first).minY, grid.cellFrame(weekday: 7, row: 2).minY)
+        XCTAssertEqual(grid.frame(for: second).maxY, grid.cellFrame(weekday: 7, row: 3).maxY)
+        XCTAssertTrue(grid.shouldSummarize(first))
+        XCTAssertFalse(grid.shouldSummarize(solo))
+    }
+
+    func testMissingOrInvalidPeriodTimesUseSafeLabels() {
+        XCTAssertEqual(TimetablePeriodLabel.safeTime("08:00"), "08:00")
+        XCTAssertEqual(TimetablePeriodLabel.safeTime(""), "—")
+        XCTAssertEqual(TimetablePeriodLabel.safeTime("25:70"), "—")
+        XCTAssertEqual(TimetablePeriodLabel.safeTime("8:00"), "—")
+    }
 }
 
 private final class TimetableModelSession: SessionStore {

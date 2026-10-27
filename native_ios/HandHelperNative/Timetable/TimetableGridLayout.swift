@@ -21,6 +21,8 @@ struct TimetableGridMetrics {
     var width: CGFloat { viewportWidth }
     var bodyHeight: CGFloat { CGFloat(rowCount) * rowHeight }
 
+    func rowOrigin(_ row: Int) -> CGFloat { CGFloat(row) * rowHeight }
+
     func dayOrigin(_ weekday: Int) -> CGFloat {
         railWidth + CGFloat(weekday - 1) * dayWidth
     }
@@ -29,11 +31,24 @@ struct TimetableGridMetrics {
         weekday == 7 ? max(0, viewportWidth - dayOrigin(weekday)) : dayWidth
     }
 
+    func cellFrame(weekday: Int, row: Int) -> CGRect {
+        CGRect(x: dayOrigin(weekday), y: rowOrigin(row),
+               width: dayWidth(weekday), height: rowHeight)
+    }
+
+    var verticalBoundaries: [CGFloat] {
+        [0, railWidth] + (1...7).map { dayOrigin($0) + dayWidth($0) }
+    }
+
+    var horizontalBoundaries: [CGFloat] {
+        (0...rowCount).map(rowOrigin)
+    }
+
     func frame(for placement: WeeklyCoursePlacement) -> CGRect {
         let laneWidth = dayWidth(placement.weekday) / CGFloat(max(placement.laneCount, 1))
         return CGRect(x: dayOrigin(placement.weekday) +
                           CGFloat(placement.laneIndex) * laneWidth,
-                      y: CGFloat(placement.startRow) * rowHeight,
+                      y: rowOrigin(placement.startRow),
                       width: laneWidth,
                       height: CGFloat(placement.rowSpan) * rowHeight)
     }
@@ -41,6 +56,16 @@ struct TimetableGridMetrics {
     func shouldSummarize(_ placement: WeeklyCoursePlacement) -> Bool {
         placement.laneCount > 1 &&
             dayWidth(placement.weekday) / CGFloat(placement.laneCount) < 56
+    }
+}
+
+enum TimetablePeriodLabel {
+    static func safeTime(_ value: String) -> String {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
+              let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0..<24).contains(hour), (0..<60).contains(minute) else { return "—" }
+        return value
     }
 }
 
