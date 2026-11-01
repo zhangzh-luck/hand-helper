@@ -27,7 +27,7 @@ enum TimetableMorphPhase: Equatable {
 
 enum TimetableMorphGeometry {
     static func destination(in bounds: CGRect, safeArea: UIEdgeInsets,
-                            preferredHeight: CGFloat = 390) -> CGRect {
+                            preferredHeight: CGFloat) -> CGRect {
         let horizontal: CGFloat = 16
         let top = bounds.minY + safeArea.top + 16
         let bottom = max(top, bounds.maxY - safeArea.bottom - 16)
@@ -46,7 +46,61 @@ enum TimetableMorphGeometry {
     }
 
     static func cornerRadius(progress: CGFloat) -> CGFloat {
-        8 + 14 * min(1, max(0, progress))
+        9 + 13 * min(1, max(0, progress))
+    }
+}
+
+struct TimetableMorphFrame {
+    let progress: CGFloat
+    let rect: CGRect
+}
+
+/// Stores the last value supplied by SwiftUI's Animatable renderer. The target
+/// state is deliberately kept separate from the surface currently on screen.
+final class TimetableMorphPresentation {
+    private let lock = NSLock()
+    private var frame = TimetableMorphFrame(progress: 0, rect: .zero)
+
+    func record(_ value: TimetableMorphFrame) {
+        lock.lock()
+        frame = value
+        lock.unlock()
+    }
+
+    func current() -> TimetableMorphFrame {
+        lock.lock()
+        defer { lock.unlock() }
+        return frame
+    }
+}
+
+enum TimetableMorphTimeline {
+    static func phase(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        min(1, max(0, (progress - start) / (end - start)))
+    }
+
+    // Flutter's fastOutSlowIn is the cubic Bezier (0.4, 0, 0.2, 1).
+    static func geometryProgress(_ progress: CGFloat) -> CGFloat {
+        let target = min(1, max(0, progress))
+        if target == 0 || target == 1 { return target }
+        var low: CGFloat = 0
+        var high: CGFloat = 1
+        for _ in 0..<12 {
+            let t = (low + high) / 2
+            let inverse = 1 - t
+            let x = 3 * inverse * inverse * t * 0.4 + 3 * inverse * t * t * 0.2 + t * t * t
+            if x < target { low = t } else { high = t }
+        }
+        let t = (low + high) / 2
+        return 3 * (1 - t) * t * t + t * t * t
+    }
+
+    static func frame(from source: CGRect, to destination: CGRect, progress: CGFloat,
+                      frozenRect: CGRect? = nil) -> TimetableMorphFrame {
+        let value = min(1, max(0, progress))
+        return TimetableMorphFrame(progress: value, rect: frozenRect ??
+            TimetableMorphGeometry.interpolate(source, destination,
+                                                progress: geometryProgress(value)))
     }
 }
 
@@ -97,7 +151,7 @@ final class TimetableCourseMorphCoordinator: ObservableObject {
     }
 
     func finish(id: UUID) {
-        guard route?.id == id else { return }
+        guard route?.id == id, phase == .closingToSource || phase == .fadingOut else { return }
         route = nil
         phase = .idle
     }
