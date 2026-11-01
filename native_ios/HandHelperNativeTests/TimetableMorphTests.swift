@@ -133,4 +133,14 @@ final class TimetableMorphTests: XCTestCase {
         morph.setPagerBusy(false)
         XCTAssertTrue(morph.open(course: course(), key: key, color: .blue))
     }
+
+    @MainActor
+    func testClearingOverlayKeepsMountedCardMarkerForNextTap() {
+        let (window, _, _, _, morph) = mountedSource()
+        XCTAssertNotNil(window)
+        XCTAssertTrue(morph.open(course: course(), key: key, color: .blue))
+        morph.clear()
+        XCTAssertNotNil(morph.visibleSourceRect(for: key))
+        XCTAssertTrue(morph.open(course: course(), key: key, color: .blue))
+    }
 }

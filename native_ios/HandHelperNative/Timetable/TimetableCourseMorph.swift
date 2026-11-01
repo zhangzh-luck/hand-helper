@@ -106,7 +106,8 @@ final class TimetableCourseMorphCoordinator: ObservableObject {
         route = nil
         phase = .idle
         pagerBusy = false
-        sources.removeAll()
+        // A background/foreground cycle keeps the hosted week pages alive. Keep their
+        // weak markers so the next tap can still measure a card without rebuilding pages.
     }
 
     func invalidate(termID: Int?, snapshotRevision: Int, authenticationRevision: Int) {
