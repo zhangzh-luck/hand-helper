@@ -363,10 +363,11 @@ struct TimetableView: View {
                     .layoutPriority(1)
                 if policy.showsRoom, let room = course.room, !room.isEmpty {
                     Text(room).font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(contrast == .increased ? Color.primary : Color.primary.opacity(0.82))
                         .lineLimit(policy.roomLines)
                         .minimumScaleFactor(0.8)
                         .truncationMode(.tail)
+                        .layoutPriority(0.5)
                 }
                 if policy.showsTeacher, let teacher = course.teacher, !teacher.isEmpty {
                     Text(teacher).font(.caption2)

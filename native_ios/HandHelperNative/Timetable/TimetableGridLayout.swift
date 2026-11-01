@@ -91,9 +91,10 @@ struct TimetableCardContentPolicy {
     let showsTeacher: Bool
 
     init(rowSpan: Int) {
-        titleLines = rowSpan > 2 ? 3 : 2
-        roomLines = rowSpan > 1 ? 2 : 1
+        let expanded = rowSpan > 1
+        titleLines = expanded ? 6 : 3
+        roomLines = expanded ? 2 : 1
         showsRoom = true
-        showsTeacher = rowSpan > 2
+        showsTeacher = expanded
     }
 }
