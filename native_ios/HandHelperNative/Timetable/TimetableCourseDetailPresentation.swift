@@ -36,19 +36,34 @@ enum TimetableDetailLayout {
 }
 
 enum TimetableDetailMotion {
-    static let openingDuration = 0.26
-    static let closingDuration = 0.20
+    static let openingDuration = 0.32
+    static let closingDuration = 0.22
     static let reducedDuration = 0.15
 
     static func scale(visible: Bool, reduceMotion: Bool) -> CGFloat {
-        visible || reduceMotion ? 1 : 0.96
+        visible || reduceMotion ? 1 : 0.92
     }
 
     static func verticalOffset(visible: Bool, reduceMotion: Bool) -> CGFloat {
-        visible || reduceMotion ? 0 : 6
+        visible || reduceMotion ? 0 : 10
     }
 
     static func scrimOpacity(dark: Bool) -> Double { dark ? 0.42 : 0.32 }
+
+    static func animation(opening: Bool, reduceMotion: Bool) -> Animation {
+        if reduceMotion { return .easeOut(duration: reducedDuration) }
+        return .spring(duration: opening ? openingDuration : closingDuration, bounce: 0.06)
+    }
+}
+
+enum TimetableDetailSurfaceKind: Equatable {
+    case glass, material, opaque
+
+    static func current(reduceTransparency: Bool, increasedContrast: Bool,
+                        supportsGlass: Bool) -> Self {
+        if reduceTransparency || increasedContrast { return .opaque }
+        return supportsGlass ? .glass : .material
+    }
 }
 
 @MainActor

@@ -43,8 +43,8 @@ final class TimetableDetailPresentationTests: XCTestCase {
     }
 
     func testNativeMotionUsesOneVisibleStateAndReducedMotionFallback() {
-        XCTAssertEqual(TimetableDetailMotion.scale(visible: false, reduceMotion: false), 0.96)
-        XCTAssertEqual(TimetableDetailMotion.verticalOffset(visible: false, reduceMotion: false), 6)
+        XCTAssertEqual(TimetableDetailMotion.scale(visible: false, reduceMotion: false), 0.92)
+        XCTAssertEqual(TimetableDetailMotion.verticalOffset(visible: false, reduceMotion: false), 10)
         XCTAssertEqual(TimetableDetailMotion.scale(visible: true, reduceMotion: false), 1)
         XCTAssertEqual(TimetableDetailMotion.verticalOffset(visible: true, reduceMotion: false), 0)
         XCTAssertEqual(TimetableDetailMotion.scale(visible: false, reduceMotion: true), 1)
@@ -52,6 +52,39 @@ final class TimetableDetailPresentationTests: XCTestCase {
         XCTAssertLessThan(TimetableDetailMotion.reducedDuration, TimetableDetailMotion.openingDuration)
         XCTAssertEqual(TimetableDetailMotion.scrimOpacity(dark: false), 0.32)
         XCTAssertEqual(TimetableDetailMotion.scrimOpacity(dark: true), 0.42)
+        XCTAssertEqual(TimetableDetailMotion.openingDuration, 0.32)
+        XCTAssertEqual(TimetableDetailMotion.closingDuration, 0.22)
+    }
+
+    func testGlassMaterialAndAccessibleOpaqueSurfacePolicy() {
+        XCTAssertEqual(TimetableDetailSurfaceKind.current(reduceTransparency: false,
+                                                          increasedContrast: false,
+                                                          supportsGlass: true), .glass)
+        XCTAssertEqual(TimetableDetailSurfaceKind.current(reduceTransparency: false,
+                                                          increasedContrast: false,
+                                                          supportsGlass: false), .material)
+        for supportsGlass in [false, true] {
+            XCTAssertEqual(TimetableDetailSurfaceKind.current(reduceTransparency: true,
+                                                              increasedContrast: false,
+                                                              supportsGlass: supportsGlass), .opaque)
+            XCTAssertEqual(TimetableDetailSurfaceKind.current(reduceTransparency: false,
+                                                              increasedContrast: true,
+                                                              supportsGlass: supportsGlass), .opaque)
+        }
+    }
+
+    @MainActor
+    func testOpeningCompletionOnlyAdvancesCurrentOpeningRoute() throws {
+        let detail = TimetableCourseDetailCoordinator()
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue))
+        let id = try XCTUnwrap(detail.route?.id)
+        detail.markOpen(id: UUID())
+        XCTAssertEqual(detail.phase, .opening)
+        detail.markOpen(id: id)
+        XCTAssertEqual(detail.phase, .open)
+        XCTAssertTrue(detail.beginClose(id: id))
+        detail.markOpen(id: id)
+        XCTAssertEqual(detail.phase, .closing)
     }
 
     @MainActor

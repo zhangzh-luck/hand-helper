@@ -42,8 +42,9 @@ private struct TimetableDetailSurface: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var destination: CGRect?
-    @State private var visible = false
+    @State private var presented = false
     @State private var closing = false
     @State private var focusTitle = false
 
@@ -51,35 +52,68 @@ private struct TimetableDetailSurface: View {
         TimetableDetailLayout.frame(in: bounds, safeArea: safeArea, preferredHeight: 0).width
     }
 
+    private var surfaceKind: TimetableDetailSurfaceKind {
+        let supportsGlass: Bool
+        if #available(iOS 26.0, *) { supportsGlass = true }
+        else { supportsGlass = false }
+        return .current(reduceTransparency: reduceTransparency,
+                        increasedContrast: contrast == .increased,
+                        supportsGlass: supportsGlass)
+    }
+
+    private var panelShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+    }
+
+    @ViewBuilder
+    private var panelBackground: some View {
+        switch surfaceKind {
+        case .glass:
+            if #available(iOS 26.0, *) {
+                // One system glass surface; the semantic wash shares its outline.
+                Color.clear.glassEffect(.regular, in: panelShape)
+                    .overlay(panelShape.fill(Color(uiColor: .systemGroupedBackground).opacity(0.78)))
+            }
+        case .material:
+            panelShape.fill(.thickMaterial)
+        case .opaque:
+            panelShape.fill(Color(uiColor: .systemGroupedBackground))
+        }
+    }
+
+    private var panelTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .scale(scale: TimetableDetailMotion.scale(visible: false, reduceMotion: false))
+            .combined(with: .offset(y: TimetableDetailMotion.verticalOffset(visible: false,
+                                                                            reduceMotion: false)))
+            .combined(with: .opacity)
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let destination {
-                Color.black.opacity(visible ? TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark) : 0)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: close)
+                if presented {
+                    Color.black.opacity(TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark))
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: close)
+                        .transition(.opacity)
 
-                ScrollView(.vertical) {
-                    TimetableDetailContent(course: route.course, courseColor: route.courseColor,
-                                           focusTitle: focusTitle, onClose: close)
-                        .frame(width: destination.width)
+                    ScrollView(.vertical) {
+                        TimetableDetailContent(course: route.course, courseColor: route.courseColor,
+                                               focusTitle: focusTitle, onClose: close)
+                            .frame(width: destination.width)
+                    }
+                    .frame(width: destination.width, height: destination.height)
+                    .background(panelBackground)
+                    .clipShape(panelShape)
+                    .overlay(panelShape.strokeBorder(Color.primary.opacity(contrast == .increased ? 0.24 : 0.06),
+                                                     lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+                    .transition(panelTransition)
+                    .position(x: destination.midX, y: destination.midY)
+                    .allowsHitTesting(!closing)
+                    .accessibilityHidden(closing)
                 }
-                .frame(width: destination.width, height: destination.height)
-                // An opaque semantic surface keeps details legible over photos and
-                // when the system requests reduced transparency.
-                .background(Color(uiColor: .systemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 22))
-                .clipShape(RoundedRectangle(cornerRadius: 22))
-                .overlay(RoundedRectangle(cornerRadius: 22)
-                    .strokeBorder(Color.primary.opacity(contrast == .increased ? 0.24 : 0.08),
-                                  lineWidth: 0.5))
-                .shadow(color: .black.opacity(visible ? 0.16 : 0), radius: 16, y: 6)
-                .scaleEffect(TimetableDetailMotion.scale(visible: visible, reduceMotion: reduceMotion))
-                .offset(y: TimetableDetailMotion.verticalOffset(visible: visible, reduceMotion: reduceMotion))
-                .opacity(visible ? 1 : 0)
-                .position(x: destination.midX, y: destination.midY)
-                .allowsHitTesting(visible && !closing)
-                .accessibilityHidden(!visible || closing)
-                .onAppear(perform: open)
             } else {
                 // Measure once at the final width, before the visible presentation begins.
                 TimetableDetailContent(course: route.course, courseColor: route.courseColor,
@@ -97,20 +131,21 @@ private struct TimetableDetailSurface: View {
         }
         .frame(width: bounds.width, height: bounds.height)
         .onPreferenceChange(TimetableDetailHeightKey.self) { height in
-            guard destination == nil, height > 0, detail.route?.id == route.id else { return }
-            destination = TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
-                                                       preferredHeight: height)
+            guard destination == nil, height > 0, detail.route?.id == route.id,
+                  detail.phase == .opening else { return }
+            open(at: TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
+                                                 preferredHeight: height))
         }
         .onChange(of: bounds.size) { _, _ in close() }
     }
 
-    private func open() {
-        guard detail.route?.id == route.id, detail.phase == .opening else { return }
-        let animation: Animation = reduceMotion
-            ? .easeOut(duration: TimetableDetailMotion.reducedDuration)
-            : .smooth(duration: TimetableDetailMotion.openingDuration, extraBounce: 0)
-        withAnimation(animation, completionCriteria: .logicallyComplete) {
-            visible = true
+    private func open(at frame: CGRect) {
+        // The measured destination exists before SwiftUI inserts the visible panel.
+        // An insertion transition owns the first rendered frame, rather than onAppear.
+        withAnimation(TimetableDetailMotion.animation(opening: true, reduceMotion: reduceMotion),
+                      completionCriteria: .removed) {
+            destination = frame
+            presented = true
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
             detail.markOpen(id: route.id)
@@ -122,11 +157,9 @@ private struct TimetableDetailSurface: View {
         guard !closing, detail.beginClose(id: route.id) else { return }
         closing = true
         focusTitle = false
-        let animation: Animation = reduceMotion
-            ? .easeOut(duration: TimetableDetailMotion.reducedDuration)
-            : .smooth(duration: TimetableDetailMotion.closingDuration, extraBounce: 0)
-        withAnimation(animation, completionCriteria: .logicallyComplete) {
-            visible = false
+        withAnimation(TimetableDetailMotion.animation(opening: false, reduceMotion: reduceMotion),
+                      completionCriteria: .removed) {
+            presented = false
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
             detail.finish(id: route.id)
