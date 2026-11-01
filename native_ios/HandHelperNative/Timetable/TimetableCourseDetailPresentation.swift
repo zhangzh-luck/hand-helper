@@ -58,6 +58,8 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     private(set) var pagerBusy = false
     private weak var rootView: UIView?
 
+    var isPresenting: Bool { route != nil }
+
     func setRootView(_ view: UIView) { rootView = view }
     var windowSafeArea: UIEdgeInsets { rootView?.window?.safeAreaInsets ?? .zero }
 

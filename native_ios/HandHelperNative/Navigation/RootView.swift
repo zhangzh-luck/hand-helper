@@ -29,8 +29,8 @@ struct RootView: View {
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
                                    timetableDetail: timetableDetail)
                     .ignoresSafeArea()
-                    .allowsHitTesting(avatarPreview == nil && timetableDetail.route == nil)
-                    .accessibilityHidden(avatarPreview != nil || timetableDetail.route != nil)
+                    .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting)
+                    .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -65,6 +65,9 @@ struct RootView: View {
                 timetableDetail.clear()
             }
         }
+        .onChange(of: timetableDetail.isPresenting) { _, presenting in
+            if presenting { clearAvatarPreview() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { timetableDetail.clear() }
         }
@@ -74,7 +77,7 @@ struct RootView: View {
         guard state.entry == .main, state.selectedTab == .today,
               state.canAccessPrivateData,
               route.revision == state.authenticationRevision,
-              timetableDetail.route == nil else { return }
+              !timetableDetail.isPresenting else { return }
         avatarPreviewVisible = false
         avatarPreview = route
     }

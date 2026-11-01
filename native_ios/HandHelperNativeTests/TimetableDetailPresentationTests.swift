@@ -8,10 +8,11 @@ final class TimetableDetailPresentationTests: XCTestCase {
                                                  week: 2, snapshotRevision: 5,
                                                  courseID: 11, placementIndex: 0)
 
-    private func course(name: String = "完整课程名称") -> CourseSession {
+    private func course(name: String = "完整课程名称", room: String? = "A101",
+                        teacher: String? = "教师", weeks: String? = "2周") -> CourseSession {
         CourseSession(id: 11, name: name, date: "2026-09-08",
                       startDateTime: "2026-09-08T08:00:00", endDateTime: "2026-09-08T09:35:00",
-                      room: "A101", teacher: "教师", weekExpression: "2周", source: "IMPORTED",
+                      room: room, teacher: teacher, weekExpression: weeks, source: "IMPORTED",
                       manualCourseID: nil, termID: 8, weekday: 2, startPeriod: 1, endPeriod: 2)
     }
 
@@ -61,6 +62,7 @@ final class TimetableDetailPresentationTests: XCTestCase {
         XCTAssertEqual(route.course.name, "完整课程名称")
         XCTAssertEqual(route.context, context)
         XCTAssertEqual(detail.phase, .opening)
+        XCTAssertTrue(detail.isPresenting)
         XCTAssertFalse(detail.open(course: course(name: "其他课程"), context: context, color: .red))
         XCTAssertEqual(detail.route?.id, route.id)
     }
@@ -78,6 +80,7 @@ final class TimetableDetailPresentationTests: XCTestCase {
         detail.finish(id: id)
         XCTAssertEqual(detail.phase, .idle)
         XCTAssertNil(detail.route)
+        XCTAssertFalse(detail.isPresenting)
     }
 
     @MainActor
@@ -122,8 +125,10 @@ final class TimetableDetailPresentationTests: XCTestCase {
 
     @MainActor
     func testLongTitleAndDynamicTypeIncreaseMeasuredContentHeight() {
-        func height(name: String, size: DynamicTypeSize) -> CGFloat {
-            let view = TimetableDetailContent(course: course(name: name), courseColor: .blue,
+        func height(name: String, room: String? = "A101", teacher: String? = "教师",
+                    size: DynamicTypeSize) -> CGFloat {
+            let view = TimetableDetailContent(course: course(name: name, room: room,
+                                                             teacher: teacher), courseColor: .blue,
                                               focusTitle: false, onClose: {})
                 .frame(width: 343)
                 .fixedSize(horizontal: false, vertical: true)
@@ -136,5 +141,26 @@ final class TimetableDetailPresentationTests: XCTestCase {
         XCTAssertGreaterThan(height(name: String(repeating: "Python 数据分析与可视化技术", count: 4),
                                     size: .medium), short)
         XCTAssertGreaterThan(height(name: "机器学习", size: .accessibility2), short)
+        XCTAssertGreaterThan(height(name: "机器学习",
+                                    room: String(repeating: "教学楼与实验室", count: 8),
+                                    teacher: String(repeating: "任课教师", count: 8),
+                                    size: .medium), short)
+    }
+
+    func testInformationRowsKeepFullValuesAndOptionalTeachingWeek() {
+        let full = course(name: "Python 数据分析与可视化技术",
+                          room: "综合实验楼 A101 与 B202", teacher: "张老师、李老师")
+        let rows = TimetableDetailInformation.rows(for: full)
+        XCTAssertEqual(rows.map(\.label), ["日期与时间", "教室", "任课教师", "教学周", "节次"])
+        XCTAssertEqual(rows[0].value, "2026-09-08 · 08:00–09:35")
+        XCTAssertEqual(rows[1].value, full.room ?? "")
+        XCTAssertEqual(rows[2].value, full.teacher ?? "")
+        XCTAssertEqual(rows[3].value, full.weekExpression ?? "")
+        XCTAssertTrue(rows[3].isSecondary)
+        XCTAssertEqual(rows[4].value, "第 1–2 节")
+        XCTAssertEqual(full.name, "Python 数据分析与可视化技术")
+
+        let noWeek = TimetableDetailInformation.rows(for: course(weeks: nil))
+        XCTAssertFalse(noWeek.contains(where: { $0.label == "教学周" }))
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The root overlay sits above NativeTabContainer, including its UIKit tab bar.
 struct TimetableCourseDetailOverlay: View {
@@ -21,7 +22,7 @@ struct TimetableCourseDetailOverlay: View {
             }
         }
         .ignoresSafeArea()
-        .allowsHitTesting(detail.route != nil)
+        .allowsHitTesting(detail.isPresenting)
     }
 }
 
@@ -40,6 +41,7 @@ private struct TimetableDetailSurface: View {
     let reduceMotion: Bool
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var destination: CGRect?
     @State private var visible = false
     @State private var closing = false
@@ -62,9 +64,14 @@ private struct TimetableDetailSurface: View {
                         .frame(width: destination.width)
                 }
                 .frame(width: destination.width, height: destination.height)
-                .background(Color(uiColor: .secondarySystemGroupedBackground),
+                // An opaque semantic surface keeps details legible over photos and
+                // when the system requests reduced transparency.
+                .background(Color(uiColor: .systemGroupedBackground),
                             in: RoundedRectangle(cornerRadius: 22))
                 .clipShape(RoundedRectangle(cornerRadius: 22))
+                .overlay(RoundedRectangle(cornerRadius: 22)
+                    .strokeBorder(Color.primary.opacity(contrast == .increased ? 0.24 : 0.08),
+                                  lineWidth: 0.5))
                 .shadow(color: .black.opacity(visible ? 0.16 : 0), radius: 16, y: 6)
                 .scaleEffect(TimetableDetailMotion.scale(visible: visible, reduceMotion: reduceMotion))
                 .offset(y: TimetableDetailMotion.verticalOffset(visible: visible, reduceMotion: reduceMotion))
@@ -123,6 +130,7 @@ private struct TimetableDetailSurface: View {
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
             detail.finish(id: route.id)
+            UIAccessibility.post(notification: .layoutChanged, argument: nil)
         }
     }
 }
@@ -159,42 +167,71 @@ struct TimetableDetailContent: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭课程详情")
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 10) {
-                detailRow("日期", value: course.date)
-                detailRow("时间", value: TimetableCourseDetailText.time(course))
-                detailRow("教室", value: TimetableCourseDetailText.nonempty(course.room))
-                detailRow("教师", value: TimetableCourseDetailText.nonempty(course.teacher))
-                if let weeks = course.weekExpression, !weeks.isEmpty {
-                    detailRow("周次", value: weeks)
-                }
-                if let first = course.startPeriod, let last = course.endPeriod {
-                    detailRow("节次", value: "第 \(first)–\(last) 节")
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(TimetableDetailInformation.rows(for: course)) { row in
+                    detailRow(row)
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 18)
+            .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .onChange(of: focusTitle) { _, value in titleFocused = value }
     }
 
-    private func detailRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
-            Text(value)
+    private func detailRow(_ row: TimetableDetailInformation.Row) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: row.symbol)
                 .font(.subheadline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(row.value)
+                    .font(.subheadline)
+                    .foregroundStyle(row.isSecondary ? Color.secondary : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+enum TimetableDetailInformation {
+    struct Row: Identifiable {
+        let label: String
+        let symbol: String
+        let value: String
+        var isSecondary = false
+        var id: String { label }
+    }
+
+    static func rows(for course: CourseSession) -> [Row] {
+        var rows = [
+            Row(label: "日期与时间", symbol: "calendar",
+                value: "\(course.date) · \(TimetableCourseDetailText.time(course))"),
+            Row(label: "教室", symbol: "mappin.and.ellipse",
+                value: TimetableCourseDetailText.nonempty(course.room)),
+            Row(label: "任课教师", symbol: "person",
+                value: TimetableCourseDetailText.nonempty(course.teacher))
+        ]
+        if let weeks = course.weekExpression, !weeks.isEmpty {
+            rows.append(Row(label: "教学周", symbol: "calendar.badge.clock",
+                            value: weeks, isSecondary: true))
+        }
+        if let first = course.startPeriod, let last = course.endPeriod {
+            rows.append(Row(label: "节次", symbol: "number", value: "第 \(first)–\(last) 节",
+                            isSecondary: true))
+        }
+        return rows
     }
 }
