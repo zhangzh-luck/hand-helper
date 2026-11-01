@@ -1,4 +1,5 @@
 import CryptoKit
+import SwiftUI
 import XCTest
 import UIKit
 @testable import HandHelperNative
@@ -32,6 +33,18 @@ final class TodayTests: XCTestCase {
             in: CGSize(width: 1024, height: 1366)), 520)
         XCTAssertEqual(TodayAvatarLightboxLayout.imageSide(
             in: CGSize(width: 320, height: 400)), 250)
+    }
+
+    @MainActor
+    func testSharedGlassCloseButtonKeepsBothTapTargets() {
+        for diameter in [CGFloat(44), 54] {
+            let button = GlassCloseButton(accessibilityLabel: "关闭", diameter: diameter,
+                                          onDarkBackground: diameter == 54, action: {})
+            let size = UIHostingController(rootView: button)
+                .sizeThatFits(in: CGSize(width: 200, height: 200))
+            XCTAssertEqual(size.width, diameter, accuracy: 1)
+            XCTAssertEqual(size.height, diameter, accuracy: 1)
+        }
     }
 
     func testWallpaperDataURLDecoding() {

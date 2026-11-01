@@ -32,14 +32,8 @@ struct TodayAvatarLightboxView: View {
                                 .strokeBorder(.white, lineWidth: 2.5)
                         }
 
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .frame(width: 54, height: 54)
-                            .background(.white, in: Circle())
-                    }
-                    .accessibilityLabel("关闭头像预览")
+                    GlassCloseButton(accessibilityLabel: "关闭头像预览", diameter: 54,
+                                     onDarkBackground: true, action: onClose)
                 }
                 .scaleEffect(isVisible ? 1 : 0.92)
                 .opacity(isVisible ? 1 : 0)

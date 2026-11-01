@@ -191,15 +191,8 @@ struct TimetableDetailContent: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityFocused($titleFocused)
                 Spacer(minLength: 0)
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭课程详情")
+                GlassCloseButton(accessibilityLabel: "关闭课程详情", diameter: 44,
+                                 onDarkBackground: false, action: onClose)
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
