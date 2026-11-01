@@ -15,6 +15,10 @@ final class TimetableWallpaperImageTests: XCTestCase {
             reduceTransparency: false, increasedContrast: true))
         XCTAssertEqual(TimetableWallpaperStyle.cellOpacity(hasPhoto: false), 1)
         XCTAssertEqual(TimetableWallpaperStyle.cardOpacity(hasPhoto: false), 1)
+        XCTAssertEqual(TimetableWallpaperStyle.railOpacity(hasPhoto: false, dark: false), 1)
+        XCTAssertEqual(TimetableWallpaperStyle.railOpacity(hasPhoto: false, dark: true), 1)
+        XCTAssertEqual(TimetableWallpaperStyle.railOpacity(hasPhoto: true, dark: false), 0.26)
+        XCTAssertEqual(TimetableWallpaperStyle.railOpacity(hasPhoto: true, dark: true), 0.30)
         XCTAssertLessThan(TimetableWallpaperStyle.cellOpacity(hasPhoto: true), 0.2)
     }
 

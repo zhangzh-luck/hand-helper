@@ -290,9 +290,19 @@ final class TimetableViewTests: XCTestCase {
             endPeriod: 1, startRow: 0, rowSpan: 1, conflictGroup: 1, laneIndex: 0, laneCount: 2)
         XCTAssertFalse(grid.shouldSummarize(solo))
         XCTAssertTrue(grid.shouldSummarize(overlap))
-        XCTAssertEqual(TimetableCardContentPolicy(rowSpan: 1).titleLines, 3)
-        XCTAssertFalse(TimetableCardContentPolicy(rowSpan: 1).showsTeacher)
-        XCTAssertTrue(TimetableCardContentPolicy(rowSpan: 3).showsTeacher)
+        let short = TimetableCardContentPolicy(rowSpan: 1)
+        let medium = TimetableCardContentPolicy(rowSpan: 2)
+        let long = TimetableCardContentPolicy(rowSpan: 3)
+        XCTAssertEqual(short.titleLines, 2)
+        XCTAssertEqual(short.roomLines, 1)
+        XCTAssertTrue(short.showsRoom)
+        XCTAssertFalse(short.showsTeacher)
+        XCTAssertEqual(medium.titleLines, 2)
+        XCTAssertEqual(medium.roomLines, 2)
+        XCTAssertFalse(medium.showsTeacher)
+        XCTAssertEqual(long.titleLines, 3)
+        XCTAssertEqual(long.roomLines, 2)
+        XCTAssertTrue(long.showsTeacher)
     }
 
     func testDateLabelsHandleMonthAndYearTransitions() {

@@ -9,6 +9,10 @@ enum TimetableWallpaperStyle {
     static func scrimOpacity(dark: Bool) -> Double { dark ? 0.34 : 0.18 }
     static func cellOpacity(hasPhoto: Bool) -> Double { hasPhoto ? 0.12 : 1 }
     static func cardOpacity(hasPhoto: Bool) -> Double { hasPhoto ? 0.78 : 1 }
+    static func railOpacity(hasPhoto: Bool, dark: Bool) -> Double {
+        guard hasPhoto else { return 1 }
+        return dark ? 0.30 : 0.26
+    }
 }
 
 @MainActor
@@ -269,7 +273,9 @@ struct TimetableView: View {
         ZStack(alignment: .topLeading) {
             ForEach(0..<model.periods.count, id: \.self) { row in
                 Rectangle()
-                    .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.82 : 1))
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground)
+                        .opacity(TimetableWallpaperStyle.railOpacity(hasPhoto: showsWallpaper,
+                                                                     dark: colorScheme == .dark)))
                     .frame(width: metrics.railWidth, height: metrics.rowHeight)
                     .offset(y: metrics.rowOrigin(row))
                 periodLabel(model.periods[row])
@@ -324,7 +330,7 @@ struct TimetableView: View {
             Text(TimetablePeriodLabel.safeTime(period.startTime)).font(.caption2).lineLimit(1)
             Text(TimetablePeriodLabel.safeTime(period.endTime)).font(.caption2).lineLimit(1)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(showsWallpaper ? Color.primary : Color.secondary)
         .accessibilityLabel("第 \(period.periodNumber) 节，\(TimetablePeriodLabel.safeTime(period.startTime)) 至 \(TimetablePeriodLabel.safeTime(period.endTime))")
     }
 
@@ -349,14 +355,24 @@ struct TimetableView: View {
         let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
         return Button { selectedCourse = course } label: {
             VStack(alignment: .leading, spacing: 2) {
-                Text(course.name).font(.caption2.weight(.bold))
-                    .lineLimit(policy.titleLines).truncationMode(.tail)
+                Text(course.name).font(.caption.weight(.semibold))
+                    .lineLimit(policy.titleLines)
+                    .minimumScaleFactor(0.8)
+                    .allowsTightening(true)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
                 if policy.showsRoom, let room = course.room, !room.isEmpty {
-                    Text(room).font(.caption2).lineLimit(2).truncationMode(.tail)
+                    Text(room).font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(policy.roomLines)
+                        .minimumScaleFactor(0.8)
+                        .truncationMode(.tail)
                 }
                 if policy.showsTeacher, let teacher = course.teacher, !teacher.isEmpty {
-                    Spacer(minLength: 0)
-                    Text(teacher).font(.caption2).lineLimit(1).truncationMode(.tail)
+                    Text(teacher).font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

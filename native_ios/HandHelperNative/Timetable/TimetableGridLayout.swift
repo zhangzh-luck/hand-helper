@@ -86,12 +86,14 @@ enum TimetableDateLabel {
 
 struct TimetableCardContentPolicy {
     let titleLines: Int
+    let roomLines: Int
     let showsRoom: Bool
     let showsTeacher: Bool
 
     init(rowSpan: Int) {
-        titleLines = rowSpan > 1 ? 4 : 3
-        showsRoom = rowSpan > 1
+        titleLines = rowSpan > 2 ? 3 : 2
+        roomLines = rowSpan > 1 ? 2 : 1
+        showsRoom = true
         showsTeacher = rowSpan > 2
     }
 }
