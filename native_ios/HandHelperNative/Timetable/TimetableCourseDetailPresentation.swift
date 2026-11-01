@@ -23,6 +23,12 @@ enum TimetableDetailPhase: Equatable {
 }
 
 enum TimetableDetailLayout {
+    static func needsScrolling(contentHeight: CGFloat, viewportHeight: CGFloat) -> Bool {
+        guard contentHeight.isFinite, viewportHeight.isFinite else { return false }
+        // Absorb sub-point measurement differences without enabling an empty bounce.
+        return contentHeight > viewportHeight + 1
+    }
+
     static func frame(in bounds: CGRect, safeArea: UIEdgeInsets,
                       preferredHeight: CGFloat) -> CGRect {
         let top = bounds.minY + safeArea.top + 16

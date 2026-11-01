@@ -42,6 +42,28 @@ final class TimetableDetailPresentationTests: XCTestCase {
         XCTAssertEqual(frame.maxY, 370)
     }
 
+    func testDetailScrollsOnlyWhenContentExceedsAvailableViewport() {
+        let bounds = CGRect(x: 0, y: 0, width: 375, height: 812)
+        let safeArea = UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0)
+        let ordinary = TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
+                                                    preferredHeight: 260)
+        XCTAssertFalse(TimetableDetailLayout.needsScrolling(contentHeight: 260,
+                                                             viewportHeight: ordinary.height))
+        XCTAssertFalse(TimetableDetailLayout.needsScrolling(contentHeight: 260.5,
+                                                             viewportHeight: ordinary.height))
+
+        let long = TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
+                                                preferredHeight: 700)
+        XCTAssertTrue(TimetableDetailLayout.needsScrolling(contentHeight: 700,
+                                                            viewportHeight: long.height))
+        let small = TimetableDetailLayout.frame(
+            in: CGRect(x: 0, y: 0, width: 320, height: 420),
+            safeArea: UIEdgeInsets(top: 50, left: 0, bottom: 34, right: 0),
+            preferredHeight: 400)
+        XCTAssertTrue(TimetableDetailLayout.needsScrolling(contentHeight: 400,
+                                                            viewportHeight: small.height))
+    }
+
     func testNativeMotionUsesOneVisibleStateAndReducedMotionFallback() {
         XCTAssertEqual(TimetableDetailMotion.scale(visible: false, reduceMotion: false), 0.92)
         XCTAssertEqual(TimetableDetailMotion.verticalOffset(visible: false, reduceMotion: false), 10)

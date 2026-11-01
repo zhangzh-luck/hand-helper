@@ -44,6 +44,7 @@ private struct TimetableDetailSurface: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var destination: CGRect?
+    @State private var measuredContentHeight: CGFloat = 0
     @State private var closing = false
     @State private var focusTitle = false
 
@@ -107,6 +108,9 @@ private struct TimetableDetailSurface: View {
                                            glassHeader: surfaceKind == .glass)
                         .frame(width: destination.width)
                 }
+                .scrollDisabled(!TimetableDetailLayout.needsScrolling(
+                    contentHeight: measuredContentHeight, viewportHeight: destination.height))
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .frame(width: destination.width, height: destination.height))
                 .clipShape(panelShape)
                 .overlay(panelShape.strokeBorder(Color.primary.opacity(borderOpacity),
@@ -137,16 +141,18 @@ private struct TimetableDetailSurface: View {
             guard destination == nil, height > 0, detail.route?.id == route.id,
                   detail.phase == .opening else { return }
             open(at: TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
-                                                 preferredHeight: height))
+                                                 preferredHeight: height),
+                 contentHeight: height)
         }
         .onChange(of: bounds.size) { _, _ in close() }
     }
 
-    private func open(at frame: CGRect) {
+    private func open(at frame: CGRect, contentHeight: CGFloat) {
         // Animate the insertion controlled by the measured destination itself.
         // The panel is never inserted at its final height before this transaction.
         withAnimation(TimetableDetailMotion.animation(opening: true, reduceMotion: reduceMotion),
                       completionCriteria: .removed) {
+            measuredContentHeight = contentHeight
             destination = frame
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
