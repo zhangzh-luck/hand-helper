@@ -1,6 +1,16 @@
 import SwiftUI
 import UIKit
 
+enum TimetableWallpaperStyle {
+    static func showsPhoto(hasImage: Bool, reduceTransparency: Bool, increasedContrast: Bool) -> Bool {
+        hasImage && !reduceTransparency && !increasedContrast
+    }
+
+    static func scrimOpacity(dark: Bool) -> Double { dark ? 0.34 : 0.18 }
+    static func cellOpacity(hasPhoto: Bool) -> Double { hasPhoto ? 0.12 : 1 }
+    static func cardOpacity(hasPhoto: Bool) -> Double { hasPhoto ? 0.78 : 1 }
+}
+
 @MainActor
 struct TimetableView: View {
     @ObservedObject private var state: AppState
@@ -15,7 +25,9 @@ struct TimetableView: View {
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
-    @State private var wallpaperData: Data?
+    @State private var wallpaperImage: UIImage?
+    @State private var wallpaperTask: Task<Void, Never>?
+    @State private var wallpaperGeneration = 0
     @State private var wallpaperError: String?
 
     init(state: AppState) {
@@ -26,18 +38,44 @@ struct TimetableView: View {
     }
 
     private var showsWallpaper: Bool {
-        wallpaperData != nil && !reduceTransparency && contrast != .increased
+        TimetableWallpaperStyle.showsPhoto(hasImage: wallpaperImage != nil,
+                                           reduceTransparency: reduceTransparency,
+                                           increasedContrast: contrast == .increased)
     }
 
     private func reloadWallpaper() {
-        guard state.canAccessPrivateData else { wallpaperData = nil; wallpaperError = nil; return }
-        do {
-            wallpaperData = try WallpaperStore(session: state.sessionStore,
-                                               account: state.verifiedAccount,
-                                               kind: .timetable).load()
+        wallpaperTask?.cancel()
+        wallpaperGeneration += 1
+        let generation = wallpaperGeneration
+        guard state.canAccessPrivateData else {
+            wallpaperImage = nil
             wallpaperError = nil
+            return
+        }
+        do {
+            let revision = state.authenticationRevision
+            let data = try WallpaperStore(session: state.sessionStore,
+                                          account: state.verifiedAccount,
+                                          kind: .timetable).load()
+            wallpaperError = nil
+            guard let data else {
+                wallpaperImage = nil
+                return
+            }
+            wallpaperTask = Task {
+                do {
+                    let decoded = try await TimetableWallpaperImage.displayImage(data)
+                    guard !Task.isCancelled, generation == wallpaperGeneration,
+                          (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
+                    wallpaperImage = UIImage(cgImage: decoded)
+                } catch {
+                    guard !Task.isCancelled, generation == wallpaperGeneration else { return }
+                    wallpaperImage = nil
+                    wallpaperError = "课表壁纸无法读取：\(error.localizedDescription)"
+                }
+            }
         } catch {
-            wallpaperData = nil
+            wallpaperImage = nil
             wallpaperError = "课表壁纸无法读取：\(error.localizedDescription)"
         }
     }
@@ -45,13 +83,15 @@ struct TimetableView: View {
     @ViewBuilder
     private var pageBackground: some View {
         ZStack {
-            if showsWallpaper, let wallpaperData, let image = UIImage(data: wallpaperData) {
+            if showsWallpaper, let wallpaperImage {
                 GeometryReader { geometry in
-                    Image(uiImage: image)
+                    Image(uiImage: wallpaperImage)
                         .resizable().scaledToFill()
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
-                        .overlay(colorScheme == .dark ? Color.black.opacity(0.38) : Color.white.opacity(0.43))
+                        .overlay(colorScheme == .dark
+                                 ? Color.black.opacity(TimetableWallpaperStyle.scrimOpacity(dark: true))
+                                 : Color.white.opacity(TimetableWallpaperStyle.scrimOpacity(dark: false)))
                 }
             } else {
                 Color(uiColor: .systemGroupedBackground)
@@ -132,7 +172,9 @@ struct TimetableView: View {
                 unplacedCourses = []
                 showingConflicts = false
                 model.clear()
-                wallpaperData = nil
+                wallpaperTask?.cancel()
+                wallpaperGeneration += 1
+                wallpaperImage = nil
                 wallpaperError = nil
                 reloadWallpaper()
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
@@ -236,7 +278,8 @@ struct TimetableView: View {
                 ForEach(1...7, id: \.self) { day in
                     let cell = metrics.cellFrame(weekday: day, row: row)
                     Rectangle()
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.53 : 1))
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground)
+                            .opacity(TimetableWallpaperStyle.cellOpacity(hasPhoto: showsWallpaper)))
                         .frame(width: cell.width, height: cell.height)
                         .offset(x: cell.minX, y: cell.minY)
                 }
@@ -296,7 +339,7 @@ struct TimetableView: View {
                 path.addLine(to: CGPoint(x: metrics.width, y: y))
             }
         }
-        .stroke(Color.primary.opacity(showsWallpaper ? 0.22 : 0.15), lineWidth: 0.5)
+        .stroke(Color.primary.opacity(showsWallpaper ? 0.28 : 0.15), lineWidth: 0.5)
         .frame(width: metrics.width, height: metrics.bodyHeight)
         .allowsHitTesting(false)
     }
@@ -318,11 +361,12 @@ struct TimetableView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(3)
-            .background(courseColor(course.name).opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
-            .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(showsWallpaper ? 0.91 : 1),
+            .background(courseColor(course.name).opacity(showsWallpaper ? 0.36 : 0.28), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color(uiColor: .secondarySystemGroupedBackground)
+                            .opacity(TimetableWallpaperStyle.cardOpacity(hasPhoto: showsWallpaper)),
                         in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(courseColor(course.name).opacity(0.55), lineWidth: 0.5))
+                .strokeBorder(courseColor(course.name).opacity(showsWallpaper ? 0.7 : 0.55), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .frame(width: width, height: height)

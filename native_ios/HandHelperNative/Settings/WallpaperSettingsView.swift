@@ -51,9 +51,17 @@ final class WallpaperSettingsModel: ObservableObject {
             guard let data = try await loadPhoto() else { throw WallpaperSelectionError.unreadableImage }
             guard generation == selectionGeneration, !Task.isCancelled else { return }
             _ = try state.requireCurrentAccount(revision: revision)
-            guard UIImage(data: data) != nil else { throw WallpaperSelectionError.unreadableImage }
-            try store.save(data)
-            wallpaperData = data
+            let storedData: Data
+            if kind == .timetable {
+                storedData = try await TimetableWallpaperImage.prepare(data)
+            } else {
+                guard UIImage(data: data) != nil else { throw WallpaperSelectionError.unreadableImage }
+                storedData = data
+            }
+            guard generation == selectionGeneration, !Task.isCancelled else { return }
+            _ = try state.requireCurrentAccount(revision: revision)
+            try store.save(storedData)
+            wallpaperData = storedData
             try publishChange()
             errorMessage = nil
         } catch {

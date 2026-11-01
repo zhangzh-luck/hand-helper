@@ -167,7 +167,9 @@ final class WallpaperSettingsTests: XCTestCase {
         await model.replace { image }
         XCTAssertEqual(state.timetableWallpaperVersion, 1)
         XCTAssertEqual(state.wallpaperVersion, 0)
-        XCTAssertEqual(try timetableStore.load(), image)
+        let stored = try XCTUnwrap(timetableStore.load())
+        XCTAssertNotEqual(stored, image) // Timetable photos are bounded JPEGs; Today's image is unchanged.
+        XCTAssertEqual(UIImage(data: stored)?.size, CGSize(width: 2, height: 2))
         XCTAssertNil(try todayStore.load())
         model.restoreDefault()
         XCTAssertEqual(state.timetableWallpaperVersion, 2)
