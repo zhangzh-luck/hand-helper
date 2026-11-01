@@ -28,7 +28,7 @@ enum TimetableWallpaperImage {
             guard !data.isEmpty, data.count <= maxSourceBytes else {
                 throw TimetableWallpaperImageError.oversizedSource
             }
-            let image = try thumbnail(data)
+            let image = try thumbnail(data, enforceSourceLimit: true)
             try Task.checkCancellation()
             for quality in [0.85, 0.72, 0.58] {
                 if let jpeg = encodeJPEG(image, quality: quality), jpeg.count <= maxStoredBytes {
@@ -45,7 +45,9 @@ enum TimetableWallpaperImage {
     }
 
     static func displayImage(_ data: Data) async throws -> CGImage {
-        let worker = Task.detached(priority: .userInitiated) { try thumbnail(data) }
+        let worker = Task.detached(priority: .userInitiated) {
+            try thumbnail(data, enforceSourceLimit: false)
+        }
         return try await withTaskCancellationHandler {
             try await worker.value
         } onCancel: {
@@ -53,7 +55,7 @@ enum TimetableWallpaperImage {
         }
     }
 
-    private static func thumbnail(_ data: Data) throws -> CGImage {
+    private static func thumbnail(_ data: Data, enforceSourceLimit: Bool) throws -> CGImage {
         try Task.checkCancellation()
         guard let source = CGImageSourceCreateWithData(data as CFData,
             [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -61,7 +63,7 @@ enum TimetableWallpaperImage {
             let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
             let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
             width > 0, height > 0 else { throw TimetableWallpaperImageError.invalidImage }
-        guard Double(width) * Double(height) <= Double(maxSourcePixels) else {
+        guard !enforceSourceLimit || Double(width) * Double(height) <= Double(maxSourcePixels) else {
             throw TimetableWallpaperImageError.oversizedSource
         }
         let options: [CFString: Any] = [
