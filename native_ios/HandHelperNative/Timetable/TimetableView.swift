@@ -18,13 +18,13 @@ enum TimetableWallpaperStyle {
 @MainActor
 struct TimetableView: View {
     @ObservedObject private var state: AppState
+    @ObservedObject private var morph: TimetableCourseMorphCoordinator
     @StateObject private var model: TimetableViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var gridScale: CGFloat = 1
-    @State private var selectedCourse: CourseSession?
     @State private var showingUnplaced = false
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
@@ -34,8 +34,9 @@ struct TimetableView: View {
     @State private var wallpaperGeneration = 0
     @State private var wallpaperError: String?
 
-    init(state: AppState) {
+    init(state: AppState, morph: TimetableCourseMorphCoordinator? = nil) {
         self.state = state
+        self.morph = morph ?? TimetableCourseMorphCoordinator()
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TimetableViewModel(state: state, repository: repository))
@@ -125,7 +126,8 @@ struct TimetableView: View {
                                                renderRevision: state.timetableWallpaperVersion,
                                                wallpaperVisible: showsWallpaper,
                                                layoutScale: gridScale,
-                                               reduceMotion: reduceMotion) { projection in
+                                               reduceMotion: reduceMotion,
+                                               onTransitionStateChange: { morph.setPagerBusy($0) }) { projection in
                                 TimetableWeekPage(projection: projection,
                                                   periodCount: model.periods.count,
                                                   dynamicScale: gridScale,
@@ -151,9 +153,6 @@ struct TimetableView: View {
                 .ignoresSafeArea(.container, edges: .bottom)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(item: $selectedCourse) { course in
-                NavigationStack { TimetableCourseDetailView(course: course) }
-            }
             .sheet(isPresented: $showingUnplaced) { unplacedList }
             .sheet(isPresented: $showingConflicts) { conflictList }
             .task {
@@ -171,7 +170,7 @@ struct TimetableView: View {
             }
             .onChange(of: state.timetableWallpaperVersion) { _, _ in reloadWallpaper() }
             .onChange(of: state.authenticationRevision) { _, _ in
-                selectedCourse = nil
+                morph.clear()
                 showingUnplaced = false
                 unplacedCourses = []
                 showingConflicts = false
@@ -182,6 +181,16 @@ struct TimetableView: View {
                 wallpaperError = nil
                 reloadWallpaper()
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
+            }
+            .onChange(of: model.selectedTermID) { _, _ in
+                morph.invalidate(termID: model.selectedTermID,
+                                 snapshotRevision: model.snapshotRevision,
+                                 authenticationRevision: state.authenticationRevision)
+            }
+            .onChange(of: model.snapshotRevision) { _, _ in
+                morph.invalidate(termID: model.selectedTermID,
+                                 snapshotRevision: model.snapshotRevision,
+                                 authenticationRevision: state.authenticationRevision)
             }
         }
     }
@@ -294,9 +303,15 @@ struct TimetableView: View {
             ForEach(projection.placements.indices, id: \.self) { index in
                 let placement = projection.placements[index]
                 if !metrics.shouldSummarize(placement) {
+                    let key = TimetableMorphSourceKey(authenticationRevision: state.authenticationRevision,
+                                                      termID: projection.term.id, week: projection.week,
+                                                      snapshotRevision: model.snapshotRevision,
+                                                      courseID: placement.course.id, placementIndex: index)
                     courseButton(placement.course, rowSpan: placement.rowSpan,
                                  width: metrics.frame(for: placement).width - 4,
-                                 height: metrics.frame(for: placement).height - 4)
+                                  height: metrics.frame(for: placement).height - 4, key: key)
+                        .modifier(TimetableSourceVisibility(morph: morph, key: key))
+                        .background(TimetableCourseSourceAnchor(morph: morph, key: key))
                         .offset(x: metrics.frame(for: placement).minX + 2,
                                 y: metrics.frame(for: placement).minY + 2)
                 }
@@ -351,9 +366,17 @@ struct TimetableView: View {
     }
 
     private func courseButton(_ course: CourseSession, rowSpan: Int,
-                              width: CGFloat, height: CGFloat) -> some View {
+                              width: CGFloat, height: CGFloat,
+                              key: TimetableMorphSourceKey) -> some View {
         let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
-        return Button { selectedCourse = course } label: {
+        return Button {
+            guard state.selectedTab == .timetable, state.canAccessPrivateData,
+                  model.selectedWeek == key.week, model.selectedTermID == key.termID,
+                  model.snapshotRevision == key.snapshotRevision,
+                  (try? state.requireCurrentAccount(revision: key.authenticationRevision)) != nil else { return }
+            _ = morph.open(course: course, key: key, color: courseColor(course.name),
+                           wallpaperVisible: showsWallpaper)
+        } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(course.name).font(.caption.weight(.semibold))
                     .lineLimit(policy.titleLines)

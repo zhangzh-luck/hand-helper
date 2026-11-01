@@ -10,6 +10,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
     let wallpaperVisible: Bool
     let layoutScale: CGFloat
     let reduceMotion: Bool
+    var onTransitionStateChange: ((Bool) -> Void)? = nil
     let content: (WeeklyTimetableProjection) -> Page
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -68,6 +69,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
                 pages.removeAll()
                 visibleWeek = nil
                 programmatic = false
+                parent.onTransitionStateChange?(false)
                 let week = parent.model.selectedWeek
                 if let page = page(for: week) {
                     visibleWeek = week
@@ -82,12 +84,14 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             let prior = visibleWeek ?? desired
             let adjacent = abs(desired - prior) == 1
             programmatic = true
+            parent.onTransitionStateChange?(true)
             transitionToken += 1
             let token = transitionToken
             controller.setViewControllers([target], direction: desired > prior ? .forward : .reverse,
                                           animated: adjacent && !parent.reduceMotion) { [weak self, weak controller] _ in
                 guard let self, let controller, self.transitionToken == token else { return }
                 self.programmatic = false
+                self.parent.onTransitionStateChange?(false)
                 self.visibleWeek = desired
                 self.warmNeighbours(of: desired)
                 self.prune(around: desired)
@@ -139,6 +143,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
         func pageViewController(_ controller: UIPageViewController,
                                 willTransitionTo pendingViewControllers: [UIViewController]) {
             interacting = true
+            parent.onTransitionStateChange?(true)
         }
 
         func pageViewController(_ controller: UIPageViewController,
@@ -146,6 +151,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
                                 previousViewControllers: [UIViewController],
                                 transitionCompleted completed: Bool) {
             interacting = false
+            parent.onTransitionStateChange?(false)
             guard let displayed = controller.viewControllers?.first as? WeekHost<Page> else { return }
             let externalSelection = parent.model.selectedWeek != visibleWeek
             if identity != currentIdentity {
