@@ -18,7 +18,7 @@ enum TimetableWallpaperStyle {
 @MainActor
 struct TimetableView: View {
     @ObservedObject private var state: AppState
-    @ObservedObject private var morph: TimetableCourseMorphCoordinator
+    @ObservedObject private var detail: TimetableCourseDetailCoordinator
     @StateObject private var model: TimetableViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -34,9 +34,9 @@ struct TimetableView: View {
     @State private var wallpaperGeneration = 0
     @State private var wallpaperError: String?
 
-    init(state: AppState, morph: TimetableCourseMorphCoordinator? = nil) {
+    init(state: AppState, detail: TimetableCourseDetailCoordinator? = nil) {
         self.state = state
-        self.morph = morph ?? TimetableCourseMorphCoordinator()
+        self.detail = detail ?? TimetableCourseDetailCoordinator()
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TimetableViewModel(state: state, repository: repository))
@@ -127,7 +127,7 @@ struct TimetableView: View {
                                                wallpaperVisible: showsWallpaper,
                                                layoutScale: gridScale,
                                                reduceMotion: reduceMotion,
-                                               onTransitionStateChange: { morph.setPagerBusy($0) }) { projection in
+                                               onTransitionStateChange: { detail.setPagerBusy($0) }) { projection in
                                 TimetableWeekPage(projection: projection,
                                                   periodCount: model.periods.count,
                                                   dynamicScale: gridScale,
@@ -170,7 +170,7 @@ struct TimetableView: View {
             }
             .onChange(of: state.timetableWallpaperVersion) { _, _ in reloadWallpaper() }
             .onChange(of: state.authenticationRevision) { _, _ in
-                morph.clear()
+                detail.clear()
                 showingUnplaced = false
                 unplacedCourses = []
                 showingConflicts = false
@@ -183,12 +183,12 @@ struct TimetableView: View {
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
             }
             .onChange(of: model.selectedTermID) { _, _ in
-                morph.invalidate(termID: model.selectedTermID,
+                detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
             }
             .onChange(of: model.snapshotRevision) { _, _ in
-                morph.invalidate(termID: model.selectedTermID,
+                detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
             }
@@ -303,15 +303,13 @@ struct TimetableView: View {
             ForEach(projection.placements.indices, id: \.self) { index in
                 let placement = projection.placements[index]
                 if !metrics.shouldSummarize(placement) {
-                    let key = TimetableMorphSourceKey(authenticationRevision: state.authenticationRevision,
+                    let context = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
                                                       termID: projection.term.id, week: projection.week,
                                                       snapshotRevision: model.snapshotRevision,
                                                       courseID: placement.course.id, placementIndex: index)
                     courseButton(placement.course, rowSpan: placement.rowSpan,
                                  width: metrics.frame(for: placement).width - 4,
-                                  height: metrics.frame(for: placement).height - 4, key: key)
-                        .modifier(TimetableSourceVisibility(morph: morph, key: key))
-                        .background(TimetableCourseSourceAnchor(morph: morph, key: key))
+                                   height: metrics.frame(for: placement).height - 4, context: context)
                         .offset(x: metrics.frame(for: placement).minX + 2,
                                 y: metrics.frame(for: placement).minY + 2)
                 }
@@ -367,15 +365,14 @@ struct TimetableView: View {
 
     private func courseButton(_ course: CourseSession, rowSpan: Int,
                               width: CGFloat, height: CGFloat,
-                              key: TimetableMorphSourceKey) -> some View {
+                              context: TimetableDetailContext) -> some View {
         let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
         return Button {
             guard state.selectedTab == .timetable, state.canAccessPrivateData,
-                  model.selectedWeek == key.week, model.selectedTermID == key.termID,
-                  model.snapshotRevision == key.snapshotRevision,
-                  (try? state.requireCurrentAccount(revision: key.authenticationRevision)) != nil else { return }
-            _ = morph.open(course: course, key: key, color: courseColor(course.name),
-                           wallpaperVisible: showsWallpaper)
+                   model.selectedWeek == context.week, model.selectedTermID == context.termID,
+                   model.snapshotRevision == context.snapshotRevision,
+                   (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
+            _ = detail.open(course: course, context: context, color: courseColor(course.name))
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(course.name).font(.caption.weight(.semibold))

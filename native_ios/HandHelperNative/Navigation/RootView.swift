@@ -6,7 +6,7 @@ struct RootView: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var timetableMorph = TimetableCourseMorphCoordinator()
+    @StateObject private var timetableDetail = TimetableCourseDetailCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
 
@@ -27,10 +27,10 @@ struct RootView: View {
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
-                                   timetableMorph: timetableMorph)
+                                   timetableDetail: timetableDetail)
                     .ignoresSafeArea()
-                    .allowsHitTesting(avatarPreview == nil && timetableMorph.route == nil)
-                    .accessibilityHidden(avatarPreview != nil || timetableMorph.route != nil)
+                    .allowsHitTesting(avatarPreview == nil && timetableDetail.route == nil)
+                    .accessibilityHidden(avatarPreview != nil || timetableDetail.route != nil)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -47,33 +47,34 @@ struct RootView: View {
                     }
             }
             if state.entry == .main {
-                TimetableCourseMorphOverlay(morph: timetableMorph, reduceMotion: reduceMotion)
+                TimetableCourseDetailOverlay(detail: timetableDetail, reduceMotion: reduceMotion)
                     .zIndex(2)
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
             clearAvatarPreview()
-            timetableMorph.clear()
+            timetableDetail.clear()
         }
         .onChange(of: state.selectedTab) { _, tab in
             if tab != .today { clearAvatarPreview() }
-            if tab != .timetable { timetableMorph.clear() }
+            if tab != .timetable { timetableDetail.clear() }
         }
         .onChange(of: state.entry) { _, entry in
             if entry != .main {
                 clearAvatarPreview()
-                timetableMorph.clear()
+                timetableDetail.clear()
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { timetableMorph.clear() }
+            if phase != .active { timetableDetail.clear() }
         }
     }
 
     private func showAvatarPreview(_ route: TodayAvatarPreviewRoute) {
         guard state.entry == .main, state.selectedTab == .today,
               state.canAccessPrivateData,
-              route.revision == state.authenticationRevision else { return }
+              route.revision == state.authenticationRevision,
+              timetableDetail.route == nil else { return }
         avatarPreviewVisible = false
         avatarPreview = route
     }
@@ -116,11 +117,11 @@ private struct AuthenticationStatusView: View {
 private struct NativeTabContainer: UIViewControllerRepresentable {
     @ObservedObject var state: AppState
     let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
-    let timetableMorph: TimetableCourseMorphCoordinator
+    let timetableDetail: TimetableCourseDetailCoordinator
 
     func makeUIViewController(context: Context) -> NativeTabController {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
-                                             timetableMorph: timetableMorph)
+                                             timetableDetail: timetableDetail)
         controller.selectedTabDidChange = { [weak state] tab in state?.selectedTab = tab }
         return controller
     }
@@ -135,7 +136,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var detailPresented = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
-         timetableMorph: TimetableCourseMorphCoordinator? = nil) {
+         timetableDetail: TimetableCourseDetailCoordinator? = nil) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
             let page: AnyView
@@ -144,7 +145,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             case .settings: page = AnyView(SettingsView(state: state))
             case .analysis: page = AnyView(AnalysisView(state: state))
             case .timetable: page = AnyView(TimetableView(state: state,
-                morph: timetableMorph ?? TimetableCourseMorphCoordinator()))
+                detail: timetableDetail ?? TimetableCourseDetailCoordinator()))
             }
             let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
