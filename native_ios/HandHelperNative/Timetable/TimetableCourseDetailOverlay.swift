@@ -44,7 +44,6 @@ private struct TimetableDetailSurface: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var destination: CGRect?
-    @State private var presented = false
     @State private var closing = false
     @State private var focusTitle = false
 
@@ -65,19 +64,24 @@ private struct TimetableDetailSurface: View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
     }
 
+    private var borderOpacity: Double {
+        if contrast == .increased { return 0.24 }
+        return surfaceKind == .glass ? 0 : 0.06
+    }
+
     @ViewBuilder
-    private var panelBackground: some View {
+    private func panelSurface<Content: View>(_ content: Content) -> some View {
         switch surfaceKind {
         case .glass:
             if #available(iOS 26.0, *) {
-                // One system glass surface; the semantic wash shares its outline.
-                Color.clear.glassEffect(.regular, in: panelShape)
-                    .overlay(panelShape.fill(Color(uiColor: .systemGroupedBackground).opacity(0.78)))
+                // Let the system glass render behind the header; only the information
+                // area receives a readable semantic backing inside this same outline.
+                content.glassEffect(.regular, in: panelShape)
             }
         case .material:
-            panelShape.fill(.thickMaterial)
+            content.background(.thickMaterial, in: panelShape)
         case .opaque:
-            panelShape.fill(Color(uiColor: .systemGroupedBackground))
+            content.background(Color(uiColor: .systemGroupedBackground), in: panelShape)
         }
     }
 
@@ -92,32 +96,31 @@ private struct TimetableDetailSurface: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let destination {
-                if presented {
-                    Color.black.opacity(TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark))
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: close)
-                        .transition(.opacity)
+                Color.black.opacity(TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark))
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: close)
+                    .transition(.opacity)
 
-                    ScrollView(.vertical) {
-                        TimetableDetailContent(course: route.course, courseColor: route.courseColor,
-                                               focusTitle: focusTitle, onClose: close)
-                            .frame(width: destination.width)
-                    }
-                    .frame(width: destination.width, height: destination.height)
-                    .background(panelBackground)
-                    .clipShape(panelShape)
-                    .overlay(panelShape.strokeBorder(Color.primary.opacity(contrast == .increased ? 0.24 : 0.06),
-                                                     lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
-                    .transition(panelTransition)
-                    .position(x: destination.midX, y: destination.midY)
-                    .allowsHitTesting(!closing)
-                    .accessibilityHidden(closing)
+                panelSurface(ScrollView(.vertical) {
+                    TimetableDetailContent(course: route.course, courseColor: route.courseColor,
+                                           focusTitle: focusTitle, onClose: close,
+                                           glassHeader: surfaceKind == .glass)
+                        .frame(width: destination.width)
                 }
+                .frame(width: destination.width, height: destination.height))
+                .clipShape(panelShape)
+                .overlay(panelShape.strokeBorder(Color.primary.opacity(borderOpacity),
+                                                 lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+                .transition(panelTransition)
+                .position(x: destination.midX, y: destination.midY)
+                .allowsHitTesting(!closing)
+                .accessibilityHidden(closing)
             } else {
                 // Measure once at the final width, before the visible presentation begins.
                 TimetableDetailContent(course: route.course, courseColor: route.courseColor,
-                                       focusTitle: false, onClose: {})
+                                       focusTitle: false, onClose: {},
+                                       glassHeader: surfaceKind == .glass)
                     .frame(width: targetWidth)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(GeometryReader { proxy in
@@ -140,12 +143,11 @@ private struct TimetableDetailSurface: View {
     }
 
     private func open(at frame: CGRect) {
-        // The measured destination exists before SwiftUI inserts the visible panel.
-        // An insertion transition owns the first rendered frame, rather than onAppear.
+        // Animate the insertion controlled by the measured destination itself.
+        // The panel is never inserted at its final height before this transaction.
         withAnimation(TimetableDetailMotion.animation(opening: true, reduceMotion: reduceMotion),
                       completionCriteria: .removed) {
             destination = frame
-            presented = true
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
             detail.markOpen(id: route.id)
@@ -159,7 +161,7 @@ private struct TimetableDetailSurface: View {
         focusTitle = false
         withAnimation(TimetableDetailMotion.animation(opening: false, reduceMotion: reduceMotion),
                       completionCriteria: .removed) {
-            presented = false
+            destination = nil
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
             detail.finish(id: route.id)
@@ -173,6 +175,7 @@ struct TimetableDetailContent: View {
     let courseColor: Color
     let focusTitle: Bool
     let onClose: () -> Void
+    var glassHeader = false
 
     @AccessibilityFocusState private var titleFocused: Bool
 
@@ -192,10 +195,8 @@ struct TimetableDetailContent: View {
                     Image(systemName: "xmark")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
                         .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭课程详情")
@@ -210,7 +211,13 @@ struct TimetableDetailContent: View {
                 }
             }
             .padding(.horizontal, 20)
+            .padding(.top, glassHeader ? 14 : 0)
             .padding(.bottom, 20)
+            .background {
+                if glassHeader {
+                    Color(uiColor: .systemGroupedBackground).opacity(0.94)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)

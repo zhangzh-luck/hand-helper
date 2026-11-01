@@ -159,10 +159,11 @@ final class TimetableDetailPresentationTests: XCTestCase {
     @MainActor
     func testLongTitleAndDynamicTypeIncreaseMeasuredContentHeight() {
         func height(name: String, room: String? = "A101", teacher: String? = "教师",
-                    size: DynamicTypeSize) -> CGFloat {
+                    size: DynamicTypeSize, glassHeader: Bool = false) -> CGFloat {
             let view = TimetableDetailContent(course: course(name: name, room: room,
                                                              teacher: teacher), courseColor: .blue,
-                                              focusTitle: false, onClose: {})
+                                               focusTitle: false, onClose: {},
+                                               glassHeader: glassHeader)
                 .frame(width: 343)
                 .fixedSize(horizontal: false, vertical: true)
                 .environment(\.dynamicTypeSize, size)
@@ -178,6 +179,7 @@ final class TimetableDetailPresentationTests: XCTestCase {
                                     room: String(repeating: "教学楼与实验室", count: 8),
                                     teacher: String(repeating: "任课教师", count: 8),
                                     size: .medium), short)
+        XCTAssertGreaterThan(height(name: "机器学习", size: .medium, glassHeader: true), short)
     }
 
     func testInformationRowsKeepFullValuesAndOptionalTeachingWeek() {
