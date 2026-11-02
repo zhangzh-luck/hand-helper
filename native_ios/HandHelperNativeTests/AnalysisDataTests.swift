@@ -52,7 +52,7 @@ final class AnalysisDataTests: XCTestCase {
     func testAIUsesExplicitRequestAndDeletionEvictsOnlySelectedTerm() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let result = #"{"term_id":8,"content":"## 报告","provider":"test","model":"model","created_at":"2026-09-08T10:00:00","cached":false}"#
+        let result = ###"{"term_id":8,"content":"## 报告","provider":"test","model":"model","created_at":"2026-09-08T10:00:00","cached":false}"###
         let api = AnalysisAPIStub(responses: [
             "/api/v1/terms": terms,
             "/api/v1/grades?term_id=8": grades,
