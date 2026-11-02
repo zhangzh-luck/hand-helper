@@ -92,6 +92,8 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     @Published private(set) var route: TimetableDetailRoute?
     @Published private(set) var phase: TimetableDetailPhase = .idle
     @Published private(set) var readyAction: TimetableManualCourseActionRequest?
+    @Published private(set) var pendingDelete: TimetableManualCourseActionRequest?
+    @Published private(set) var deletionError: String?
     private(set) var pagerBusy = false
     private var closingAction: TimetableManualCourseActionRequest?
     private weak var rootView: UIView?
@@ -133,6 +135,34 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func requestDelete(id: UUID) -> Bool {
+        guard let route, route.id == id, let identity = route.editableManualCourse,
+              phase == .opening || phase == .open,
+              pendingDelete == nil, readyAction == nil else { return false }
+        pendingDelete = TimetableManualCourseActionRequest(action: .delete,
+            identity: identity, context: route.context)
+        return true
+    }
+
+    func cancelDelete() { pendingDelete = nil }
+
+    @discardableResult
+    func confirmDelete() -> Bool {
+        guard let request = pendingDelete, let route,
+              let identity = route.editableManualCourse,
+              route.context == request.context,
+              identity == request.identity,
+              phase == .opening || phase == .open,
+              readyAction == nil else { return false }
+        pendingDelete = nil
+        readyAction = request
+        return true
+    }
+
+    func reportDeletionError(_ message: String) { deletionError = message }
+    func dismissDeletionError() { deletionError = nil }
+
     func finish(id: UUID) {
         guard route?.id == id, phase == .closing else { return }
         route = nil
@@ -150,6 +180,8 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     func clear() {
         closingAction = nil
         readyAction = nil
+        pendingDelete = nil
+        deletionError = nil
         route = nil
         phase = .idle
         pagerBusy = false

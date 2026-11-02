@@ -284,7 +284,16 @@ struct TimetableView: View {
             }
             .onChange(of: detail.readyAction?.id) { _, actionID in
                 guard actionID != nil, let request = detail.takeReadyAction() else { return }
-                presentManualAction(request)
+                if request.action == .delete {
+                    do {
+                        try model.deleteManualCourse(for: request)
+                        detail.clear()
+                    } catch {
+                        detail.reportDeletionError(error.localizedDescription)
+                    }
+                } else {
+                    presentManualAction(request)
+                }
             }
         }
     }

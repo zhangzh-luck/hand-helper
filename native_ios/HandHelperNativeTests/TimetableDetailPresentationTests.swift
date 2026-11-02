@@ -150,6 +150,51 @@ final class TimetableDetailPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testDeleteConfirmationKeepsDetailVisibleAndCancelReturnsToIt() throws {
+        let detail = TimetableCourseDetailCoordinator()
+        let identity = TimetableManualCourseIdentity(owner: "user:alice", ruleID: -7)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue,
+                                  editableManualCourse: identity))
+        let id = try XCTUnwrap(detail.route?.id)
+        XCTAssertTrue(detail.requestDelete(id: id))
+        XCTAssertFalse(detail.requestDelete(id: id))
+        XCTAssertEqual(detail.route?.id, id)
+        XCTAssertEqual(detail.phase, .opening)
+        XCTAssertNotNil(detail.pendingDelete)
+        XCTAssertNil(detail.readyAction)
+
+        detail.cancelDelete()
+        XCTAssertNil(detail.pendingDelete)
+        XCTAssertEqual(detail.route?.id, id)
+        XCTAssertNil(detail.takeReadyAction())
+        XCTAssertTrue(detail.requestDelete(id: id), "取消后可再次确认同一课程")
+    }
+
+    @MainActor
+    func testConfirmDeleteDispatchesOnceAndInvalidationClearsPrompt() throws {
+        let detail = TimetableCourseDetailCoordinator()
+        let identity = TimetableManualCourseIdentity(owner: "user:alice", ruleID: -7)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue,
+                                  editableManualCourse: identity))
+        let id = try XCTUnwrap(detail.route?.id)
+        XCTAssertTrue(detail.requestDelete(id: id))
+        XCTAssertTrue(detail.confirmDelete())
+        XCTAssertFalse(detail.confirmDelete())
+        XCTAssertEqual(detail.route?.id, id)
+        let request = try XCTUnwrap(detail.takeReadyAction())
+        XCTAssertEqual(request.identity, identity)
+        XCTAssertEqual(request.action, .delete)
+        XCTAssertNil(detail.takeReadyAction())
+
+        XCTAssertTrue(detail.requestDelete(id: id))
+        detail.invalidate(termID: context.termID, snapshotRevision: context.snapshotRevision + 1,
+                          authenticationRevision: context.authenticationRevision)
+        XCTAssertNil(detail.pendingDelete)
+        XCTAssertNil(detail.route)
+        XCTAssertFalse(detail.confirmDelete())
+    }
+
+    @MainActor
     func testInvalidatedDetailDoesNotOpenEditorOrDeleteConfirmation() throws {
         let detail = TimetableCourseDetailCoordinator()
         let identity = TimetableManualCourseIdentity(owner: "user:alice", ruleID: -7)

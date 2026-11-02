@@ -23,6 +23,23 @@ struct TimetableCourseDetailOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(detail.isPresenting)
+        .confirmationDialog("删除“\(detail.route?.course.name ?? "手动课程")”？", isPresented: Binding(
+            get: { detail.pendingDelete != nil },
+            set: { if !$0 { detail.cancelDelete() } }
+        )) {
+            Button("删除课程", role: .destructive) { _ = detail.confirmDelete() }
+            Button("取消", role: .cancel) { detail.cancelDelete() }
+        } message: {
+            Text("删除后这门手动课程将从本机课程表移除。")
+        }
+        .alert("无法操作课程", isPresented: Binding(
+            get: { detail.deletionError != nil },
+            set: { if !$0 { detail.dismissDeletionError() } }
+        )) {
+            Button("好", role: .cancel) { detail.dismissDeletionError() }
+        } message: {
+            Text(detail.deletionError ?? "请重试。")
+        }
     }
 }
 
@@ -106,7 +123,10 @@ private struct TimetableDetailSurface: View {
                     TimetableDetailContent(course: route.course, courseColor: route.courseColor,
                                            focusTitle: focusTitle, onClose: { close() },
                                            glassHeader: surfaceKind == .glass,
-                                           onAction: route.editableManualCourse == nil ? nil : { close(action: $0) })
+                                           onAction: route.editableManualCourse == nil ? nil : { action in
+                                               if action == .delete { _ = detail.requestDelete(id: route.id) }
+                                               else { close(action: action) }
+                                           })
                         .frame(width: destination.width)
                 }
                 .scrollDisabled(!TimetableDetailLayout.needsScrolling(
