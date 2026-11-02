@@ -62,6 +62,22 @@ final class TimetableViewModel: ObservableObject {
         }
     }
 
+    func addManualCourse(_ draft: ManualCourseDraft, from cell: TimetableEmptyCellSelection) throws {
+        guard state.selectedTab == .timetable, !isLoading,
+              selectedTermID == cell.termID, selectedWeek == cell.week,
+              snapshotRevision == cell.snapshotRevision,
+              try state.requireCurrentAccount(revision: cell.authenticationRevision) == cell.owner else {
+            throw APIError.unauthorized(message: "课表或账号已变化，请重新选择空白节次。")
+        }
+        _ = try repository.createManualRule(termID: cell.termID, name: draft.name,
+            weeks: Array(draft.weeks), weekday: draft.weekday,
+            startPeriod: draft.startPeriod, endPeriod: draft.endPeriod,
+            room: draft.room, teacher: draft.teacher)
+        loadCached()
+        try state.publishLocalManualCourseChange(for: cell.owner,
+            authenticationRevision: cell.authenticationRevision)
+    }
+
     func selectTerm(_ id: Int) {
         guard terms.contains(where: { $0.id == id }) else { return }
         selectedTermID = id

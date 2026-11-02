@@ -134,12 +134,20 @@ struct TodayView: View {
                 Task { await refreshCourses() }
             }
         }
+        .onChange(of: state.localManualCourseChange) { _, change in
+            guard let change,
+                  (try? state.requireCurrentAccount(revision: change.authenticationRevision)) == change.owner else { return }
+            model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+        }
         .onChange(of: state.completedCourseRefresh) { _, marker in
             if state.selectedTab == .today && marker == pendingCourseInvalidation {
                 Task { await refreshCourses() }
             }
         }
         .onChange(of: state.selectedTab) { _, tab in
+            if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
+                model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+            }
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }
             }

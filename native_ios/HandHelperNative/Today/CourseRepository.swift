@@ -19,6 +19,18 @@ struct CourseSnapshot: Codable, Equatable {
     )
 }
 
+enum ManualCoursePersistenceError: LocalizedError {
+    case missingTimetable, invalidFields, exhaustedIdentifiers
+
+    var errorDescription: String? {
+        switch self {
+        case .missingTimetable: "当前课程表数据不可用，请重新打开课表后再试。"
+        case .invalidFields: "请检查课程名称、教学周和起止节次。"
+        case .exhaustedIdentifiers: "本机课程数量已达到可保存上限。"
+        }
+    }
+}
+
 @MainActor
 protocol CourseRepository {
     var sessionCookie: String? { get }
@@ -32,10 +44,16 @@ protocol CourseRepository {
     func saveSchedule(_ schedule: CustomSchedule) throws
     func deleteSchedule(id: Int) throws
     func saveManualRule(_ rule: ManualCourseRule) throws
+    func createManualRule(termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule
     func saveProfile(_ profile: TodayProfile) throws
 }
 
 extension CourseRepository {
+    func createManualRule(termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
+        throw APIError.invalidResponse
+    }
     func refresh(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
         guard isCurrent() else { throw APIError.unauthorized(message: "登录状态已变化") }
         let snapshot = try await refresh(on: date)
@@ -74,21 +92,35 @@ final class DiskCourseRepository: CourseRepository {
                                                            baseURL: baseURL, directory: directory)
     }
 
-    private var file: URL? {
-        guard let cookie = session.cookie, !cookie.isEmpty else { return nil }
+    private func snapshotFile(for owner: String) -> URL {
+        let digest = SHA256.hash(data: Data("\(baseURL.absoluteString)|\(owner)".utf8))
+        return directory.appendingPathComponent("course_snapshot_\(digest.map { String(format: "%02x", $0) }.joined()).json")
+    }
+
+    private func legacySnapshotFile(for cookie: String) -> URL {
         let digest = SHA256.hash(data: Data("\(baseURL.absoluteString)|\(cookie)".utf8))
         return directory.appendingPathComponent("course_snapshot_\(digest.map { String(format: "%02x", $0) }.joined()).json")
     }
 
     func cached() throws -> CourseSnapshot? {
-        _ = try account.requireOwner(cookie: session.cookie)
-        guard let file, FileManager.default.fileExists(atPath: file.path) else { return nil }
-        return try decoder.decode(CourseSnapshot.self, from: Data(contentsOf: file))
+        let owner = try account.requireOwner(cookie: session.cookie)
+        let file = snapshotFile(for: owner)
+        if FileManager.default.fileExists(atPath: file.path) {
+            return try decoder.decode(CourseSnapshot.self, from: Data(contentsOf: file))
+        }
+        // Only the *currently verified* Cookie may identify a legacy file. Never
+        // scan historical Cookie files or infer their account from their names.
+        guard let cookie = session.cookie else { return nil }
+        let legacy = legacySnapshotFile(for: cookie)
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        let snapshot = try decoder.decode(CourseSnapshot.self, from: Data(contentsOf: legacy))
+        try write(snapshot)
+        return snapshot
     }
 
     private func write(_ snapshot: CourseSnapshot) throws {
-        _ = try account.requireOwner(cookie: session.cookie)
-        guard let file else { throw APIError.unauthorized(message: "请先登录后查看本机安排。") }
+        let owner = try account.requireOwner(cookie: session.cookie)
+        let file = snapshotFile(for: owner)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try encoder.encode(snapshot).write(to: file, options: .atomic)
     }
@@ -201,6 +233,38 @@ final class DiskCourseRepository: CourseRepository {
         snapshot.manualRules.removeAll { $0.id == rule.id }
         snapshot.manualRules.append(rule)
         try write(snapshot)
+    }
+
+    func createManualRule(termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
+        guard var snapshot = try cached(),
+              let term = snapshot.terms.first(where: { $0.id == termID }),
+              (try? TeachingWeekCalendar.dates(in: 1, term: term, calendar: .current)) != nil else {
+            throw ManualCoursePersistenceError.missingTimetable
+        }
+        let available = Set(snapshot.periods.map(\.periodNumber))
+        let normalizedWeeks = Array(Set(weeks)).sorted()
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !normalizedWeeks.isEmpty, normalizedWeeks.allSatisfy({ (1...20).contains($0) }),
+              (1...7).contains(weekday), startPeriod <= endPeriod,
+              available.contains(startPeriod), available.contains(endPeriod) else {
+            throw ManualCoursePersistenceError.invalidFields
+        }
+        let lowestID = snapshot.manualRules.map(\.id).min() ?? 0
+        guard lowestID > Int.min else { throw ManualCoursePersistenceError.exhaustedIdentifiers }
+        let id = min(-1, lowestID - 1)
+        let trimmedRoom = room?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTeacher = teacher?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rule = ManualCourseRule(id: id, termSourceID: term.sourceTermID,
+                                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    weeks: normalizedWeeks, weekday: weekday,
+                                    startPeriod: startPeriod, endPeriod: endPeriod,
+                                    room: trimmedRoom?.isEmpty == true ? nil : trimmedRoom,
+                                    teacher: trimmedTeacher?.isEmpty == true ? nil : trimmedTeacher,
+                                    remoteID: nil)
+        snapshot.manualRules.append(rule)
+        try write(snapshot)
+        return rule
     }
 
     func saveProfile(_ profile: TodayProfile) throws {

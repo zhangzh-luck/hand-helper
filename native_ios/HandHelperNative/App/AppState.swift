@@ -40,6 +40,12 @@ struct CourseDataInvalidation: Equatable {
     let sequence: Int
 }
 
+struct LocalManualCourseChange: Equatable {
+    let owner: String
+    let authenticationRevision: Int
+    let sequence: Int
+}
+
 struct PendingAcademicTimeWrite: Identifiable, Equatable {
     enum Phase: Equatable { case submitting, awaitingConfirmation }
     let id: UUID
@@ -68,9 +74,11 @@ final class AppState: ObservableObject {
     @Published private(set) var authenticationRevision = 0
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
     @Published private(set) var completedCourseRefresh: CourseDataInvalidation?
+    @Published private(set) var localManualCourseChange: LocalManualCourseChange?
     @Published private(set) var wallpaperVersion = 0
     @Published private(set) var timetableWallpaperVersion = 0
     private var courseDataSequence = 0
+    private var localManualCourseSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
     private var timetableUploadCancellation: (() -> Void)?
     @Published private(set) var pendingGradeImport: PendingGradeImport?
@@ -200,6 +208,15 @@ final class AppState: ObservableObject {
         courseDataInvalidation = CourseDataInvalidation(
             owner: owner, authenticationRevision: revision, sequence: courseDataSequence)
         completedCourseRefresh = nil
+    }
+
+    func publishLocalManualCourseChange(for owner: String, authenticationRevision revision: Int) throws {
+        guard try requireCurrentAccount(revision: revision) == owner else {
+            throw APIError.unauthorized(message: "登录账号已变化。")
+        }
+        localManualCourseSequence += 1
+        localManualCourseChange = LocalManualCourseChange(owner: owner,
+            authenticationRevision: revision, sequence: localManualCourseSequence)
     }
 
     func pendingCourseInvalidation(after appliedSequence: Int?) -> CourseDataInvalidation? {
@@ -617,6 +634,7 @@ final class AppState: ObservableObject {
         if let marker = courseDataInvalidation { rotationPendingCourseOwner = marker.owner }
         courseDataInvalidation = nil
         completedCourseRefresh = nil
+        localManualCourseChange = nil
         if let pendingTimetableImport,
            case .refreshPending(let result, _) = pendingTimetableImport.phase {
             self.pendingTimetableImport?.phase = .accepted(result)
@@ -670,6 +688,7 @@ final class AppState: ObservableObject {
         verifiedAccount.clear()
         courseDataInvalidation = nil
         completedCourseRefresh = nil
+        localManualCourseChange = nil
         pendingAcademicTimeWrites = []
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
@@ -699,6 +718,7 @@ final class AppState: ObservableObject {
         verifiedAccount.clear()
         courseDataInvalidation = nil
         completedCourseRefresh = nil
+        localManualCourseChange = nil
         pendingAcademicTimeWrites = []
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil

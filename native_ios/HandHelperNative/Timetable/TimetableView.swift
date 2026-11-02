@@ -20,6 +20,7 @@ struct TimetableView: View {
     @ObservedObject private var state: AppState
     @ObservedObject private var detail: TimetableCourseDetailCoordinator
     @StateObject private var model: TimetableViewModel
+    @StateObject private var emptyCellSelection = TimetableEmptyCellSelectionCoordinator()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -29,6 +30,7 @@ struct TimetableView: View {
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
+    @State private var manualEditorRoute: ManualCourseEditorRoute?
     @State private var wallpaperImage: UIImage?
     @State private var wallpaperTask: Task<Void, Never>?
     @State private var wallpaperGeneration = 0
@@ -127,13 +129,17 @@ struct TimetableView: View {
                                                wallpaperVisible: showsWallpaper,
                                                layoutScale: gridScale,
                                                reduceMotion: reduceMotion,
-                                               onTransitionStateChange: { detail.setPagerBusy($0) }) { projection in
-                                TimetableWeekPage(projection: projection,
+                                                onTransitionStateChange: { busy in
+                                                    detail.setPagerBusy(busy)
+                                                    if busy { emptyCellSelection.clear() }
+                                                }) { projection in
+                                TimetableWeekPage(emptyCellSelection: emptyCellSelection,
+                                                  projection: projection,
                                                   periodCount: model.periods.count,
                                                   dynamicScale: gridScale,
                                                   bottomPadding: viewport.safeAreaInsets.bottom + 12,
                                                   header: { dateHeader($0, metrics: $1) },
-                                                  grid: { courseGrid($0, metrics: $1) },
+                                                   grid: { courseGrid($0, metrics: $1, selectedCell: $2) },
                                                   showUnplaced: { courses in
                                                       unplacedCourses = courses
                                                       showingUnplaced = true
@@ -155,12 +161,23 @@ struct TimetableView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingUnplaced) { unplacedList }
             .sheet(isPresented: $showingConflicts) { conflictList }
+            .sheet(item: $manualEditorRoute, onDismiss: { emptyCellSelection.clear() }) { route in
+                ManualCourseEditorView(cell: route.cell, periods: model.periods) { draft in
+                    try model.addManualCourse(draft, from: route.cell)
+                }
+            }
             .task {
                 reloadWallpaper()
                 await model.updateIfNeeded()
             }
             .onChange(of: state.selectedTab) { _, tab in
+                if tab != .timetable { emptyCellSelection.clear(); manualEditorRoute = nil }
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
+            }
+            .onChange(of: state.localManualCourseChange) { _, change in
+                guard let change,
+                      (try? state.requireCurrentAccount(revision: change.authenticationRevision)) == change.owner else { return }
+                model.loadCached()
             }
             .onChange(of: state.courseDataInvalidation) { _, _ in
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
@@ -170,6 +187,8 @@ struct TimetableView: View {
             }
             .onChange(of: state.timetableWallpaperVersion) { _, _ in reloadWallpaper() }
             .onChange(of: state.authenticationRevision) { _, _ in
+                emptyCellSelection.clear()
+                manualEditorRoute = nil
                 detail.clear()
                 showingUnplaced = false
                 unplacedCourses = []
@@ -183,14 +202,22 @@ struct TimetableView: View {
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
             }
             .onChange(of: model.selectedTermID) { _, _ in
+                emptyCellSelection.clear()
+                manualEditorRoute = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
             }
             .onChange(of: model.snapshotRevision) { _, _ in
+                emptyCellSelection.clear()
+                manualEditorRoute = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
+            }
+            .onChange(of: model.selectedWeek) { _, _ in
+                emptyCellSelection.clear()
+                manualEditorRoute = nil
             }
         }
     }
@@ -278,7 +305,8 @@ struct TimetableView: View {
     }
 
     private func courseGrid(_ projection: WeeklyTimetableProjection,
-                            metrics: TimetableGridMetrics) -> some View {
+                            metrics: TimetableGridMetrics,
+                            selectedCell: TimetableEmptyCellSelection?) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(0..<model.periods.count, id: \.self) { row in
                 Rectangle()
@@ -292,11 +320,41 @@ struct TimetableView: View {
                     .offset(y: metrics.rowOrigin(row))
                 ForEach(1...7, id: \.self) { day in
                     let cell = metrics.cellFrame(weekday: day, row: row)
-                    Rectangle()
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground)
-                            .opacity(TimetableWallpaperStyle.cellOpacity(hasPhoto: showsWallpaper)))
-                        .frame(width: cell.width, height: cell.height)
-                        .offset(x: cell.minX, y: cell.minY)
+                    let periodNumber = model.periods[row].periodNumber
+                    let occupied = projection.placements.contains {
+                        $0.weekday == day && row >= $0.startRow && row < $0.startRow + $0.rowSpan
+                    }
+                    let isSelected = selectedCell?.termID == projection.term.id &&
+                        selectedCell?.week == projection.week && selectedCell?.weekday == day &&
+                        selectedCell?.periodNumber == periodNumber
+                    Button {
+                        selectEmptyCell(projection: projection, weekday: day,
+                                        periodNumber: periodNumber)
+                    } label: {
+                        Rectangle()
+                            .fill(Color(uiColor: .secondarySystemGroupedBackground)
+                                .opacity(TimetableWallpaperStyle.cellOpacity(hasPhoto: showsWallpaper)))
+                            .overlay {
+                                if isSelected { Color.accentColor.opacity(0.17) }
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(occupied)
+                    .accessibilityLabel("\(projection.dates[day - 1])，第 \(periodNumber) 节，选择空白格")
+                    .frame(width: cell.width, height: cell.height)
+                    .offset(x: cell.minX, y: cell.minY)
+                    if isSelected, let selectedCell {
+                        Button { openManualEditor(for: selectedCell) } label: {
+                            addCourseSymbol
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("添加课程，\(projection.dates[day - 1])，第 \(periodNumber) 节")
+                        .frame(width: min(44, cell.width - 2), height: min(44, cell.height - 2))
+                        .offset(x: cell.midX - min(44, cell.width - 2) / 2,
+                                y: cell.midY - min(44, cell.height - 2) / 2)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    }
                 }
             }
             gridLines(metrics: metrics)
@@ -335,6 +393,43 @@ struct TimetableView: View {
             }
         }
         .frame(width: metrics.width, height: metrics.bodyHeight, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var addCourseSymbol: some View {
+        let symbol = Image(systemName: "plus")
+            .font(.system(size: 16, weight: .semibold))
+            .frame(width: 30, height: 30)
+        if reduceTransparency || contrast == .increased {
+            symbol.background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
+        } else if #available(iOS 26.0, *) {
+            symbol.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            symbol.background(.regularMaterial, in: Circle())
+        }
+    }
+
+    private func selectEmptyCell(projection: WeeklyTimetableProjection,
+                                 weekday: Int, periodNumber: Int) {
+        guard state.selectedTab == .timetable, state.canAccessPrivateData,
+              !detail.isPresenting, !detail.pagerBusy, manualEditorRoute == nil,
+              model.selectedWeek == projection.week, model.selectedTermID == projection.term.id,
+              (1...20).contains(projection.week),
+              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else { return }
+        let cell = TimetableEmptyCellSelection(owner: owner,
+            authenticationRevision: state.authenticationRevision, termID: projection.term.id,
+            week: projection.week, snapshotRevision: model.snapshotRevision,
+            weekday: weekday, periodNumber: periodNumber)
+        withAnimation(.easeOut(duration: 0.16)) { emptyCellSelection.select(cell) }
+    }
+
+    private func openManualEditor(for cell: TimetableEmptyCellSelection) {
+        guard manualEditorRoute == nil, emptyCellSelection.selected == cell,
+              !detail.isPresenting, !detail.pagerBusy,
+              model.selectedTermID == cell.termID, model.selectedWeek == cell.week,
+              model.snapshotRevision == cell.snapshotRevision,
+              (try? state.requireCurrentAccount(revision: cell.authenticationRevision)) == cell.owner else { return }
+        manualEditorRoute = ManualCourseEditorRoute(cell: cell)
     }
 
     private func periodLabel(_ period: PeriodInfo) -> some View {

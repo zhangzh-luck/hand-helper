@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// A complete horizontal page: its dates stay above its own vertical grid.
+@MainActor
 struct TimetableWeekPage<Header: View, Grid: View>: View {
+    @ObservedObject var emptyCellSelection: TimetableEmptyCellSelectionCoordinator
     let projection: WeeklyTimetableProjection
     let periodCount: Int
     let dynamicScale: CGFloat
     let bottomPadding: CGFloat
     let header: (WeeklyTimetableProjection, TimetableGridMetrics) -> Header
-    let grid: (WeeklyTimetableProjection, TimetableGridMetrics) -> Grid
+    let grid: (WeeklyTimetableProjection, TimetableGridMetrics, TimetableEmptyCellSelection?) -> Grid
     let showUnplaced: ([UnplacedCourse]) -> Void
 
     var body: some View {
@@ -33,14 +35,25 @@ struct TimetableWeekPage<Header: View, Grid: View>: View {
                 VStack(spacing: 0) {
                     header(projection, metrics)
                     ScrollView(.vertical) {
-                        grid(projection, metrics)
+                        grid(projection, metrics, emptyCellSelection.selected)
                             .padding(.bottom, bottomPadding)
                     }
+                    .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { drag in
+                        if abs(drag.translation.height) > abs(drag.translation.width) {
+                            emptyCellSelection.clear()
+                        }
+                    })
                 }
                 .frame(width: metrics.width)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.container, edges: .bottom)
+        .onDisappear {
+            if emptyCellSelection.selected?.week == projection.week &&
+                emptyCellSelection.selected?.termID == projection.term.id {
+                emptyCellSelection.clear()
+            }
+        }
     }
 }

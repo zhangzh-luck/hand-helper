@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import HandHelperNative
 
@@ -59,6 +60,18 @@ final class WeeklyTimetableTests: XCTestCase {
         XCTAssertEqual(week.map { CourseScheduleCalculator.dateKey($0, calendar: utc) },
                        ["2027-01-04", "2027-01-05", "2027-01-06", "2027-01-07",
                         "2027-01-08", "2027-01-09", "2027-01-10"])
+    }
+
+    func testManualCourseUsesFirstMondayWhenTermStartsMidweek() throws {
+        let rule = ManualCourseRule(id: -1, termSourceID: "fall", name: "周一课程",
+            weeks: [1], weekday: 1, startPeriod: 1, endPeriod: 2,
+            room: "A101", teacher: nil, remoteID: nil)
+        let stored = snapshot(term: term("2026-09-02"), rules: [rule])
+        let projection = try WeeklyTimetableProjector.project(snapshot: stored,
+            termID: 8, week: 1, calendar: utc)
+        XCTAssertEqual(projection.dates.first, "2026-08-31")
+        XCTAssertEqual(projection.placements.map(\.course.name), ["周一课程"])
+        XCTAssertEqual(projection.placements.first?.weekday, 1)
     }
 
     func testMissingInvalidStartAndInvalidWeek() throws {
@@ -228,7 +241,7 @@ final class WeeklyTimetableTests: XCTestCase {
     }
 
     @MainActor
-    func testCookieBoundCacheRequiresVerifiedCurrentCookie() throws {
+    func testVerifiedOwnerCacheSurvivesCookieRotationButRejectsOtherAccount() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let sessionStore = ProjectionSessionStore()
@@ -245,7 +258,9 @@ final class WeeklyTimetableTests: XCTestCase {
         sessionStore.save(cookie: "session=alice-new")
         XCTAssertThrowsError(try repository.cached())
         try account.confirm(username: "alice", cookie: "session=alice-new")
-        XCTAssertNil(try repository.cached()) // Existing Cookie-keyed cache remains unchanged.
+        XCTAssertEqual(try repository.cached()?.manualRules.count, 1)
+        try account.confirm(username: "bob", cookie: "session=alice-new")
+        XCTAssertNil(try repository.cached())
     }
 
     @MainActor
@@ -305,6 +320,90 @@ final class WeeklyTimetableTests: XCTestCase {
         state.handleUnauthorized()
         XCTAssertThrowsError(try access.ticket())
     }
+
+    @MainActor
+    func testManualCreationUsesRealPeriodNumbersAndKeepsExistingCourses() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let sessionStore = ProjectionSessionStore()
+        sessionStore.save(cookie: "session=alice")
+        let account = VerifiedAccountContext()
+        try account.confirm(username: "alice", cookie: "session=alice")
+        let repository = DiskCourseRepository(api: ProjectionAPI(), session: sessionStore,
+                                              account: account, directory: folder)
+        let existing = session(20, first: 1, last: 1)
+        var stored = snapshot(sessions: [existing], periods: [periods[0], periods[2]])
+        stored.manualRules = [ManualCourseRule(id: -1, termSourceID: "fall", name: "旧课程",
+            weeks: [1], weekday: 1, startPeriod: 1, endPeriod: 1,
+            room: nil, teacher: nil, remoteID: nil)]
+        let stable = snapshotPath(folder: folder, scope: "user:alice")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(stored).write(to: stable, options: .atomic)
+
+        let created = try repository.createManualRule(termID: 8, name: "  新课程  ", weeks: [3, 1, 3],
+            weekday: 1, startPeriod: 3, endPeriod: 3, room: " A101 ", teacher: nil)
+        XCTAssertEqual(created.id, -2)
+        XCTAssertEqual(created.name, "新课程")
+        XCTAssertEqual(created.weeks, [1, 3])
+        XCTAssertEqual(created.startPeriod, 3)
+        XCTAssertEqual(try repository.cached()?.calendarSessions, [existing])
+        XCTAssertEqual(try repository.cached()?.manualRules.count, 2)
+        let saved = try XCTUnwrap(repository.cached())
+        let projected = try WeeklyTimetableProjector.project(snapshot: saved,
+            termID: 8, week: 1, calendar: utc)
+        XCTAssertTrue(projected.placements.contains { $0.course.name == "新课程" })
+        XCTAssertTrue(projected.placements.contains { $0.course.id == existing.id })
+        let day = try self.day("2026-08-31", calendar: utc)
+        XCTAssertTrue(CourseScheduleCalculator.expandedManualCourses(on: day,
+            rules: saved.manualRules, terms: stored.terms,
+            periods: stored.periods, calendar: utc).contains { $0.name == "新课程" })
+        let today = TodayViewModel(repository: repository,
+            wallpaperStore: WallpaperStore(session: sessionStore, account: account, directory: folder),
+            clock: ProjectionClock(now: day))
+        today.load()
+        XCTAssertTrue(today.courses.contains { $0.name == "新课程" })
+        XCTAssertThrowsError(try repository.createManualRule(termID: 8, name: "无效", weeks: [1],
+            weekday: 1, startPeriod: 2, endPeriod: 2, room: nil, teacher: nil))
+        XCTAssertEqual(try repository.cached()?.manualRules.count, 2)
+    }
+
+    @MainActor
+    func testLegacyCookieSnapshotMigratesOnlyAfterCurrentOwnerVerification() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = snapshot(rules: [ManualCourseRule(id: -1, termSourceID: "fall", name: "旧规则",
+            weeks: [1], weekday: 1, startPeriod: 1, endPeriod: 1,
+            room: nil, teacher: nil, remoteID: nil)])
+        try JSONEncoder().encode(old).write(to: snapshotPath(folder: folder, scope: "session=alice"),
+                                               options: .atomic)
+        let sessionStore = ProjectionSessionStore()
+        sessionStore.save(cookie: "session=alice")
+        let account = VerifiedAccountContext()
+        let repository = DiskCourseRepository(api: ProjectionAPI(), session: sessionStore,
+                                              account: account, directory: folder)
+        XCTAssertThrowsError(try repository.cached())
+        XCTAssertFalse(FileManager.default.fileExists(atPath:
+            snapshotPath(folder: folder, scope: "user:alice").path))
+        try account.confirm(username: "alice", cookie: "session=alice")
+        XCTAssertEqual(try repository.cached()?.manualRules.first?.name, "旧规则")
+        XCTAssertTrue(FileManager.default.fileExists(atPath:
+            snapshotPath(folder: folder, scope: "user:alice").path))
+        sessionStore.save(cookie: "session=alice-new")
+        XCTAssertThrowsError(try repository.cached())
+        try account.confirm(username: "alice", cookie: "session=alice-new")
+        XCTAssertEqual(try repository.cached()?.manualRules.first?.name, "旧规则")
+    }
+
+    private func snapshotPath(folder: URL, scope: String) -> URL {
+        let base = APIConfiguration.development.baseURL.absoluteString
+        let digest = SHA256.hash(data: Data("\(base)|\(scope)".utf8))
+        return folder.appendingPathComponent("course_snapshot_\(digest.map { String(format: "%02x", $0) }.joined()).json")
+    }
+}
+
+private struct ProjectionClock: TodayClock {
+    let now: Date
 }
 
 private final class ProjectionSessionStore: SessionStore {
