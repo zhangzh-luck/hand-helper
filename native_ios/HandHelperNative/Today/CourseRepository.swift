@@ -20,13 +20,14 @@ struct CourseSnapshot: Codable, Equatable {
 }
 
 enum ManualCoursePersistenceError: LocalizedError {
-    case missingTimetable, invalidFields, exhaustedIdentifiers
+    case missingTimetable, invalidFields, exhaustedIdentifiers, ruleNotFound
 
     var errorDescription: String? {
         switch self {
         case .missingTimetable: "当前课程表数据不可用，请重新打开课表后再试。"
         case .invalidFields: "请检查课程名称、教学周和起止节次。"
         case .exhaustedIdentifiers: "本机课程数量已达到可保存上限。"
+        case .ruleNotFound: "这门手动课程已不存在，请刷新课程表。"
         }
     }
 }
@@ -46,10 +47,18 @@ protocol CourseRepository {
     func saveManualRule(_ rule: ManualCourseRule) throws
     func createManualRule(termID: Int, name: String, weeks: [Int], weekday: Int,
                           startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule
+    func updateManualRule(id: Int, termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule
+    func deleteManualRule(id: Int, termID: Int) throws
     func saveProfile(_ profile: TodayProfile) throws
 }
 
 extension CourseRepository {
+    func updateManualRule(id: Int, termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
+        throw APIError.invalidResponse
+    }
+    func deleteManualRule(id: Int, termID: Int) throws { throw APIError.invalidResponse }
     func createManualRule(termID: Int, name: String, weeks: [Int], weekday: Int,
                           startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
         throw APIError.invalidResponse
@@ -265,6 +274,50 @@ final class DiskCourseRepository: CourseRepository {
         snapshot.manualRules.append(rule)
         try write(snapshot)
         return rule
+    }
+
+    func updateManualRule(id: Int, termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
+        guard var snapshot = try cached(),
+              let term = snapshot.terms.first(where: { $0.id == termID }),
+              (try? TeachingWeekCalendar.dates(in: 1, term: term, calendar: .current)) != nil else {
+            throw ManualCoursePersistenceError.missingTimetable
+        }
+        guard let index = snapshot.manualRules.firstIndex(where: {
+            $0.id == id && $0.termSourceID == term.sourceTermID && $0.remoteID == nil
+        }) else { throw ManualCoursePersistenceError.ruleNotFound }
+        let normalizedWeeks = Array(Set(weeks)).sorted()
+        let available = Set(snapshot.periods.map(\.periodNumber))
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !normalizedWeeks.isEmpty, normalizedWeeks.allSatisfy({ (1...20).contains($0) }),
+              (1...7).contains(weekday), startPeriod <= endPeriod,
+              available.contains(startPeriod), available.contains(endPeriod) else {
+            throw ManualCoursePersistenceError.invalidFields
+        }
+        let previous = snapshot.manualRules[index]
+        let trimmedRoom = room?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTeacher = teacher?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updated = ManualCourseRule(id: previous.id, termSourceID: previous.termSourceID,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), weeks: normalizedWeeks,
+            weekday: weekday, startPeriod: startPeriod, endPeriod: endPeriod,
+            room: trimmedRoom?.isEmpty == true ? nil : trimmedRoom,
+            teacher: trimmedTeacher?.isEmpty == true ? nil : trimmedTeacher,
+            remoteID: previous.remoteID)
+        snapshot.manualRules[index] = updated
+        try write(snapshot)
+        return updated
+    }
+
+    func deleteManualRule(id: Int, termID: Int) throws {
+        guard var snapshot = try cached(),
+              let term = snapshot.terms.first(where: { $0.id == termID }) else {
+            throw ManualCoursePersistenceError.missingTimetable
+        }
+        guard let index = snapshot.manualRules.firstIndex(where: {
+            $0.id == id && $0.termSourceID == term.sourceTermID && $0.remoteID == nil
+        }) else { throw ManualCoursePersistenceError.ruleNotFound }
+        snapshot.manualRules.remove(at: index)
+        try write(snapshot)
     }
 
     func saveProfile(_ profile: TodayProfile) throws {

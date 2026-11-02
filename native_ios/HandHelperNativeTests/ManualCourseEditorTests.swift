@@ -15,6 +15,24 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertEqual(draft.endPeriod, 7)
     }
 
+    func testEditDraftPrefillsEveryManualFieldWithoutMutatingOriginal() {
+        let original = ManualCourseRule(id: -7, termSourceID: "fall", name: "机器学习",
+            weeks: [1, 3, 5], weekday: 4, startPeriod: 2, endPeriod: 7,
+            room: "A101", teacher: "张老师", remoteID: nil)
+        var draft = ManualCourseDraft(rule: original)
+        XCTAssertEqual(draft.name, original.name)
+        XCTAssertEqual(draft.weeks, Set(original.weeks))
+        XCTAssertEqual(draft.weekday, original.weekday)
+        XCTAssertEqual(draft.startPeriod, original.startPeriod)
+        XCTAssertEqual(draft.endPeriod, original.endPeriod)
+        XCTAssertEqual(draft.room, original.room ?? "")
+        XCTAssertEqual(draft.teacher, original.teacher ?? "")
+        draft.name = "修改后"
+        draft.weeks = [2]
+        XCTAssertEqual(original.name, "机器学习", "取消编辑只丢弃尚未保存的草稿")
+        XCTAssertEqual(original.weeks, [1, 3, 5])
+    }
+
     func testDraftValidatesNameWeeksAndRealPeriods() {
         var draft = ManualCourseDraft(cell: cell)
         let available: Set<Int> = [1, 3, 7]

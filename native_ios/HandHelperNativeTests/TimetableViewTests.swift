@@ -107,6 +107,89 @@ final class TimetableViewTests: XCTestCase {
         XCTAssertEqual(repository.createCount, 0)
     }
 
+    @MainActor
+    func testOnlyLocalRuleCanBeEditedOrDeletedWithoutNetwork() async throws {
+        let (state, repository, model) = try await setup()
+        model.loadCached()
+        let remote = try XCTUnwrap(model.projection?.placements.first?.course)
+        let remoteContext = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 1, snapshotRevision: model.snapshotRevision,
+            courseID: remote.id, placementIndex: 0)
+        XCTAssertNil(model.editableManualCourse(for: remote, context: remoteContext))
+
+        let owner = try state.requireCurrentAccount(revision: state.authenticationRevision)
+        let cell = TimetableEmptyCellSelection(owner: owner, authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 1, snapshotRevision: model.snapshotRevision, weekday: 3, periodNumber: 1)
+        var draft = ManualCourseDraft(cell: cell)
+        draft.name = "原课程"
+        try model.addManualCourse(draft, from: cell)
+        let local = try XCTUnwrap(model.projection?.placements.first(where: { $0.course.source == "LOCAL" })?.course)
+        let context = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 1, snapshotRevision: model.snapshotRevision,
+            courseID: local.id, placementIndex: 0)
+        let identity = try XCTUnwrap(model.editableManualCourse(for: local, context: context))
+        XCTAssertEqual(identity.owner, owner)
+        let request = TimetableManualCourseActionRequest(action: .edit, identity: identity, context: context)
+        let rule = try XCTUnwrap(model.manualRule(for: request))
+        var edit = ManualCourseDraft(rule: rule)
+        edit.name = "修改后"
+        edit.weekday = 4
+        edit.startPeriod = 2
+        edit.endPeriod = 2
+        edit.weeks = [2]
+        try model.updateManualCourse(edit, for: request)
+        XCTAssertEqual(repository.updateCount, 1)
+        XCTAssertEqual(repository.stored?.manualRules.count, 1)
+        XCTAssertEqual(repository.stored?.manualRules.first?.id, rule.id)
+        XCTAssertFalse(model.projection?.placements.contains { $0.course.source == "LOCAL" } == true)
+        XCTAssertThrowsError(try model.updateManualCourse(edit, for: request),
+                             "旧快照操作不得重复提交")
+        model.selectWeek(2)
+        let moved = try XCTUnwrap(model.projection?.placements.first(where: { $0.course.source == "LOCAL" })?.course)
+        let movedContext = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 2, snapshotRevision: model.snapshotRevision,
+            courseID: moved.id, placementIndex: 0)
+        let movedIdentity = try XCTUnwrap(model.editableManualCourse(for: moved, context: movedContext))
+        let delete = TimetableManualCourseActionRequest(action: .delete, identity: movedIdentity,
+                                                         context: movedContext)
+        try model.deleteManualCourse(for: delete)
+        XCTAssertEqual(repository.deleteManualCount, 1)
+        XCTAssertTrue(repository.stored?.manualRules.isEmpty == true)
+        XCTAssertFalse(model.projection?.placements.contains { $0.course.source == "LOCAL" } == true)
+        XCTAssertThrowsError(try model.deleteManualCourse(for: delete))
+        XCTAssertEqual(repository.refreshCount, 0)
+        XCTAssertEqual(state.localManualCourseChange?.owner, owner)
+    }
+
+    @MainActor
+    func testManualEditRejectsMissingRuleTermChangeAndLogout() async throws {
+        let (state, repository, model) = try await setup()
+        var stored = try XCTUnwrap(repository.stored)
+        stored.manualRules = [ManualCourseRule(id: -4, termSourceID: "a", name: "手动课",
+            weeks: [1], weekday: 3, startPeriod: 1, endPeriod: 1,
+            room: nil, teacher: nil, remoteID: nil)]
+        repository.stored = stored
+        model.loadCached()
+        let local = try XCTUnwrap(model.projection?.placements.first(where: { $0.course.source == "LOCAL" })?.course)
+        let context = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 1, snapshotRevision: model.snapshotRevision,
+            courseID: local.id, placementIndex: 0)
+        let identity = try XCTUnwrap(model.editableManualCourse(for: local, context: context))
+        let request = TimetableManualCourseActionRequest(action: .edit, identity: identity, context: context)
+        let draft = ManualCourseDraft(rule: try XCTUnwrap(model.manualRule(for: request)))
+        model.selectTerm(2)
+        XCTAssertThrowsError(try model.updateManualCourse(draft, for: request))
+        model.selectTerm(1)
+        stored.manualRules = []
+        repository.stored = stored
+        model.loadCached()
+        XCTAssertThrowsError(try model.updateManualCourse(draft, for: request))
+        await state.logout()
+        XCTAssertThrowsError(try model.deleteManualCourse(for: request))
+        XCTAssertEqual(repository.updateCount, 0)
+        XCTAssertEqual(repository.deleteManualCount, 0)
+    }
+
     func testPageDelegateCommitsOnlyCompletedAdjacentTransition() {
         XCTAssertEqual(TimetablePageTransition.committedWeek(from: 2, to: 3, completed: true), 3)
         XCTAssertEqual(TimetablePageTransition.committedWeek(from: 2, to: 1, completed: true), 1)
@@ -444,6 +527,8 @@ private final class TimetableModelRepository: CourseRepository {
     var refreshError: Error?
     var refreshCount = 0
     var createCount = 0
+    var updateCount = 0
+    var deleteManualCount = 0
     var sessionCookie: String? { "session=alice" }
     var canEditSchedules: Bool { false }
     func cached() throws -> CourseSnapshot? { stored }
@@ -472,6 +557,30 @@ private final class TimetableModelRepository: CourseRepository {
         stored.manualRules.append(rule)
         self.stored = stored
         return rule
+    }
+    func updateManualRule(id: Int, termID: Int, name: String, weeks: [Int], weekday: Int,
+                          startPeriod: Int, endPeriod: Int, room: String?, teacher: String?) throws -> ManualCourseRule {
+        guard var stored, let index = stored.manualRules.firstIndex(where: { $0.id == id }),
+              stored.terms.contains(where: { $0.id == termID }) else {
+            throw ManualCoursePersistenceError.ruleNotFound
+        }
+        updateCount += 1
+        let old = stored.manualRules[index]
+        let updated = ManualCourseRule(id: old.id, termSourceID: old.termSourceID,
+            name: name, weeks: weeks, weekday: weekday, startPeriod: startPeriod,
+            endPeriod: endPeriod, room: room, teacher: teacher, remoteID: old.remoteID)
+        stored.manualRules[index] = updated
+        self.stored = stored
+        return updated
+    }
+    func deleteManualRule(id: Int, termID: Int) throws {
+        guard var stored, let index = stored.manualRules.firstIndex(where: { $0.id == id }),
+              stored.terms.contains(where: { $0.id == termID }) else {
+            throw ManualCoursePersistenceError.ruleNotFound
+        }
+        deleteManualCount += 1
+        stored.manualRules.remove(at: index)
+        self.stored = stored
     }
     func saveProfile(_ profile: TodayProfile) throws {}
 }

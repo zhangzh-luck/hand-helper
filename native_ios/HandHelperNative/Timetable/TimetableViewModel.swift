@@ -78,6 +78,61 @@ final class TimetableViewModel: ObservableObject {
             authenticationRevision: cell.authenticationRevision)
     }
 
+    func editableManualCourse(for course: CourseSession,
+                              context: TimetableDetailContext) -> TimetableManualCourseIdentity? {
+        guard state.selectedTab == .timetable, state.canAccessPrivateData,
+              course.source == "LOCAL", let ruleID = course.manualCourseID,
+              course.id == context.courseID, course.termID == context.termID,
+              selectedTermID == context.termID, selectedWeek == context.week,
+              snapshotRevision == context.snapshotRevision,
+              let snapshot, let term = snapshot.terms.first(where: { $0.id == context.termID }),
+              snapshot.manualRules.contains(where: {
+                  $0.id == ruleID && $0.termSourceID == term.sourceTermID && $0.remoteID == nil
+              }),
+              let owner = try? state.requireCurrentAccount(revision: context.authenticationRevision) else {
+            return nil
+        }
+        return TimetableManualCourseIdentity(owner: owner, ruleID: ruleID)
+    }
+
+    func manualRule(for request: TimetableManualCourseActionRequest) -> ManualCourseRule? {
+        guard state.selectedTab == .timetable, !isLoading,
+              selectedTermID == request.context.termID, selectedWeek == request.context.week,
+              snapshotRevision == request.context.snapshotRevision,
+              (try? state.requireCurrentAccount(revision: request.context.authenticationRevision)) == request.identity.owner,
+              let snapshot, let term = snapshot.terms.first(where: { $0.id == request.context.termID }) else {
+            return nil
+        }
+        return snapshot.manualRules.first {
+            $0.id == request.identity.ruleID && $0.termSourceID == term.sourceTermID && $0.remoteID == nil
+        }
+    }
+
+    func updateManualCourse(_ draft: ManualCourseDraft,
+                            for request: TimetableManualCourseActionRequest) throws {
+        guard manualRule(for: request) != nil else {
+            throw APIError.unauthorized(message: "课表或账号已变化，请重新打开课程详情。")
+        }
+        _ = try repository.updateManualRule(id: request.identity.ruleID,
+            termID: request.context.termID, name: draft.name, weeks: Array(draft.weeks),
+            weekday: draft.weekday, startPeriod: draft.startPeriod,
+            endPeriod: draft.endPeriod, room: draft.room, teacher: draft.teacher)
+        loadCached()
+        try state.publishLocalManualCourseChange(for: request.identity.owner,
+            authenticationRevision: request.context.authenticationRevision)
+    }
+
+    func deleteManualCourse(for request: TimetableManualCourseActionRequest) throws {
+        guard manualRule(for: request) != nil else {
+            throw APIError.unauthorized(message: "课表或账号已变化，请重新打开课程详情。")
+        }
+        try repository.deleteManualRule(id: request.identity.ruleID,
+                                        termID: request.context.termID)
+        loadCached()
+        try state.publishLocalManualCourseChange(for: request.identity.owner,
+            authenticationRevision: request.context.authenticationRevision)
+    }
+
     func selectTerm(_ id: Int) {
         guard terms.contains(where: { $0.id == id }) else { return }
         selectedTermID = id

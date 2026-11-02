@@ -30,6 +30,9 @@ struct TimetableView: View {
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
+    @State private var editingManualCourse: ManualCourseOperationRoute?
+    @State private var deletingManualCourse: ManualCourseOperationRoute?
+    @State private var manualCourseError: String?
     @State private var wallpaperImage: UIImage?
     @State private var wallpaperTask: Task<Void, Never>?
     @State private var wallpaperGeneration = 0
@@ -179,6 +182,33 @@ struct TimetableView: View {
                         operationID: route.operationID, startedAt: route.tappedAt)
                 }
             }
+            .sheet(item: $editingManualCourse) { route in
+                ManualCourseEditorView(rule: route.rule, periods: model.periods) { draft in
+                    try model.updateManualCourse(draft, for: route.request)
+                }
+            }
+            .confirmationDialog("删除“\(deletingManualCourse?.rule.name ?? "手动课程")”？",
+                                isPresented: Binding(get: { deletingManualCourse != nil },
+                                                     set: { if !$0 { deletingManualCourse = nil } })) {
+                Button("删除课程", role: .destructive) {
+                    guard let route = deletingManualCourse else { return }
+                    do {
+                        try model.deleteManualCourse(for: route.request)
+                    } catch {
+                        manualCourseError = error.localizedDescription
+                    }
+                    deletingManualCourse = nil
+                }
+                Button("取消", role: .cancel) { deletingManualCourse = nil }
+            } message: {
+                Text("删除后这门手动课程将从本机课程表移除。")
+            }
+            .alert("无法操作课程", isPresented: Binding(get: { manualCourseError != nil },
+                                                set: { if !$0 { manualCourseError = nil } })) {
+                Button("好", role: .cancel) { manualCourseError = nil }
+            } message: {
+                Text(manualCourseError ?? "请重试。")
+            }
             .task {
                 reloadWallpaper()
                 await model.updateIfNeeded()
@@ -187,6 +217,8 @@ struct TimetableView: View {
                 if tab != .timetable {
                     emptyCellSelection.clear(reason: "tab_changed")
                     emptyCellSelection.dismissRoute(reason: "tab_changed")
+                    editingManualCourse = nil
+                    deletingManualCourse = nil
                 }
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
             }
@@ -205,6 +237,9 @@ struct TimetableView: View {
             .onChange(of: state.authenticationRevision) { _, _ in
                 emptyCellSelection.clear(reason: "authentication_changed")
                 emptyCellSelection.dismissRoute(reason: "authentication_changed")
+                editingManualCourse = nil
+                deletingManualCourse = nil
+                manualCourseError = nil
                 detail.clear()
                 showingUnplaced = false
                 unplacedCourses = []
@@ -220,6 +255,8 @@ struct TimetableView: View {
             .onChange(of: model.selectedTermID) { _, _ in
                 emptyCellSelection.clear(reason: "term_changed")
                 emptyCellSelection.dismissRoute(reason: "term_changed")
+                editingManualCourse = nil
+                deletingManualCourse = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -227,6 +264,8 @@ struct TimetableView: View {
             .onChange(of: model.snapshotRevision) { _, _ in
                 emptyCellSelection.clear(reason: "snapshot_changed")
                 emptyCellSelection.dismissRoute(reason: "snapshot_changed")
+                editingManualCourse = nil
+                deletingManualCourse = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -234,6 +273,20 @@ struct TimetableView: View {
             .onChange(of: model.selectedWeek) { _, _ in
                 emptyCellSelection.clear(reason: "week_changed")
                 emptyCellSelection.dismissRoute(reason: "week_changed")
+                editingManualCourse = nil
+                deletingManualCourse = nil
+            }
+            .onChange(of: detail.readyAction?.id) { _, actionID in
+                guard actionID != nil, let request = detail.takeReadyAction() else { return }
+                guard let rule = model.manualRule(for: request) else {
+                    manualCourseError = "课程表或账号已变化，请重新打开课程详情。"
+                    return
+                }
+                let route = ManualCourseOperationRoute(rule: rule, request: request)
+                switch request.action {
+                case .edit: editingManualCourse = route
+                case .delete: deletingManualCourse = route
+                }
             }
         }
     }
@@ -506,7 +559,8 @@ struct TimetableView: View {
                    model.selectedWeek == context.week, model.selectedTermID == context.termID,
                    model.snapshotRevision == context.snapshotRevision,
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
-            if detail.open(course: course, context: context, color: courseColor(course.name)) {
+            if detail.open(course: course, context: context, color: courseColor(course.name),
+                           editableManualCourse: model.editableManualCourse(for: course, context: context)) {
                 emptyCellSelection.clear(reason: "course_detail_opened")
             }
         } label: {

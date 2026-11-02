@@ -16,6 +16,21 @@ struct TimetableDetailRoute: Identifiable {
     let course: CourseSession
     let context: TimetableDetailContext
     let courseColor: Color
+    let editableManualCourse: TimetableManualCourseIdentity?
+}
+
+struct TimetableManualCourseIdentity: Equatable {
+    let owner: String
+    let ruleID: Int
+}
+
+enum TimetableManualCourseAction: Equatable { case edit, delete }
+
+struct TimetableManualCourseActionRequest: Identifiable {
+    let id = UUID()
+    let action: TimetableManualCourseAction
+    let identity: TimetableManualCourseIdentity
+    let context: TimetableDetailContext
 }
 
 enum TimetableDetailPhase: Equatable {
@@ -76,7 +91,9 @@ enum TimetableDetailSurfaceKind: Equatable {
 final class TimetableCourseDetailCoordinator: ObservableObject {
     @Published private(set) var route: TimetableDetailRoute?
     @Published private(set) var phase: TimetableDetailPhase = .idle
+    @Published private(set) var readyAction: TimetableManualCourseActionRequest?
     private(set) var pagerBusy = false
+    private var closingAction: TimetableManualCourseActionRequest?
     private weak var rootView: UIView?
 
     var isPresenting: Bool { route != nil }
@@ -87,9 +104,11 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     func setPagerBusy(_ busy: Bool) { pagerBusy = busy }
 
     @discardableResult
-    func open(course: CourseSession, context: TimetableDetailContext, color: Color) -> Bool {
-        guard phase == .idle, !pagerBusy else { return false }
-        route = TimetableDetailRoute(course: course, context: context, courseColor: color)
+    func open(course: CourseSession, context: TimetableDetailContext, color: Color,
+              editableManualCourse: TimetableManualCourseIdentity? = nil) -> Bool {
+        guard phase == .idle, !pagerBusy, readyAction == nil else { return false }
+        route = TimetableDetailRoute(course: course, context: context, courseColor: color,
+                                     editableManualCourse: editableManualCourse)
         phase = .opening
         return true
     }
@@ -106,13 +125,31 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
         return true
     }
 
+    func beginAction(_ action: TimetableManualCourseAction, id: UUID) -> Bool {
+        guard let route, route.id == id, let identity = route.editableManualCourse,
+              beginClose(id: id) else { return false }
+        closingAction = TimetableManualCourseActionRequest(action: action, identity: identity,
+                                                           context: route.context)
+        return true
+    }
+
     func finish(id: UUID) {
         guard route?.id == id, phase == .closing else { return }
         route = nil
         phase = .idle
+        readyAction = closingAction
+        closingAction = nil
+    }
+
+    func takeReadyAction() -> TimetableManualCourseActionRequest? {
+        let action = readyAction
+        readyAction = nil
+        return action
     }
 
     func clear() {
+        closingAction = nil
+        readyAction = nil
         route = nil
         phase = .idle
         pagerBusy = false

@@ -99,13 +99,14 @@ private struct TimetableDetailSurface: View {
             if let destination {
                 Color.black.opacity(TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark))
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: close)
+                    .onTapGesture { close() }
                     .transition(.opacity)
 
                 panelSurface(ScrollView(.vertical) {
                     TimetableDetailContent(course: route.course, courseColor: route.courseColor,
-                                           focusTitle: focusTitle, onClose: close,
-                                           glassHeader: surfaceKind == .glass)
+                                           focusTitle: focusTitle, onClose: { close() },
+                                           glassHeader: surfaceKind == .glass,
+                                           onAction: route.editableManualCourse == nil ? nil : { close(action: $0) })
                         .frame(width: destination.width)
                 }
                 .scrollDisabled(!TimetableDetailLayout.needsScrolling(
@@ -124,7 +125,8 @@ private struct TimetableDetailSurface: View {
                 // Measure once at the final width, before the visible presentation begins.
                 TimetableDetailContent(course: route.course, courseColor: route.courseColor,
                                        focusTitle: false, onClose: {},
-                                       glassHeader: surfaceKind == .glass)
+                                       glassHeader: surfaceKind == .glass,
+                                       onAction: route.editableManualCourse == nil ? nil : { _ in })
                     .frame(width: targetWidth)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(GeometryReader { proxy in
@@ -161,8 +163,13 @@ private struct TimetableDetailSurface: View {
         }
     }
 
-    private func close() {
-        guard !closing, detail.beginClose(id: route.id) else { return }
+    private func close(action: TimetableManualCourseAction? = nil) {
+        guard !closing else { return }
+        if let action {
+            guard detail.beginAction(action, id: route.id) else { return }
+        } else {
+            guard detail.beginClose(id: route.id) else { return }
+        }
         closing = true
         focusTitle = false
         withAnimation(TimetableDetailMotion.animation(opening: false, reduceMotion: reduceMotion),
@@ -182,6 +189,7 @@ struct TimetableDetailContent: View {
     let focusTitle: Bool
     let onClose: () -> Void
     var glassHeader = false
+    var onAction: ((TimetableManualCourseAction) -> Void)? = nil
 
     @AccessibilityFocusState private var titleFocused: Bool
 
@@ -207,6 +215,21 @@ struct TimetableDetailContent: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(TimetableDetailInformation.rows(for: course)) { row in
                     detailRow(row)
+                }
+                if let onAction {
+                    HStack(spacing: 10) {
+                        Button { onAction(.edit) } label: {
+                            Label("编辑", systemImage: "pencil")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        Button(role: .destructive) { onAction(.delete) } label: {
+                            Label("删除", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 20)

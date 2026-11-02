@@ -16,6 +16,16 @@ struct ManualCourseDraft {
         endPeriod = cell.periodNumber
     }
 
+    init(rule: ManualCourseRule) {
+        name = rule.name
+        weeks = Set(rule.weeks)
+        weekday = rule.weekday
+        startPeriod = rule.startPeriod
+        endPeriod = rule.endPeriod
+        room = rule.room ?? ""
+        teacher = rule.teacher ?? ""
+    }
+
     func validationMessage(availablePeriods: Set<Int>) -> String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "请输入课程名称。" }
         if weeks.isEmpty || !weeks.allSatisfy({ (1...20).contains($0) }) {
@@ -36,6 +46,12 @@ struct ManualCourseEditorRoute: Identifiable {
     let tappedAt: TimeInterval
 }
 
+struct ManualCourseOperationRoute: Identifiable {
+    let id = UUID()
+    let rule: ManualCourseRule
+    let request: TimetableManualCourseActionRequest
+}
+
 @MainActor
 struct ManualCourseEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -44,12 +60,22 @@ struct ManualCourseEditorView: View {
     @State private var errorMessage: String?
     let periods: [PeriodInfo]
     let save: (ManualCourseDraft) throws -> Void
+    let isEditing: Bool
 
     init(cell: TimetableEmptyCellSelection, periods: [PeriodInfo],
          save: @escaping (ManualCourseDraft) throws -> Void) {
         _draft = State(initialValue: ManualCourseDraft(cell: cell))
         self.periods = periods
         self.save = save
+        isEditing = false
+    }
+
+    init(rule: ManualCourseRule, periods: [PeriodInfo],
+         save: @escaping (ManualCourseDraft) throws -> Void) {
+        _draft = State(initialValue: ManualCourseDraft(rule: rule))
+        self.periods = periods
+        self.save = save
+        isEditing = true
     }
 
     var body: some View {
@@ -89,7 +115,7 @@ struct ManualCourseEditorView: View {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("添加课程")
+            .navigationTitle(isEditing ? "编辑课程" : "添加课程")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

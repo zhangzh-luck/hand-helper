@@ -368,6 +368,66 @@ final class WeeklyTimetableTests: XCTestCase {
     }
 
     @MainActor
+    func testManualUpdateAndDeleteUseStableIDAndKeepTodayInSync() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let sessionStore = ProjectionSessionStore()
+        sessionStore.save(cookie: "session=alice")
+        let account = VerifiedAccountContext()
+        try account.confirm(username: "alice", cookie: "session=alice")
+        let repository = DiskCourseRepository(api: ProjectionAPI(), session: sessionStore,
+                                              account: account, directory: folder)
+        var stored = snapshot(sessions: [session(20)], rules: [
+            ManualCourseRule(id: -1, termSourceID: "fall", name: "待修改", weeks: [1],
+                weekday: 1, startPeriod: 1, endPeriod: 1, room: nil, teacher: nil, remoteID: nil),
+            ManualCourseRule(id: -2, termSourceID: "fall", name: "保留", weeks: [1],
+                weekday: 1, startPeriod: 1, endPeriod: 1, room: nil, teacher: nil, remoteID: nil)
+        ])
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(stored).write(to: snapshotPath(folder: folder, scope: "user:alice"), options: .atomic)
+
+        let edited = try repository.updateManualRule(id: -1, termID: 8, name: "  新名称  ",
+            weeks: [2, 2], weekday: 3, startPeriod: 2, endPeriod: 3,
+            room: " B201 ", teacher: " 李老师 ")
+        XCTAssertEqual(edited.id, -1)
+        XCTAssertEqual(edited.name, "新名称")
+        XCTAssertEqual(edited.weeks, [2])
+        XCTAssertEqual(edited.room, "B201")
+        XCTAssertEqual(edited.teacher, "李老师")
+        stored = try XCTUnwrap(repository.cached())
+        XCTAssertEqual(stored.manualRules.count, 2)
+        XCTAssertEqual(stored.manualRules.first(where: { $0.id == -2 })?.name, "保留")
+        let firstWeek = try WeeklyTimetableProjector.project(snapshot: stored, termID: 8,
+                                                               week: 1, calendar: utc)
+        XCTAssertFalse(firstWeek.placements.contains { $0.course.name == "新名称" })
+        let secondWeek = try WeeklyTimetableProjector.project(snapshot: stored, termID: 8,
+                                                                week: 2, calendar: utc)
+        XCTAssertTrue(secondWeek.placements.contains {
+            $0.course.manualCourseID == -1 && $0.weekday == 3 && $0.startRow == 1 && $0.rowSpan == 2
+        })
+        let today = TodayViewModel(repository: repository,
+            wallpaperStore: WallpaperStore(session: sessionStore, account: account, directory: folder),
+            clock: ProjectionClock(now: try day("2026-09-09", calendar: .current)))
+        today.load()
+        XCTAssertTrue(today.courses.contains { $0.manualCourseID == -1 && $0.name == "新名称" })
+
+        sessionStore.save(cookie: "session=alice-new")
+        XCTAssertThrowsError(try repository.deleteManualRule(id: -1, termID: 8))
+        try account.confirm(username: "alice", cookie: "session=alice-new")
+        try repository.deleteManualRule(id: -1, termID: 8)
+        XCTAssertThrowsError(try repository.deleteManualRule(id: -1, termID: 8))
+        stored = try XCTUnwrap(repository.cached())
+        XCTAssertEqual(stored.manualRules.map(\.id), [-2])
+        XCTAssertEqual(stored.calendarSessions.map(\.id), [20])
+        today.load()
+        XCTAssertFalse(today.courses.contains { $0.manualCourseID == -1 })
+        try account.confirm(username: "bob", cookie: "session=alice-new")
+        XCTAssertThrowsError(try repository.deleteManualRule(id: -2, termID: 8))
+        try account.confirm(username: "alice", cookie: "session=alice-new")
+        XCTAssertEqual(try repository.cached()?.manualRules.map(\.id), [-2])
+    }
+
+    @MainActor
     func testLegacyCookieSnapshotMigratesOnlyAfterCurrentOwnerVerification() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }

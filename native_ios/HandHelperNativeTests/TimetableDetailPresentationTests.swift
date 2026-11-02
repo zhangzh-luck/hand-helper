@@ -123,6 +123,47 @@ final class TimetableDetailPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testOnlyEditableManualDetailCanDispatchAnActionAfterClosing() throws {
+        let detail = TimetableCourseDetailCoordinator()
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue))
+        let readOnlyID = try XCTUnwrap(detail.route?.id)
+        XCTAssertFalse(detail.beginAction(.edit, id: readOnlyID))
+        XCTAssertNil(detail.readyAction)
+        XCTAssertTrue(detail.beginClose(id: readOnlyID))
+        detail.finish(id: readOnlyID)
+
+        let identity = TimetableManualCourseIdentity(owner: "user:alice", ruleID: -7)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue,
+                                  editableManualCourse: identity))
+        let id = try XCTUnwrap(detail.route?.id)
+        XCTAssertTrue(detail.beginAction(.delete, id: id))
+        XCTAssertFalse(detail.beginAction(.delete, id: id))
+        XCTAssertNil(detail.readyAction, "删除确认须等待浮层关闭")
+        detail.finish(id: UUID())
+        XCTAssertNil(detail.readyAction)
+        detail.finish(id: id)
+        let request = try XCTUnwrap(detail.takeReadyAction())
+        XCTAssertEqual(request.action, .delete)
+        XCTAssertEqual(request.identity, identity)
+        XCTAssertEqual(request.context, context)
+        XCTAssertNil(detail.takeReadyAction())
+    }
+
+    @MainActor
+    func testInvalidatedDetailDoesNotOpenEditorOrDeleteConfirmation() throws {
+        let detail = TimetableCourseDetailCoordinator()
+        let identity = TimetableManualCourseIdentity(owner: "user:alice", ruleID: -7)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue,
+                                  editableManualCourse: identity))
+        let id = try XCTUnwrap(detail.route?.id)
+        XCTAssertTrue(detail.beginAction(.edit, id: id))
+        detail.invalidate(termID: 9, snapshotRevision: 5, authenticationRevision: 3)
+        detail.finish(id: id)
+        XCTAssertNil(detail.takeReadyAction())
+        XCTAssertEqual(detail.phase, .idle)
+    }
+
+    @MainActor
     func testOpeningCanBeClosedAndOldOpenCompletionIsIgnored() throws {
         let detail = TimetableCourseDetailCoordinator()
         XCTAssertTrue(detail.open(course: course(), context: context, color: .blue))
