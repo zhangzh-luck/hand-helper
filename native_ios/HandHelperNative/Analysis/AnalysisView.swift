@@ -4,6 +4,10 @@ import SwiftUI
 struct AnalysisView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: AnalysisViewModel
+    @State private var selectedGrade: GradeRecord?
+    @State private var reportRoute: AnalysisReportRoute?
+    @State private var historyOpen = false
+    @State private var deleteTermID: Int?
 
     init(state: AppState) {
         self.state = state
@@ -52,6 +56,31 @@ struct AnalysisView: View {
                 if tab == .analysis { model.loadIfNeeded() }
             }
             .onChange(of: state.authenticationRevision) { _, _ in model.authenticationDidChange() }
+            .onChange(of: model.selectedTermID) { _, _ in
+                selectedGrade = nil
+                reportRoute = nil
+                historyOpen = false
+                deleteTermID = nil
+            }
+            .sheet(item: $selectedGrade) { GradeDetailView(grade: $0) }
+            .sheet(item: $reportRoute) { route in
+                GradeAIReportView(analysis: route.analysis) {
+                    reportRoute = nil
+                    model.generateAnalysis(force: true) { reportRoute = AnalysisReportRoute(analysis: $0) }
+                }
+            }
+            .confirmationDialog("删除“\(model.selectedTerm?.displayName ?? "本学期")”的成绩？",
+                                isPresented: Binding(get: { deleteTermID != nil },
+                                                     set: { if !$0 { deleteTermID = nil } })) {
+                Button("确认删除", role: .destructive) {
+                    guard let id = deleteTermID else { return }
+                    deleteTermID = nil
+                    model.deleteSelectedTerm(id)
+                }
+                Button("取消", role: .cancel) { deleteTermID = nil }
+            } message: {
+                Text("将删除本学期已导入的全部成绩和对应的 AI 分析缓存。此操作无法撤销，其他学期不受影响。")
+            }
         }
     }
 
@@ -113,7 +142,67 @@ struct AnalysisView: View {
     private var aiSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("AI 成绩分析").font(.title3.weight(.semibold))
-            Text("分析操作将在下一阶段接入。").font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    if let result = model.currentAnalysis {
+                        reportRoute = AnalysisReportRoute(analysis: result)
+                    } else {
+                        model.generateAnalysis { reportRoute = AnalysisReportRoute(analysis: $0) }
+                    }
+                } label: {
+                    HStack {
+                        Label(model.currentAnalysis == nil ? "生成 AI 成绩分析" : "查看 AI 成绩分析",
+                              systemImage: "sparkles")
+                        Spacer()
+                        if model.analyzing { ProgressView() }
+                        else { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
+                    }
+                    .frame(minHeight: 44)
+                }
+                .disabled(model.analyzing || model.refreshing || model.offline ||
+                          model.selectedData?.grades.isEmpty != false)
+                Divider()
+                Button {
+                    withAnimation(.smooth) { historyOpen.toggle() }
+                } label: {
+                    HStack {
+                        Text("历史分析")
+                        Spacer()
+                        Text("\(model.selectedData?.history.count ?? 0) 条")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: historyOpen ? "chevron.down" : "chevron.right")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 44)
+                }
+                if historyOpen {
+                    ForEach(model.selectedData?.history ?? []) { result in
+                        Divider()
+                        Button {
+                            reportRoute = AnalysisReportRoute(analysis: result)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(result.model).font(.body.weight(.medium))
+                                Text(result.createdAt.replacingOccurrences(of: "T", with: " "))
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                    }
+                    if model.selectedData?.history.isEmpty != false {
+                        Text("当前学期还没有历史分析。")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .padding(.vertical, 12)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .background(Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 16))
+            Text("仅在你点击生成后，将当前学期课程名称、成绩、学分和绩点发送给已配置的模型服务。")
+                .font(.footnote).foregroundStyle(.secondary)
+            if let error = model.actionError { Text(error).font(.footnote).foregroundStyle(.red) }
         }
     }
 
@@ -121,13 +210,20 @@ struct AnalysisView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("课程成绩").font(.title3.weight(.semibold))
             let grades = model.selectedData?.grades ?? []
+            if !grades.isEmpty && !model.offline {
+                Button(role: .destructive) { deleteTermID = model.selectedTermID } label: {
+                    Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
+                }
+                .disabled(model.deleting || model.refreshing || model.analyzing)
+            }
             if grades.isEmpty {
                 ContentUnavailableView("暂无课程成绩", systemImage: "doc.text",
                                        description: Text("导入并确认成绩后，这里会显示课程明细。"))
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(grades) { grade in
-                        gradeRow(grade)
+                        Button { selectedGrade = grade } label: { gradeRow(grade) }
+                            .buttonStyle(.plain)
                         if grade.id != grades.last?.id { Divider().padding(.leading, 14) }
                     }
                 }

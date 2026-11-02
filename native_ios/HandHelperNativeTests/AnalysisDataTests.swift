@@ -49,6 +49,33 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
+    func testAIUsesExplicitRequestAndDeletionEvictsOnlySelectedTerm() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let result = #"{"term_id":8,"content":"## 报告","provider":"test","model":"model","created_at":"2026-09-08T10:00:00","cached":false}"#
+        let api = AnalysisAPIStub(responses: [
+            "/api/v1/terms": terms,
+            "/api/v1/grades?term_id=8": grades,
+            "/api/v1/grades/summary?term_id=8": summary,
+            "/api/v1/grades/ai-analyses?term_id=8": "[]",
+            "/api/v1/grades/ai-analysis?term_id=8&force_refresh=true": result,
+            "/api/v1/grades?term_id=8#DELETE": #"{"term_id":8,"grades_deleted":1,"analyses_deleted":1}"#
+        ])
+        let state = await makeState(user: "alice", api: api)
+        let revision = state.authenticationRevision
+        let owner = try state.requireCurrentAccount(revision: revision)
+        let repo = AnalysisRepository(state: state, api: api, directory: folder)
+        _ = try await repo.refresh(owner: owner, revision: revision)
+        XCTAssertFalse(api.paths.contains(where: { $0.contains("ai-analysis?") }),
+                       "普通加载不能主动生成 AI 报告")
+        let generated = try await repo.analyze(termID: 8, force: true)
+        XCTAssertEqual(generated.content, "## 报告")
+        try await repo.deleteGrades(termID: 8, owner: owner, revision: revision)
+        XCTAssertNil(try repo.cached(owner: owner, revision: revision)?.byTerm[8])
+        XCTAssertTrue(api.paths.contains("/api/v1/grades?term_id=8#DELETE"))
+    }
+
+    @MainActor
     private func makeState(user: String, api: AnalysisAPIStub, cookie: String? = nil) async -> AppState {
         let preferences = UserDefaults(suiteName: UUID().uuidString)!
         let state = AppState(api: api, sessionStore: AnalysisSessionStub(cookie: cookie ?? "session=\(user)"),
@@ -64,8 +91,9 @@ private final class AnalysisAPIStub: APIClientProtocol {
     init(responses: [String: String]) { self.responses = responses }
     func request<Value: Decodable>(_ method: String, path: String, body: Data?,
                                     preserveSessionOnPasswordError: Bool) async throws -> Value {
-        paths.append(path)
-        guard let response = responses[path] else { throw APIError.invalidResponse }
+        let key = method == "DELETE" ? path + "#DELETE" : path
+        paths.append(key)
+        guard let response = responses[key] else { throw APIError.invalidResponse }
         return try JSONDecoder().decode(Value.self, from: Data(response.utf8))
     }
 }
