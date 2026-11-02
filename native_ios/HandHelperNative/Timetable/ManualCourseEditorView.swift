@@ -128,41 +128,128 @@ struct ManualCourseEditorView: View {
     }
 }
 
+enum ManualCourseWeekChoices {
+    static let all = Set(1...20)
+    static let odd = Set(stride(from: 1, through: 19, by: 2))
+    static let even = Set(stride(from: 2, through: 20, by: 2))
+
+    static func toggling(_ week: Int, in selection: Set<Int>) -> Set<Int> {
+        var result = selection
+        if result.contains(week) { result.remove(week) }
+        else { result.insert(week) }
+        return result
+    }
+}
+
+struct ManualCourseWeekDraft {
+    private(set) var selection: Set<Int>
+
+    init(weeks: Set<Int>) { selection = weeks }
+
+    mutating func replace(with weeks: Set<Int>) { selection = weeks }
+
+    // Only the explicit Complete action commits this temporary navigation state.
+    var completedSelection: Set<Int>? { selection.isEmpty ? nil : selection }
+}
+
 private struct ManualCourseWeekPicker: View {
-    @Binding var weeks: Set<Int>
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Binding private var weeks: Set<Int>
+    @State private var draft: ManualCourseWeekDraft
+
+    init(weeks: Binding<Set<Int>>) {
+        _weeks = weeks
+        _draft = State(initialValue: ManualCourseWeekDraft(weeks: weeks.wrappedValue))
+    }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 5)
 
     var body: some View {
         Form {
             Section {
-                HStack {
-                    Button("全选") { weeks = Set(1...20) }
-                    Spacer()
-                    Button("单周") { weeks = Set(stride(from: 1, through: 19, by: 2)) }
-                    Spacer()
-                    Button("双周") { weeks = Set(stride(from: 2, through: 20, by: 2)) }
-                    Spacer()
-                    Button("清空") { weeks = [] }
-                }
-                .buttonStyle(.borderless)
-            }
-            Section("教学周 · 已选 \(weeks.count) 周") {
-                ForEach(1...20, id: \.self) { week in
-                    Button {
-                        if weeks.contains(week) { weeks.remove(week) }
-                        else { weeks.insert(week) }
-                    } label: {
-                        HStack {
-                            Text("第 \(week) 周")
-                            Spacer()
-                            if weeks.contains(week) { Image(systemName: "checkmark") }
-                        }
-                        .contentShape(Rectangle())
+                if dynamicTypeSize.isAccessibilitySize {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                        bulkButtons
                     }
-                    .foregroundStyle(.primary)
-                    .accessibilityAddTraits(weeks.contains(week) ? .isSelected : [])
+                } else {
+                    HStack(spacing: 8) { bulkButtons }
                 }
+            }
+            Section("教学周 · 已选 \(draft.selection.count) / 20 周") {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(1...20, id: \.self) { week in
+                        weekButton(week)
+                    }
+                }
+                .padding(.vertical, 4)
             }
         }
         .navigationTitle("上课周次")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") {
+                    guard let completed = draft.completedSelection else { return }
+                    weeks = completed
+                    dismiss()
+                }
+                .disabled(draft.completedSelection == nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bulkButtons: some View {
+        bulkButton("全选", selection: ManualCourseWeekChoices.all)
+        bulkButton("单周", selection: ManualCourseWeekChoices.odd)
+        bulkButton("双周", selection: ManualCourseWeekChoices.even)
+        bulkButton("清空", selection: [])
+    }
+
+    private func bulkButton(_ title: String, selection newSelection: Set<Int>) -> some View {
+        Button(title) { updateSelection(newSelection) }
+            .font(.subheadline)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.bordered)
+    }
+
+    private func weekButton(_ week: Int) -> some View {
+        let isSelected = draft.selection.contains(week)
+        return Button {
+            updateSelection(ManualCourseWeekChoices.toggling(week, in: draft.selection))
+        } label: {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(isSelected ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground))
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(isSelected ? Color.accentColor : Color(uiColor: .separator), lineWidth: 1)
+                }
+                .overlay {
+                    Text("\(week)")
+                        .font(.body.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .minimumScaleFactor(0.8)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("第 \(week) 周")
+        .accessibilityValue(isSelected ? "已选中" : "未选中")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func updateSelection(_ newSelection: Set<Int>) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            draft.replace(with: newSelection)
+        }
     }
 }

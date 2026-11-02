@@ -36,6 +36,34 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertNotNil(draft.validationMessage(availablePeriods: available))
     }
 
+    func testWeekTilesToggleEveryWeekAndBulkSelections() {
+        XCTAssertEqual(ManualCourseWeekChoices.all, Set(1...20))
+        XCTAssertEqual(ManualCourseWeekChoices.odd, Set(stride(from: 1, through: 19, by: 2)))
+        XCTAssertEqual(ManualCourseWeekChoices.even, Set(stride(from: 2, through: 20, by: 2)))
+        XCTAssertTrue(ManualCourseWeekChoices.odd.isDisjoint(with: ManualCourseWeekChoices.even))
+        var selected = Set<Int>()
+        for week in 1...20 {
+            selected = ManualCourseWeekChoices.toggling(week, in: selected)
+        }
+        XCTAssertEqual(selected, ManualCourseWeekChoices.all)
+        for week in 1...20 {
+            selected = ManualCourseWeekChoices.toggling(week, in: selected)
+        }
+        XCTAssertTrue(selected.isEmpty)
+    }
+
+    func testWeekPickerCancelKeepsFormWeeksAndCompleteRequiresSelection() {
+        var formWeeks: Set<Int> = [3]
+        var picker = ManualCourseWeekDraft(weeks: formWeeks)
+        picker.replace(with: ManualCourseWeekChoices.odd)
+        XCTAssertEqual(formWeeks, [3]) // Cancelling drops the picker without writing the binding.
+        XCTAssertEqual(picker.completedSelection, ManualCourseWeekChoices.odd)
+        formWeeks = picker.completedSelection ?? formWeeks
+        XCTAssertEqual(formWeeks, ManualCourseWeekChoices.odd)
+        picker.replace(with: [])
+        XCTAssertNil(picker.completedSelection)
+    }
+
     @MainActor
     func testSelectionMovesAndClearsWithoutLeakingToAnotherWeek() {
         let coordinator = TimetableEmptyCellSelectionCoordinator()
