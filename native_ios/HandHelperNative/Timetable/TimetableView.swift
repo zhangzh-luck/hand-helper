@@ -133,7 +133,6 @@ struct TimetableView: View {
                                                         busy ? "pager_busy" : "pager_idle",
                                                         operationID: emptyCellSelection.selectionOperationID)
                                                     detail.setPagerBusy(busy)
-                                                    if busy { emptyCellSelection.clear(reason: "pager_busy") }
                                                 }) { projection in
                                 TimetableWeekPage(emptyCellSelection: emptyCellSelection,
                                                   projection: projection,
@@ -507,7 +506,9 @@ struct TimetableView: View {
                    model.selectedWeek == context.week, model.selectedTermID == context.termID,
                    model.snapshotRevision == context.snapshotRevision,
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
-            _ = detail.open(course: course, context: context, color: courseColor(course.name))
+            if detail.open(course: course, context: context, color: courseColor(course.name)) {
+                emptyCellSelection.clear(reason: "course_detail_opened")
+            }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(course.name).font(.caption.weight(.semibold))

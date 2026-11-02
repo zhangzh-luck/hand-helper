@@ -52,6 +52,36 @@ final class ManualCourseEditorTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectionSurvivesScrollingAndCancelledPagingUntilWeekChanges() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        // Vertical scrolling has no selection mutation; a cancelled page transition
+        // also leaves the selected teaching week unchanged.
+        XCTAssertEqual(coordinator.selected, cell)
+        XCTAssertEqual(coordinator.open(cell, context: context(pagerBusy: true), tappedAt: 10),
+                       .pagerBusy)
+        XCTAssertEqual(coordinator.selected, cell)
+        XCTAssertNil(coordinator.route)
+        XCTAssertEqual(coordinator.selected, cell) // Pager settled on the original week.
+        coordinator.clear(reason: "week_changed")
+        XCTAssertNil(coordinator.selected)
+    }
+
+    @MainActor
+    func testSelectingSameCellKeepsSelectionAndAnotherCellMovesIt() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        coordinator.select(cell)
+        XCTAssertEqual(coordinator.selected, cell)
+        let otherCell = TimetableEmptyCellSelection(owner: cell.owner,
+            authenticationRevision: cell.authenticationRevision, termID: cell.termID,
+            week: cell.week, snapshotRevision: cell.snapshotRevision,
+            weekday: 3, periodNumber: cell.periodNumber)
+        coordinator.select(otherCell)
+        XCTAssertEqual(coordinator.selected, otherCell)
+    }
+
+    @MainActor
     private func context(termID: Int? = 8, week: Int = 3, snapshotRevision: Int = 2,
                          owner: String? = "user:alice", pagerBusy: Bool = false,
                          tabActive: Bool = true, detailPresenting: Bool = false)
@@ -85,9 +115,7 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertEqual(coordinator.open(cell, context: context(pagerBusy: true), tappedAt: 10),
                        .pagerBusy)
         XCTAssertNil(coordinator.route)
-        coordinator.clear(reason: "pager_busy")
-        XCTAssertEqual(coordinator.open(cell, context: context(), tappedAt: 11), .selectionChanged)
-        coordinator.select(cell)
+        XCTAssertEqual(coordinator.selected, cell)
         XCTAssertEqual(coordinator.open(cell, context: context(snapshotRevision: 3), tappedAt: 12),
                        .snapshotChanged)
         coordinator.clear(reason: "snapshot_changed")

@@ -38,22 +38,11 @@ struct TimetableWeekPage<Header: View, Grid: View>: View {
                         grid(projection, metrics, emptyCellSelection.selected)
                             .padding(.bottom, bottomPadding)
                     }
-                    .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { drag in
-                        if abs(drag.translation.height) > abs(drag.translation.width) {
-                            emptyCellSelection.clear(reason: "vertical_drag")
-                        }
-                    })
                 }
                 .frame(width: metrics.width)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.container, edges: .bottom)
-        .onDisappear {
-            if emptyCellSelection.selected?.week == projection.week &&
-                emptyCellSelection.selected?.termID == projection.term.id {
-                emptyCellSelection.clear(reason: "week_page_disappeared")
-            }
-        }
     }
 }
