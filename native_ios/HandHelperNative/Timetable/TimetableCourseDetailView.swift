@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TimetableCourseDetailView: View {
     let course: CourseSession
+    var onEdit: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         List {
@@ -18,6 +20,16 @@ struct TimetableCourseDetailView: View {
                     LabeledContent("教师", value: TimetableCourseDetailText.nonempty(course.teacher))
                     if let start = course.startPeriod, let end = course.endPeriod {
                         LabeledContent("节次", value: "第 \(start)–\(end) 节")
+                    }
+                }
+                if let onEdit, let onDelete {
+                    Section("手动课程") {
+                        Button(action: onEdit) {
+                            Label("编辑课程", systemImage: "pencil")
+                        }
+                        Button(role: .destructive, action: onDelete) {
+                            Label("删除课程", systemImage: "trash")
+                        }
                     }
                 }
         }

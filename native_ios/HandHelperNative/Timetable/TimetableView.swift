@@ -32,6 +32,7 @@ struct TimetableView: View {
     @State private var showingConflicts = false
     @State private var editingManualCourse: ManualCourseOperationRoute?
     @State private var deletingManualCourse: ManualCourseOperationRoute?
+    @State private var pendingListManualAction: TimetableManualCourseActionRequest?
     @State private var manualCourseError: String?
     @State private var wallpaperImage: UIImage?
     @State private var wallpaperTask: Task<Void, Never>?
@@ -163,8 +164,8 @@ struct TimetableView: View {
                 .ignoresSafeArea(.container, edges: .bottom)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showingUnplaced) { unplacedList }
-            .sheet(isPresented: $showingConflicts) { conflictList }
+            .sheet(isPresented: $showingUnplaced, onDismiss: presentPendingListManualAction) { unplacedList }
+            .sheet(isPresented: $showingConflicts, onDismiss: presentPendingListManualAction) { conflictList }
             .sheet(item: Binding(get: { emptyCellSelection.route },
                                  set: { if $0 == nil { emptyCellSelection.dismissRoute(reason: "sheet_closed") } }),
                    onDismiss: { emptyCellSelection.sheetDidDismiss() }) { route in
@@ -219,6 +220,7 @@ struct TimetableView: View {
                     emptyCellSelection.dismissRoute(reason: "tab_changed")
                     editingManualCourse = nil
                     deletingManualCourse = nil
+                    pendingListManualAction = nil
                 }
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
             }
@@ -239,6 +241,7 @@ struct TimetableView: View {
                 emptyCellSelection.dismissRoute(reason: "authentication_changed")
                 editingManualCourse = nil
                 deletingManualCourse = nil
+                pendingListManualAction = nil
                 manualCourseError = nil
                 detail.clear()
                 showingUnplaced = false
@@ -257,6 +260,7 @@ struct TimetableView: View {
                 emptyCellSelection.dismissRoute(reason: "term_changed")
                 editingManualCourse = nil
                 deletingManualCourse = nil
+                pendingListManualAction = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -266,6 +270,7 @@ struct TimetableView: View {
                 emptyCellSelection.dismissRoute(reason: "snapshot_changed")
                 editingManualCourse = nil
                 deletingManualCourse = nil
+                pendingListManualAction = nil
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -275,18 +280,11 @@ struct TimetableView: View {
                 emptyCellSelection.dismissRoute(reason: "week_changed")
                 editingManualCourse = nil
                 deletingManualCourse = nil
+                pendingListManualAction = nil
             }
             .onChange(of: detail.readyAction?.id) { _, actionID in
                 guard actionID != nil, let request = detail.takeReadyAction() else { return }
-                guard let rule = model.manualRule(for: request) else {
-                    manualCourseError = "课程表或账号已变化，请重新打开课程详情。"
-                    return
-                }
-                let route = ManualCourseOperationRoute(rule: rule, request: request)
-                switch request.action {
-                case .edit: editingManualCourse = route
-                case .delete: deletingManualCourse = route
-                }
+                presentManualAction(request)
             }
         }
     }
@@ -636,7 +634,7 @@ struct TimetableView: View {
                 ForEach(items.indices, id: \.self) { index in
                     let item = items[index]
                     NavigationLink {
-                        TimetableCourseDetailView(course: item.course)
+                        listCourseDetail(item.course)
                     } label: {
                         VStack(alignment: .leading) {
                             Text(item.course.name)
@@ -655,7 +653,7 @@ struct TimetableView: View {
         NavigationStack {
             List(conflictCourses) { course in
                 NavigationLink {
-                    TimetableCourseDetailView(course: course)
+                    listCourseDetail(course)
                 } label: {
                     VStack(alignment: .leading) {
                         Text(course.name)
@@ -666,6 +664,46 @@ struct TimetableView: View {
             }
             .navigationTitle("同时段课程")
             .toolbar { Button("完成") { showingConflicts = false } }
+        }
+    }
+
+    private func listCourseDetail(_ course: CourseSession) -> TimetableCourseDetailView {
+        let context = TimetableDetailContext(authenticationRevision: state.authenticationRevision,
+            termID: model.selectedTermID ?? -1, week: model.selectedWeek,
+            snapshotRevision: model.snapshotRevision, courseID: course.id, placementIndex: -1)
+        let canManage = model.editableManualCourse(for: course, context: context) != nil
+        return TimetableCourseDetailView(course: course,
+            onEdit: canManage ? { queueListManualAction(.edit, course: course, context: context) } : nil,
+            onDelete: canManage ? { queueListManualAction(.delete, course: course, context: context) } : nil)
+    }
+
+    private func queueListManualAction(_ action: TimetableManualCourseAction,
+                                       course: CourseSession, context: TimetableDetailContext) {
+        guard let identity = model.editableManualCourse(for: course, context: context) else {
+            manualCourseError = "课程表或账号已变化，请重新打开课程详情。"
+            return
+        }
+        pendingListManualAction = TimetableManualCourseActionRequest(action: action,
+            identity: identity, context: context)
+        showingConflicts = false
+        showingUnplaced = false
+    }
+
+    private func presentPendingListManualAction() {
+        guard let request = pendingListManualAction else { return }
+        pendingListManualAction = nil
+        presentManualAction(request)
+    }
+
+    private func presentManualAction(_ request: TimetableManualCourseActionRequest) {
+        guard let rule = model.manualRule(for: request) else {
+            manualCourseError = "课程表或账号已变化，请重新打开课程详情。"
+            return
+        }
+        let route = ManualCourseOperationRoute(rule: rule, request: request)
+        switch request.action {
+        case .edit: editingManualCourse = route
+        case .delete: deletingManualCourse = route
         }
     }
 
