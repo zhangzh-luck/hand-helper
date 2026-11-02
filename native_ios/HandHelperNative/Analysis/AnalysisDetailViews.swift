@@ -76,6 +76,7 @@ struct GradeAIReportView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     LabeledContent("分析模型", value: analysis.model)
+                    LabeledContent("服务提供方", value: analysis.provider)
                     LabeledContent("结果来源", value: analysis.cached == true ? "当前成绩快照的缓存" : "实时生成或历史记录")
                     LabeledContent("生成时间", value: analysis.createdAt.replacingOccurrences(of: "T", with: " "))
                     Button("重新生成") { onRegenerate() }

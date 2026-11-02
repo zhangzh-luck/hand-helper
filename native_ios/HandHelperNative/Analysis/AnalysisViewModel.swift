@@ -98,7 +98,7 @@ final class AnalysisViewModel: ObservableObject {
                 guard isCurrent(owner: currentOwner, revision: revision, token: token),
                       selectedTermID == termID else { return }
                 currentAnalysis = result
-                completion(result)
+                if state.selectedTab == .analysis { completion(result) }
                 analyzing = false
                 refresh()
             } catch {

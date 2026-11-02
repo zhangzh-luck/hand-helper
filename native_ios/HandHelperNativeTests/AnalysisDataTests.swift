@@ -76,12 +76,76 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
+    func testCachedTermsSwitchWithoutAnotherRequestAndLateResponseCannotRestoreOldAccount() async throws {
+        let api = AnalysisAPIStub(responses: [:])
+        let state = await makeState(user: "alice", api: api)
+        state.selectedTab = .analysis
+        let current = try XCTUnwrap(JSONDecoder().decode([TermInfo].self,
+            from: Data(terms.utf8)).first)
+        let second = TermInfo(id: 9, sourceTermID: "2026-2027-1",
+                              displayName: "下一学期", startDate: nil, isCurrent: false)
+        let grade = try XCTUnwrap(JSONDecoder().decode([GradeRecord].self,
+            from: Data(grades.utf8)).first)
+        let value = try JSONDecoder().decode(GradeSummary.self, from: Data(summary.utf8))
+        let cached = AnalysisSnapshot(terms: [current, second], byTerm: [
+            8: AnalysisTermData(grades: [grade], summary: value, history: []),
+            9: AnalysisTermData(grades: [], summary: value, history: [])
+        ], savedAt: Date(timeIntervalSince1970: 0))
+        let repository = AnalysisDelayedRepository(snapshot: cached)
+        let model = AnalysisViewModel(state: state, repository: repository)
+        model.loadIfNeeded()
+        XCTAssertEqual(model.selectedTermID, 8)
+        model.selectTerm(9)
+        XCTAssertEqual(model.selectedTermID, 9)
+        XCTAssertEqual(model.selectedData?.grades.count, 0)
+        await fulfillment(of: [repository.started], timeout: 3)
+        state.selectedTab = .today
+        state.selectedTab = .analysis
+        model.loadIfNeeded()
+        XCTAssertEqual(repository.refreshCalls, 1)
+        await state.logout()
+        model.authenticationDidChange()
+        repository.finish()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertNil(model.snapshot)
+        XCTAssertNil(model.selectedTermID)
+    }
+
+    @MainActor
     private func makeState(user: String, api: AnalysisAPIStub, cookie: String? = nil) async -> AppState {
         let preferences = UserDefaults(suiteName: UUID().uuidString)!
         let state = AppState(api: api, sessionStore: AnalysisSessionStub(cookie: cookie ?? "session=\(user)"),
                              authentication: AnalysisAuthStub(user: user), preferences: preferences)
         await state.restoreSession()
         return state
+    }
+}
+
+@MainActor
+private final class AnalysisDelayedRepository: AnalysisRepositoryProtocol {
+    let snapshot: AnalysisSnapshot
+    let started = XCTestExpectation(description: "Refresh started")
+    private var continuation: CheckedContinuation<AnalysisSnapshot, Error>?
+    private(set) var refreshCalls = 0
+
+    init(snapshot: AnalysisSnapshot) { self.snapshot = snapshot }
+    func cached(owner: String, revision: Int) throws -> AnalysisSnapshot? { snapshot }
+    func refresh(owner: String, revision: Int) async throws -> AnalysisSnapshot {
+        refreshCalls += 1
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+    }
+    func finish() {
+        continuation?.resume(returning: snapshot)
+        continuation = nil
+    }
+    func analyze(termID: Int, force: Bool) async throws -> GradeAIAnalysis {
+        throw APIError.invalidConfiguration
+    }
+    func deleteGrades(termID: Int, owner: String, revision: Int) async throws {
+        throw APIError.invalidConfiguration
     }
 }
 
