@@ -3,39 +3,76 @@ import SwiftUI
 @MainActor
 struct GradeDetailView: View {
     let grade: GradeRecord
+    let focusTitle: Bool
+    let onClose: () -> Void
+    var glassHeader = false
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AccessibilityFocusState private var titleFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(grade.courseName)
-                        .font(.title2.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(alignment: .top, spacing: 8) {
-                        score("总评成绩", grade.score ?? "未公布", emphasized: true)
-                        score("期末成绩", grade.finalExamScore ?? "未提供")
-                        score("平时成绩", grade.usualScore ?? "未提供")
-                    }
-                    .padding(12)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground),
-                                in: RoundedRectangle(cornerRadius: 16))
-                    VStack(spacing: 0) {
-                        detail("课程名称", grade.courseName, symbol: "book")
-                        detail("学分 / 绩点", "\(grade.credits.map { String($0) } ?? "—") / \(grade.gradePoint.map { String($0) } ?? "—")", symbol: "graduationcap")
-                        detail("课程性质", grade.courseType ?? "未提供", symbol: "books.vertical")
-                        detail("考试性质", grade.examType ?? "未提供", symbol: "doc.text")
-                        detail("补考 / 重修", "\(grade.makeupFlag ? "补考" : "否") / \(grade.retakeFlag ? "重修" : "否")", symbol: "arrow.clockwise")
-                    }
-                    .padding(.horizontal, 16)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground),
-                                in: RoundedRectangle(cornerRadius: 16))
-                }
-                .padding(16)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.accentColor)
+                    .frame(width: 4, height: 26)
+                    .accessibilityHidden(true)
+                Text(grade.courseName)
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityFocused($titleFocused)
+                Spacer(minLength: 0)
+                GlassCloseButton(accessibilityLabel: "关闭成绩详情", diameter: 44,
+                                 onDarkBackground: false, action: onClose)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("成绩详情")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 10) { scores }
+                    } else {
+                        HStack(alignment: .top, spacing: 8) { scores }
+                    }
+                }
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 14))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    detail("学分 / 绩点", "\(grade.credits.map { String($0) } ?? "—") / \(grade.gradePoint.map { String($0) } ?? "—")", symbol: "graduationcap")
+                    detail("课程性质", grade.courseType ?? "未提供", symbol: "books.vertical")
+                    detail("考试性质", grade.examType ?? "未提供", symbol: "doc.text")
+                    detail("补考 / 重修", "\(grade.makeupFlag ? "补考" : "否") / \(grade.retakeFlag ? "重修" : "否")", symbol: "arrow.clockwise")
+                    if !grade.courseCode.isEmpty {
+                        detail("课程代码", grade.courseCode, symbol: "number", secondary: true)
+                    }
+                    if let weighted = grade.weightedGradePoint {
+                        detail("加权绩点", String(weighted), symbol: "chart.bar", secondary: true)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, glassHeader ? 14 : 0)
+            .padding(.bottom, 20)
+            .background {
+                if glassHeader {
+                    Color(uiColor: .systemGroupedBackground).opacity(0.94)
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .onChange(of: focusTitle) { _, value in titleFocused = value }
+    }
+
+    @ViewBuilder
+    private var scores: some View {
+        score("总评成绩", grade.score ?? "未公布", emphasized: true)
+        score("期末成绩", grade.finalExamScore ?? "未提供")
+        score("平时成绩", grade.usualScore ?? "未提供")
     }
 
     private func score(_ title: String, _ value: String, emphasized: Bool = false) -> some View {
@@ -48,15 +85,19 @@ struct GradeDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func detail(_ label: String, _ value: String, symbol: String) -> some View {
+    private func detail(_ label: String, _ value: String, symbol: String,
+                        secondary: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 22)
-            Text(label).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
-            Text(value).frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(value).foregroundStyle(secondary ? Color.secondary : Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.subheadline)
-        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
     }
 }

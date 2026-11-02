@@ -5,7 +5,8 @@ import UIKit
 struct AnalysisView: View {
     @ObservedObject private var state: AppState
     @StateObject private var model: AnalysisViewModel
-    @State private var selectedGrade: GradeRecord?
+    @ObservedObject private var gradeDetail: GradeDetailCoordinator
+    private let timetableDetail: TimetableCourseDetailCoordinator
     @State private var reportRoute: AnalysisReportRoute?
     @State private var historyOpen = false
     @State private var deleteTermID: Int?
@@ -14,8 +15,11 @@ struct AnalysisView: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
 
-    init(state: AppState) {
+    init(state: AppState, gradeDetail: GradeDetailCoordinator,
+         timetableDetail: TimetableCourseDetailCoordinator) {
         self.state = state
+        self.gradeDetail = gradeDetail
+        self.timetableDetail = timetableDetail
         _model = StateObject(wrappedValue: AnalysisViewModel(state: state))
     }
 
@@ -74,24 +78,26 @@ struct AnalysisView: View {
             .task { loadWallpaper(); model.loadIfNeeded() }
             .onChange(of: state.selectedTab) { _, tab in
                 if tab == .analysis { model.loadIfNeeded() }
+                else { gradeDetail.clear() }
             }
             .onChange(of: state.authenticationRevision) { _, _ in
+                gradeDetail.clear()
                 wallpaperImage = nil
                 model.authenticationDidChange()
                 if state.selectedTab == .analysis { loadWallpaper() }
             }
             .onChange(of: state.analysisWallpaperVersion) { _, _ in loadWallpaper() }
             .onChange(of: model.selectedTermID) { _, _ in
-                selectedGrade = nil
+                gradeDetail.clear()
                 reportRoute = nil
                 historyOpen = false
                 deleteTermID = nil
             }
-            .sheet(item: $selectedGrade) { GradeDetailView(grade: $0) }
+            .onChange(of: model.snapshot) { _, _ in validateGradeDetail() }
             .sheet(item: $reportRoute) { route in
                 GradeAIReportView(analysis: route.analysis) {
                     reportRoute = nil
-                    model.generateAnalysis(force: true) { reportRoute = AnalysisReportRoute(analysis: $0) }
+                    model.generateAnalysis(force: true) { showReport($0) }
                 }
             }
             .confirmationDialog("删除“\(model.selectedTerm?.displayName ?? "本学期")”的成绩？",
@@ -114,6 +120,34 @@ struct AnalysisView: View {
         let store = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount,
                                    kind: .analysis)
         wallpaperImage = (try? store.load()).flatMap(UIImage.init(data:))
+    }
+
+    private func openGradeDetail(_ grade: GradeRecord) {
+        guard state.selectedTab == .analysis, state.canAccessPrivateData,
+              reportRoute == nil, deleteTermID == nil,
+              !timetableDetail.isPresenting,
+              let termID = model.selectedTermID, grade.termID == termID,
+              model.selectedData?.grades.first(where: { $0.id == grade.id }) == grade,
+              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision)
+        else { return }
+        let context = GradeDetailContext(owner: owner,
+            authenticationRevision: state.authenticationRevision,
+            termID: termID, gradeID: grade.id)
+        _ = gradeDetail.open(grade: grade, context: context)
+    }
+
+    private func validateGradeDetail() {
+        guard let route = gradeDetail.route else { return }
+        let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision)
+        let grade = model.selectedData?.grades.first(where: { $0.id == route.context.gradeID })
+        gradeDetail.invalidate(owner: owner, authenticationRevision: state.authenticationRevision,
+                               termID: model.selectedTermID, grade: grade)
+    }
+
+    private func showReport(_ analysis: GradeAIAnalysis) {
+        guard !gradeDetail.isPresenting, deleteTermID == nil,
+              state.selectedTab == .analysis, state.canAccessPrivateData else { return }
+        reportRoute = AnalysisReportRoute(analysis: analysis)
     }
 
     private var termPicker: some View {
@@ -177,9 +211,9 @@ struct AnalysisView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button {
                     if let result = model.currentAnalysis {
-                        reportRoute = AnalysisReportRoute(analysis: result)
+                        showReport(result)
                     } else {
-                        model.generateAnalysis { reportRoute = AnalysisReportRoute(analysis: $0) }
+                        model.generateAnalysis { showReport($0) }
                     }
                 } label: {
                     HStack {
@@ -211,7 +245,7 @@ struct AnalysisView: View {
                     ForEach(model.selectedData?.history ?? []) { result in
                         Divider()
                         Button {
-                            reportRoute = AnalysisReportRoute(analysis: result)
+                            showReport(result)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(result.model).font(.body.weight(.medium))
@@ -243,7 +277,10 @@ struct AnalysisView: View {
             Text("课程成绩").font(.title3.weight(.semibold))
             let grades = model.selectedData?.grades ?? []
             if !grades.isEmpty && !model.offline {
-                Button(role: .destructive) { deleteTermID = model.selectedTermID } label: {
+                Button(role: .destructive) {
+                    guard !gradeDetail.isPresenting, reportRoute == nil else { return }
+                    deleteTermID = model.selectedTermID
+                } label: {
                     Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
                 }
                 .disabled(model.deleting || model.refreshing || model.analyzing)
@@ -254,7 +291,7 @@ struct AnalysisView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(grades) { grade in
-                        Button { selectedGrade = grade } label: { gradeRow(grade) }
+                        Button { openGradeDetail(grade) } label: { gradeRow(grade) }
                             .buttonStyle(.plain)
                         if grade.id != grades.last?.id { Divider().padding(.leading, 14) }
                     }

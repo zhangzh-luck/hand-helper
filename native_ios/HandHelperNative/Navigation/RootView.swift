@@ -7,6 +7,7 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var timetableDetail = TimetableCourseDetailCoordinator()
+    @StateObject private var gradeDetail = GradeDetailCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
 
@@ -27,10 +28,12 @@ struct RootView: View {
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
-                                   timetableDetail: timetableDetail)
+                                   timetableDetail: timetableDetail, gradeDetail: gradeDetail)
                     .ignoresSafeArea()
-                    .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting)
-                    .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting)
+                    .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
+                                      !gradeDetail.isPresenting)
+                    .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
+                                         gradeDetail.isPresenting)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -49,27 +52,41 @@ struct RootView: View {
             if state.entry == .main {
                 TimetableCourseDetailOverlay(detail: timetableDetail, reduceMotion: reduceMotion)
                     .zIndex(2)
+                GradeDetailOverlay(detail: gradeDetail, reduceMotion: reduceMotion)
+                    .zIndex(3)
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
             clearAvatarPreview()
             timetableDetail.clear()
+            gradeDetail.clear()
         }
         .onChange(of: state.selectedTab) { _, tab in
             if tab != .today { clearAvatarPreview() }
             if tab != .timetable { timetableDetail.clear() }
+            if tab != .analysis { gradeDetail.clear() }
         }
         .onChange(of: state.entry) { _, entry in
             if entry != .main {
                 clearAvatarPreview()
                 timetableDetail.clear()
+                gradeDetail.clear()
             }
         }
         .onChange(of: timetableDetail.isPresenting) { _, presenting in
             if presenting { clearAvatarPreview() }
         }
+        .onChange(of: gradeDetail.isPresenting) { _, presenting in
+            if presenting {
+                clearAvatarPreview()
+                timetableDetail.clear()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { timetableDetail.clear() }
+            if phase != .active {
+                timetableDetail.clear()
+                gradeDetail.clear()
+            }
         }
     }
 
@@ -77,7 +94,7 @@ struct RootView: View {
         guard state.entry == .main, state.selectedTab == .today,
               state.canAccessPrivateData,
               route.revision == state.authenticationRevision,
-              !timetableDetail.isPresenting else { return }
+               !timetableDetail.isPresenting, !gradeDetail.isPresenting else { return }
         avatarPreviewVisible = false
         avatarPreview = route
     }
@@ -121,10 +138,11 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
     @ObservedObject var state: AppState
     let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
     let timetableDetail: TimetableCourseDetailCoordinator
+    let gradeDetail: GradeDetailCoordinator
 
     func makeUIViewController(context: Context) -> NativeTabController {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
-                                             timetableDetail: timetableDetail)
+                                             timetableDetail: timetableDetail, gradeDetail: gradeDetail)
         controller.selectedTabDidChange = { [weak state] tab in state?.selectedTab = tab }
         return controller
     }
@@ -139,14 +157,17 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var detailPresented = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
-         timetableDetail: TimetableCourseDetailCoordinator? = nil) {
+         timetableDetail: TimetableCourseDetailCoordinator? = nil,
+         gradeDetail: GradeDetailCoordinator? = nil) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
             let page: AnyView
             switch tab {
             case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview))
             case .settings: page = AnyView(SettingsView(state: state))
-            case .analysis: page = AnyView(AnalysisView(state: state))
+            case .analysis: page = AnyView(AnalysisView(state: state,
+                gradeDetail: gradeDetail ?? GradeDetailCoordinator(),
+                timetableDetail: timetableDetail ?? TimetableCourseDetailCoordinator()))
             case .timetable: page = AnyView(TimetableView(state: state,
                 detail: timetableDetail ?? TimetableCourseDetailCoordinator()))
             }
