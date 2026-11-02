@@ -4,6 +4,7 @@ import SwiftUI
 struct TodayView: View {
     @ObservedObject private var state: AppState
     private let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
+    private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TodayViewModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -15,9 +16,11 @@ struct TodayView: View {
     @State private var localError: String?
     @State private var appliedCourseInvalidationSequence: Int?
 
-    init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void) {
+    init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
+         deleteConfirmation: DestructiveConfirmationCoordinator) {
         self.state = state
         self.onAvatarPreview = onAvatarPreview
+        self.deleteConfirmation = deleteConfirmation
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
@@ -167,20 +170,6 @@ struct TodayView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .confirmationDialog("删除“\(pendingDelete?.schedule.title ?? "")”？", isPresented: Binding(
-            get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }
-        )) {
-            Button("删除安排", role: .destructive) {
-                if let pendingDelete {
-                    do {
-                        _ = try state.requireCurrentAccount(revision: pendingDelete.revision)
-                        try model.deleteSchedule(id: pendingDelete.schedule.id)
-                    }
-                    catch { localError = error.localizedDescription }
-                }
-                pendingDelete = nil
-            }
-        } message: { Text("删除后无法恢复这项自定义安排。") }
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
@@ -194,7 +183,24 @@ struct TodayView: View {
                          },
                          onDelete: {
                              guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
-                             pendingDelete = PendingScheduleDelete(schedule: schedule, revision: revision)
+                             let pending = PendingScheduleDelete(schedule: schedule, revision: revision)
+                             pendingDelete = pending
+                             if !deleteConfirmation.present(.schedule, confirm: {
+                                 guard state.selectedTab == .today,
+                                       pendingDelete?.schedule.id == pending.schedule.id,
+                                       pendingDelete?.revision == pending.revision else { return }
+                                 pendingDelete = nil
+                                 do {
+                                     _ = try state.requireCurrentAccount(revision: pending.revision)
+                                     try model.deleteSchedule(id: pending.schedule.id)
+                                 } catch { localError = error.localizedDescription }
+                             }, cancel: {
+                                 if pendingDelete?.schedule.id == pending.schedule.id {
+                                     pendingDelete = nil
+                                 }
+                             }) {
+                                 pendingDelete = nil
+                             }
                          })
     }
 

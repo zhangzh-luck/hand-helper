@@ -8,6 +8,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var timetableDetail = TimetableCourseDetailCoordinator()
     @StateObject private var gradeDetail = GradeDetailCoordinator()
+    @StateObject private var deleteConfirmation = DestructiveConfirmationCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
 
@@ -28,12 +29,13 @@ struct RootView: View {
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
-                                   timetableDetail: timetableDetail, gradeDetail: gradeDetail)
+                                   timetableDetail: timetableDetail, gradeDetail: gradeDetail,
+                                   deleteConfirmation: deleteConfirmation)
                     .ignoresSafeArea()
                     .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
-                                      !gradeDetail.isPresenting)
+                                      !gradeDetail.isPresenting && !deleteConfirmation.isPresenting)
                     .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
-                                         gradeDetail.isPresenting)
+                                         gradeDetail.isPresenting || deleteConfirmation.isPresenting)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -43,6 +45,8 @@ struct RootView: View {
                                         isVisible: avatarPreviewVisible,
                                         onClose: closeAvatarPreview)
                     .zIndex(1)
+                    .allowsHitTesting(!deleteConfirmation.isPresenting)
+                    .accessibilityHidden(deleteConfirmation.isPresenting)
                     .onAppear {
                         withAnimation(.easeOut(duration: 0.22)) {
                             avatarPreviewVisible = true
@@ -50,27 +54,38 @@ struct RootView: View {
                     }
             }
             if state.entry == .main {
-                TimetableCourseDetailOverlay(detail: timetableDetail, reduceMotion: reduceMotion)
+                TimetableCourseDetailOverlay(detail: timetableDetail,
+                                             confirmation: deleteConfirmation,
+                                             reduceMotion: reduceMotion)
                     .zIndex(2)
+                    .allowsHitTesting(!deleteConfirmation.isPresenting)
+                    .accessibilityHidden(deleteConfirmation.isPresenting)
                 GradeDetailOverlay(detail: gradeDetail, reduceMotion: reduceMotion)
                     .zIndex(3)
+                    .allowsHitTesting(!deleteConfirmation.isPresenting)
+                    .accessibilityHidden(deleteConfirmation.isPresenting)
+                DestructiveConfirmationDialog(confirmation: deleteConfirmation)
+                    .zIndex(4)
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
             clearAvatarPreview()
             timetableDetail.clear()
             gradeDetail.clear()
+            deleteConfirmation.clear()
         }
         .onChange(of: state.selectedTab) { _, tab in
             if tab != .today { clearAvatarPreview() }
             if tab != .timetable { timetableDetail.clear() }
             if tab != .analysis { gradeDetail.clear() }
+            deleteConfirmation.clear()
         }
         .onChange(of: state.entry) { _, entry in
             if entry != .main {
                 clearAvatarPreview()
                 timetableDetail.clear()
                 gradeDetail.clear()
+                deleteConfirmation.clear()
             }
         }
         .onChange(of: timetableDetail.isPresenting) { _, presenting in
@@ -139,10 +154,12 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
     let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
     let timetableDetail: TimetableCourseDetailCoordinator
     let gradeDetail: GradeDetailCoordinator
+    let deleteConfirmation: DestructiveConfirmationCoordinator
 
     func makeUIViewController(context: Context) -> NativeTabController {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
-                                             timetableDetail: timetableDetail, gradeDetail: gradeDetail)
+                                             timetableDetail: timetableDetail, gradeDetail: gradeDetail,
+                                             deleteConfirmation: deleteConfirmation)
         controller.selectedTabDidChange = { [weak state] tab in state?.selectedTab = tab }
         return controller
     }
@@ -158,18 +175,22 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
-         gradeDetail: GradeDetailCoordinator? = nil) {
+         gradeDetail: GradeDetailCoordinator? = nil,
+         deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
         super.init(nibName: nil, bundle: nil)
         viewControllers = AppTab.allCases.map { tab in
             let page: AnyView
             switch tab {
-            case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview))
+            case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview,
+                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .settings: page = AnyView(SettingsView(state: state))
             case .analysis: page = AnyView(AnalysisView(state: state,
                 gradeDetail: gradeDetail ?? GradeDetailCoordinator(),
-                timetableDetail: timetableDetail ?? TimetableCourseDetailCoordinator()))
+                timetableDetail: timetableDetail ?? TimetableCourseDetailCoordinator(),
+                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .timetable: page = AnyView(TimetableView(state: state,
-                detail: timetableDetail ?? TimetableCourseDetailCoordinator()))
+                detail: timetableDetail ?? TimetableCourseDetailCoordinator(),
+                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             }
             let host = UIHostingController(rootView: page)
             host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)

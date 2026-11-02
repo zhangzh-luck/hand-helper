@@ -19,6 +19,7 @@ enum TimetableWallpaperStyle {
 struct TimetableView: View {
     @ObservedObject private var state: AppState
     @ObservedObject private var detail: TimetableCourseDetailCoordinator
+    private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TimetableViewModel
     @StateObject private var emptyCellSelection = TimetableEmptyCellSelectionCoordinator()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -39,9 +40,11 @@ struct TimetableView: View {
     @State private var wallpaperGeneration = 0
     @State private var wallpaperError: String?
 
-    init(state: AppState, detail: TimetableCourseDetailCoordinator? = nil) {
+    init(state: AppState, detail: TimetableCourseDetailCoordinator? = nil,
+         deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
         self.state = state
         self.detail = detail ?? TimetableCourseDetailCoordinator()
+        self.deleteConfirmation = deleteConfirmation ?? DestructiveConfirmationCoordinator()
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TimetableViewModel(state: state, repository: repository))
@@ -188,22 +191,6 @@ struct TimetableView: View {
                     try model.updateManualCourse(draft, for: route.request)
                 }
             }
-            .confirmationDialog("删除“\(deletingManualCourse?.rule.name ?? "手动课程")”？",
-                                isPresented: Binding(get: { deletingManualCourse != nil },
-                                                     set: { if !$0 { deletingManualCourse = nil } })) {
-                Button("删除课程", role: .destructive) {
-                    guard let route = deletingManualCourse else { return }
-                    do {
-                        try model.deleteManualCourse(for: route.request)
-                    } catch {
-                        manualCourseError = error.localizedDescription
-                    }
-                    deletingManualCourse = nil
-                }
-                Button("取消", role: .cancel) { deletingManualCourse = nil }
-            } message: {
-                Text("删除后这门手动课程将从本机课程表移除。")
-            }
             .alert("无法操作课程", isPresented: Binding(get: { manualCourseError != nil },
                                                 set: { if !$0 { manualCourseError = nil } })) {
                 Button("好", role: .cancel) { manualCourseError = nil }
@@ -221,6 +208,7 @@ struct TimetableView: View {
                     editingManualCourse = nil
                     deletingManualCourse = nil
                     pendingListManualAction = nil
+                    clearManualConfirmation()
                 }
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
             }
@@ -242,6 +230,7 @@ struct TimetableView: View {
                 editingManualCourse = nil
                 deletingManualCourse = nil
                 pendingListManualAction = nil
+                clearManualConfirmation()
                 manualCourseError = nil
                 detail.clear()
                 showingUnplaced = false
@@ -261,6 +250,7 @@ struct TimetableView: View {
                 editingManualCourse = nil
                 deletingManualCourse = nil
                 pendingListManualAction = nil
+                clearManualConfirmation()
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -271,6 +261,7 @@ struct TimetableView: View {
                 editingManualCourse = nil
                 deletingManualCourse = nil
                 pendingListManualAction = nil
+                clearManualConfirmation()
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
@@ -281,6 +272,7 @@ struct TimetableView: View {
                 editingManualCourse = nil
                 deletingManualCourse = nil
                 pendingListManualAction = nil
+                clearManualConfirmation()
             }
             .onChange(of: detail.readyAction?.id) { _, actionID in
                 guard actionID != nil, let request = detail.takeReadyAction() else { return }
@@ -712,8 +704,23 @@ struct TimetableView: View {
         let route = ManualCourseOperationRoute(rule: rule, request: request)
         switch request.action {
         case .edit: editingManualCourse = route
-        case .delete: deletingManualCourse = route
+        case .delete:
+            deletingManualCourse = route
+            if !deleteConfirmation.present(.manualCourse, confirm: {
+                guard deletingManualCourse?.id == route.id else { return }
+                deletingManualCourse = nil
+                do { try model.deleteManualCourse(for: route.request) }
+                catch { manualCourseError = error.localizedDescription }
+            }, cancel: {
+                if deletingManualCourse?.id == route.id { deletingManualCourse = nil }
+            }) {
+                deletingManualCourse = nil
+            }
         }
+    }
+
+    private func clearManualConfirmation() {
+        if deleteConfirmation.request?.kind == .manualCourse { deleteConfirmation.clear() }
     }
 
     private func reason(_ reason: UnplacedCourseReason) -> String {

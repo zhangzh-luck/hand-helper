@@ -4,6 +4,7 @@ import UIKit
 /// The root overlay sits above NativeTabContainer, including its UIKit tab bar.
 struct TimetableCourseDetailOverlay: View {
     @ObservedObject var detail: TimetableCourseDetailCoordinator
+    let confirmation: DestructiveConfirmationCoordinator
     let reduceMotion: Bool
 
     var body: some View {
@@ -13,7 +14,7 @@ struct TimetableCourseDetailOverlay: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .allowsHitTesting(false)
                 if let route = detail.route {
-                    TimetableDetailSurface(detail: detail, route: route,
+                    TimetableDetailSurface(detail: detail, confirmation: confirmation, route: route,
                                            bounds: CGRect(origin: .zero, size: geometry.size),
                                            safeArea: detail.windowSafeArea,
                                            reduceMotion: reduceMotion)
@@ -23,15 +24,6 @@ struct TimetableCourseDetailOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(detail.isPresenting)
-        .confirmationDialog("删除“\(detail.route?.course.name ?? "手动课程")”？", isPresented: Binding(
-            get: { detail.pendingDelete != nil },
-            set: { if !$0 { detail.cancelDelete() } }
-        )) {
-            Button("删除课程", role: .destructive) { _ = detail.confirmDelete() }
-            Button("取消", role: .cancel) { detail.cancelDelete() }
-        } message: {
-            Text("删除后这门手动课程将从本机课程表移除。")
-        }
         .alert("无法操作课程", isPresented: Binding(
             get: { detail.deletionError != nil },
             set: { if !$0 { detail.dismissDeletionError() } }
@@ -52,6 +44,7 @@ private struct TimetableDetailHeightKey: PreferenceKey {
 
 private struct TimetableDetailSurface: View {
     @ObservedObject var detail: TimetableCourseDetailCoordinator
+    let confirmation: DestructiveConfirmationCoordinator
     let route: TimetableDetailRoute
     let bounds: CGRect
     let safeArea: UIEdgeInsets
@@ -124,7 +117,7 @@ private struct TimetableDetailSurface: View {
                                            focusTitle: focusTitle, onClose: { close() },
                                            glassHeader: surfaceKind == .glass,
                                            onAction: route.editableManualCourse == nil ? nil : { action in
-                                               if action == .delete { _ = detail.requestDelete(id: route.id) }
+                                                if action == .delete { requestDelete() }
                                                else { close(action: action) }
                                            })
                         .frame(width: destination.width)
@@ -199,6 +192,18 @@ private struct TimetableDetailSurface: View {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
             detail.finish(id: route.id)
             UIAccessibility.post(notification: .layoutChanged, argument: nil)
+        }
+    }
+
+    private func requestDelete() {
+        guard detail.requestDelete(id: route.id), let pending = detail.pendingDelete else { return }
+        if !confirmation.present(.manualCourse, confirm: {
+            guard detail.pendingDelete?.id == pending.id else { return }
+            _ = detail.confirmDelete()
+        }, cancel: {
+            if detail.pendingDelete?.id == pending.id { detail.cancelDelete() }
+        }) {
+            detail.cancelDelete()
         }
     }
 }

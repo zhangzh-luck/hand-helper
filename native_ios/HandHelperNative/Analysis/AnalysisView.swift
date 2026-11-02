@@ -7,6 +7,7 @@ struct AnalysisView: View {
     @StateObject private var model: AnalysisViewModel
     @ObservedObject private var gradeDetail: GradeDetailCoordinator
     private let timetableDetail: TimetableCourseDetailCoordinator
+    private let deleteConfirmation: DestructiveConfirmationCoordinator
     @State private var reportRoute: AnalysisReportRoute?
     @State private var historyOpen = false
     @State private var deleteTermID: Int?
@@ -16,10 +17,12 @@ struct AnalysisView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     init(state: AppState, gradeDetail: GradeDetailCoordinator,
-         timetableDetail: TimetableCourseDetailCoordinator) {
+         timetableDetail: TimetableCourseDetailCoordinator,
+         deleteConfirmation: DestructiveConfirmationCoordinator) {
         self.state = state
         self.gradeDetail = gradeDetail
         self.timetableDetail = timetableDetail
+        self.deleteConfirmation = deleteConfirmation
         _model = StateObject(wrappedValue: AnalysisViewModel(state: state))
     }
 
@@ -82,6 +85,7 @@ struct AnalysisView: View {
             }
             .onChange(of: state.authenticationRevision) { _, _ in
                 gradeDetail.clear()
+                deleteTermID = nil
                 wallpaperImage = nil
                 model.authenticationDidChange()
                 if state.selectedTab == .analysis { loadWallpaper() }
@@ -92,25 +96,20 @@ struct AnalysisView: View {
                 reportRoute = nil
                 historyOpen = false
                 deleteTermID = nil
+                if deleteConfirmation.request?.kind == .grades { deleteConfirmation.clear() }
             }
-            .onChange(of: model.snapshot) { _, _ in validateGradeDetail() }
+            .onChange(of: model.snapshot) { _, _ in
+                validateGradeDetail()
+                if deleteTermID != nil, model.selectedData?.grades.isEmpty != false {
+                    self.deleteTermID = nil
+                    if deleteConfirmation.request?.kind == .grades { deleteConfirmation.clear() }
+                }
+            }
             .sheet(item: $reportRoute) { route in
                 GradeAIReportView(analysis: route.analysis) {
                     reportRoute = nil
                     model.generateAnalysis(force: true) { showReport($0) }
                 }
-            }
-            .confirmationDialog("删除“\(model.selectedTerm?.displayName ?? "本学期")”的成绩？",
-                                isPresented: Binding(get: { deleteTermID != nil },
-                                                     set: { if !$0 { deleteTermID = nil } })) {
-                Button("确认删除", role: .destructive) {
-                    guard let id = deleteTermID else { return }
-                    deleteTermID = nil
-                    model.deleteSelectedTerm(id)
-                }
-                Button("取消", role: .cancel) { deleteTermID = nil }
-            } message: {
-                Text("将删除本学期已导入的全部成绩和对应的 AI 分析缓存。此操作无法撤销，其他学期不受影响。")
             }
         }
     }
@@ -148,6 +147,29 @@ struct AnalysisView: View {
         guard !gradeDetail.isPresenting, deleteTermID == nil,
               state.selectedTab == .analysis, state.canAccessPrivateData else { return }
         reportRoute = AnalysisReportRoute(analysis: analysis)
+    }
+
+    private func confirmGradeDeletion() {
+        guard !gradeDetail.isPresenting, reportRoute == nil, !model.deleting,
+              let termID = model.selectedTermID,
+              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision)
+        else { return }
+        let revision = state.authenticationRevision
+        deleteTermID = termID
+        if !deleteConfirmation.present(.grades, confirm: {
+            guard deleteTermID == termID,
+                  model.selectedTermID == termID,
+                  (try? state.requireCurrentAccount(revision: revision)) == owner else {
+                deleteTermID = nil
+                return
+            }
+            deleteTermID = nil
+            model.deleteSelectedTerm(termID)
+        }, cancel: {
+            if deleteTermID == termID { deleteTermID = nil }
+        }) {
+            deleteTermID = nil
+        }
     }
 
     private var termPicker: some View {
@@ -277,10 +299,7 @@ struct AnalysisView: View {
             Text("课程成绩").font(.title3.weight(.semibold))
             let grades = model.selectedData?.grades ?? []
             if !grades.isEmpty && !model.offline {
-                Button(role: .destructive) {
-                    guard !gradeDetail.isPresenting, reportRoute == nil else { return }
-                    deleteTermID = model.selectedTermID
-                } label: {
+                Button(role: .destructive) { confirmGradeDeletion() } label: {
                     Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
                 }
                 .disabled(model.deleting || model.refreshing || model.analyzing)
