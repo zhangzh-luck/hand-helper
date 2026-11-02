@@ -18,60 +18,53 @@ final class DestructiveConfirmationTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelNeverCallsDeleteAndReturnsToIdle() throws {
+    func testCancelNeverCallsDelete() throws {
         let confirmation = DestructiveConfirmationCoordinator()
         var deletes = 0
         var cancels = 0
         XCTAssertTrue(confirmation.present(.schedule, confirm: { deletes += 1 },
                                             cancel: { cancels += 1 }))
         let id = try XCTUnwrap(confirmation.request?.id)
-        XCTAssertTrue(confirmation.beginClose(id: id, confirmed: false))
-        confirmation.hide(id: id)
-        XCTAssertTrue(confirmation.isPresenting, "关闭动画期间继续阻断底层触摸")
-        confirmation.finish(id: id)
+        confirmation.setAlertVisible(false)
+        XCTAssertTrue(confirmation.isPresenting, "系统关闭 Alert 时仍需保留按钮回调的目标")
+        confirmation.cancel(id: id)
         XCTAssertEqual(deletes, 0)
         XCTAssertEqual(cancels, 1)
-        XCTAssertEqual(confirmation.phase, .idle)
         XCTAssertFalse(confirmation.isPresenting)
+        XCTAssertFalse(confirmation.alertVisible)
     }
 
     @MainActor
-    func testConfirmationRunsExactlyOnceAfterClosing() throws {
+    func testConfirmationRunsExactlyOnce() throws {
         for kind in [DestructiveConfirmationKind.grades, .schedule, .manualCourse] {
             let confirmation = DestructiveConfirmationCoordinator()
             var deletes = 0
             XCTAssertTrue(confirmation.present(kind, confirm: { deletes += 1 }, cancel: {}))
             let id = try XCTUnwrap(confirmation.request?.id)
             XCTAssertFalse(confirmation.present(kind, confirm: { deletes += 1 }, cancel: {}))
-            XCTAssertTrue(confirmation.beginClose(id: id, confirmed: true))
-            XCTAssertFalse(confirmation.beginClose(id: id, confirmed: true))
-            confirmation.hide(id: id)
-            XCTAssertEqual(deletes, 0)
-            XCTAssertTrue(confirmation.isExecuting)
-            confirmation.finish(id: id)
-            confirmation.finish(id: id)
+            confirmation.setAlertVisible(false)
+            confirmation.confirm(id: id)
+            confirmation.confirm(id: id)
             XCTAssertEqual(deletes, 1)
             XCTAssertFalse(confirmation.isPresenting)
         }
     }
 
     @MainActor
-    func testInvalidationCancelsPendingConfirmationAndOldCompletion() throws {
+    func testInvalidationCancelsPendingConfirmationAndOldAction() throws {
         let confirmation = DestructiveConfirmationCoordinator()
         var deletes = 0
         var cancels = 0
         XCTAssertTrue(confirmation.present(.grades, confirm: { deletes += 1 },
                                             cancel: { cancels += 1 }))
         let oldID = try XCTUnwrap(confirmation.request?.id)
-        XCTAssertTrue(confirmation.beginClose(id: oldID, confirmed: true))
-        confirmation.hide(id: oldID)
         confirmation.clear() // Account, term, or target became invalid.
-        confirmation.finish(id: oldID)
+        confirmation.confirm(id: oldID)
         XCTAssertEqual(deletes, 0)
         XCTAssertEqual(cancels, 1)
         XCTAssertTrue(confirmation.present(.manualCourse, confirm: { deletes += 1 }, cancel: {}))
         let newID = try XCTUnwrap(confirmation.request?.id)
-        confirmation.finish(id: oldID)
+        confirmation.confirm(id: oldID)
         XCTAssertEqual(confirmation.request?.id, newID)
     }
 
@@ -92,22 +85,21 @@ final class DestructiveConfirmationTests: XCTestCase {
         XCTAssertTrue(confirmation.present(.manualCourse,
             confirm: { _ = detail.confirmDelete() }, cancel: { detail.cancelDelete() }))
         let confirmID = try XCTUnwrap(confirmation.request?.id)
-        XCTAssertTrue(confirmation.beginClose(id: confirmID, confirmed: false))
-        confirmation.hide(id: confirmID)
-        confirmation.finish(id: confirmID)
+        confirmation.cancel(id: confirmID)
         XCTAssertNil(detail.pendingDelete)
         XCTAssertEqual(detail.route?.id, detailID)
         XCTAssertNil(detail.readyAction)
     }
 
-    func testSurfaceFallbackPolicy() {
-        XCTAssertEqual(DestructiveConfirmationSurface.current(supportsGlass: true,
-            reduceTransparency: false, increasedContrast: false), .glass)
-        XCTAssertEqual(DestructiveConfirmationSurface.current(supportsGlass: false,
-            reduceTransparency: false, increasedContrast: false), .material)
-        XCTAssertEqual(DestructiveConfirmationSurface.current(supportsGlass: true,
-            reduceTransparency: true, increasedContrast: false), .opaque)
-        XCTAssertEqual(DestructiveConfirmationSurface.current(supportsGlass: true,
-            reduceTransparency: false, increasedContrast: true), .opaque)
+    @MainActor
+    func testAlertBindingDoesNotLoseRequestBeforeButtonAction() throws {
+        let confirmation = DestructiveConfirmationCoordinator()
+        var deletes = 0
+        XCTAssertTrue(confirmation.present(.grades, confirm: { deletes += 1 }, cancel: {}))
+        let id = try XCTUnwrap(confirmation.request?.id)
+        confirmation.setAlertVisible(false)
+        XCTAssertEqual(confirmation.request?.id, id)
+        confirmation.confirm(id: id)
+        XCTAssertEqual(deletes, 1)
     }
 }

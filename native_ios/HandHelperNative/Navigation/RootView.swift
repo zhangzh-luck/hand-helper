@@ -64,9 +64,20 @@ struct RootView: View {
                     .zIndex(3)
                     .allowsHitTesting(!deleteConfirmation.isPresenting)
                     .accessibilityHidden(deleteConfirmation.isPresenting)
-                DestructiveConfirmationDialog(confirmation: deleteConfirmation)
-                    .zIndex(4)
             }
+        }
+        .alert(deleteConfirmation.request?.kind.title ?? "",
+               isPresented: Binding(get: { deleteConfirmation.alertVisible },
+                                    set: { deleteConfirmation.setAlertVisible($0) }),
+               presenting: deleteConfirmation.request) { request in
+            Button(request.kind.deleteTitle, role: .destructive) {
+                deleteConfirmation.confirm(id: request.id)
+            }
+            Button("取消", role: .cancel) {
+                deleteConfirmation.cancel(id: request.id)
+            }
+        } message: { request in
+            Text(request.kind.message)
         }
         .onChange(of: state.authenticationRevision) { _, _ in
             clearAvatarPreview()
