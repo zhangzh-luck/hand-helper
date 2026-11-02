@@ -152,7 +152,7 @@ struct AnalysisView: View {
                 metric("已获学分", summary?.earnedCredits.map { String($0) } ?? "—", symbol: "graduationcap")
                 metric("平均成绩", summary?.averageScore.map { String(format: "%.1f", $0) } ?? "—", symbol: "number")
                 metric("绩点", summary?.gpa.map { String(format: "%.2f", $0) } ?? "—", symbol: "chart.bar")
-                metric("不及格", summary?.failedCourses.map { String($0) } ?? "—", symbol: "exclamationmark.circle")
+                metric("不及格", summary.map { String($0.failedCourses) } ?? "—", symbol: "exclamationmark.circle")
             }
             if let note = summary?.gpaNote { Text(note).font(.footnote).foregroundStyle(.secondary) }
         }
