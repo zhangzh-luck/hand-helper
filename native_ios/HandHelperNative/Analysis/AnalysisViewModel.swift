@@ -18,7 +18,7 @@ final class AnalysisViewModel: ObservableObject {
     private let repository: any AnalysisRepositoryProtocol
     private var owner: String?
     private var generation = 0
-    private var loadedOnline = false
+    private var attemptedOnline = false
     private var refreshTask: Task<Void, Never>?
 
     init(state: AppState, repository: (any AnalysisRepositoryProtocol)? = nil) {
@@ -47,7 +47,7 @@ final class AnalysisViewModel: ObservableObject {
                 errorMessage = "本机成绩缓存无法读取：\(error.localizedDescription)"
             }
         }
-        if !loadedOnline && refreshTask == nil { refresh() }
+        if !attemptedOnline && refreshTask == nil { refresh() }
     }
 
     func selectTerm(_ id: Int) {
@@ -61,6 +61,7 @@ final class AnalysisViewModel: ObservableObject {
         guard !refreshing, state.selectedTab == .analysis,
               let currentOwner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else { return }
         let revision = state.authenticationRevision
+        attemptedOnline = true
         generation += 1
         let token = generation
         refreshing = true
@@ -71,7 +72,6 @@ final class AnalysisViewModel: ObservableObject {
                 let fresh = try await repository.refresh(owner: currentOwner, revision: revision)
                 guard isCurrent(owner: currentOwner, revision: revision, token: token) else { return }
                 snapshot = fresh
-                loadedOnline = true
                 offline = false
                 errorMessage = nil
                 selectDefaultTerm()
@@ -160,7 +160,7 @@ final class AnalysisViewModel: ObservableObject {
         loading = false
         refreshing = false
         offline = false
-        loadedOnline = false
+        attemptedOnline = false
         errorMessage = nil
         actionError = nil
         analyzing = false

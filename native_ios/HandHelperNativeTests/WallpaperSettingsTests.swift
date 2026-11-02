@@ -188,6 +188,41 @@ final class WallpaperSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testAnalysisWallpaperIsIndependentAndPublishesOnlyItsVersion() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = WallpaperTestSession()
+        session.save(cookie: "session=fixture")
+        let suite = "analysis-wallpaper-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let state = AppState(api: MockAPIClient(), sessionStore: session,
+                             authentication: WallpaperTestAuthentication(), preferences: preferences)
+        await state.restoreSession()
+        let today = WallpaperStore(session: session, account: state.verifiedAccount,
+                                   kind: .today, directory: folder)
+        let timetable = WallpaperStore(session: session, account: state.verifiedAccount,
+                                       kind: .timetable, directory: folder)
+        let analysis = WallpaperStore(session: session, account: state.verifiedAccount,
+                                      kind: .analysis, directory: folder)
+        try today.save(Data([1]))
+        try timetable.save(Data([2]))
+        let model = WallpaperSettingsModel(state: state, revision: state.authenticationRevision,
+                                           store: analysis)
+        let image = sampleImage()
+        await model.replace { image }
+        XCTAssertNotNil(try analysis.load())
+        XCTAssertEqual(state.analysisWallpaperVersion, 1)
+        XCTAssertEqual(state.wallpaperVersion, 0)
+        XCTAssertEqual(state.timetableWallpaperVersion, 0)
+        model.restoreDefault()
+        XCTAssertNil(try analysis.load())
+        XCTAssertEqual(try today.load(), Data([1]))
+        XCTAssertEqual(try timetable.load(), Data([2]))
+        XCTAssertEqual(state.analysisWallpaperVersion, 2)
+    }
+
+    @MainActor
     private func sampleImage() -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

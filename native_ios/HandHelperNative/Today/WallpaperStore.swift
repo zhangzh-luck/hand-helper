@@ -4,6 +4,7 @@ import Foundation
 enum WallpaperKind: Hashable {
     case today
     case timetable
+    case analysis
 }
 
 @MainActor
@@ -25,7 +26,12 @@ final class WallpaperStore {
     }
 
     private var deviceFile: URL {
-        let name = kind == .today ? "today_wallpaper_device_v1.image" : "timetable_wallpaper_device_v1.image"
+        let name: String
+        switch kind {
+        case .today: name = "today_wallpaper_device_v1.image"
+        case .timetable: name = "timetable_wallpaper_device_v1.image"
+        case .analysis: name = "analysis_wallpaper_device_v1.image"
+        }
         return directory.appendingPathComponent(name)
     }
 

@@ -52,7 +52,7 @@ final class WallpaperSettingsModel: ObservableObject {
             guard generation == selectionGeneration, !Task.isCancelled else { return }
             _ = try state.requireCurrentAccount(revision: revision)
             let storedData: Data
-            if kind == .timetable {
+            if kind == .timetable || kind == .analysis {
                 storedData = try await TimetableWallpaperImage.prepare(data)
             } else {
                 guard UIImage(data: data) != nil else { throw WallpaperSelectionError.unreadableImage }
@@ -100,6 +100,7 @@ final class WallpaperSettingsModel: ObservableObject {
         switch kind {
         case .today: try state.wallpaperDidChange(revision: revision)
         case .timetable: try state.timetableWallpaperDidChange(revision: revision)
+        case .analysis: try state.analysisWallpaperDidChange(revision: revision)
         }
     }
 }
@@ -134,7 +135,7 @@ struct WallpaperSettingsView: View {
                     }
                     .frame(height: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .accessibilityLabel(kind == .today ? "当前今日页壁纸预览" : "当前课程表壁纸预览")
+                    .accessibilityLabel("当前\(title)预览")
                 } else {
                     Label("正在使用默认背景", systemImage: "photo")
                         .foregroundStyle(.secondary)
@@ -161,7 +162,7 @@ struct WallpaperSettingsView: View {
                 Text("壁纸只保存在此设备，不会上传服务器。")
             }
         }
-        .navigationTitle(kind == .today ? "今日页壁纸" : "课程表壁纸")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task { model.load() }
         .onChange(of: selectedPhoto) { _, item in
@@ -184,7 +185,7 @@ struct WallpaperSettingsView: View {
         .confirmationDialog("恢复默认背景？", isPresented: $showResetConfirmation) {
             Button("恢复默认背景", role: .destructive) { model.restoreDefault() }
         } message: {
-            Text(kind == .today ? "今日页将使用系统背景。" : "课程表将使用系统背景。")
+            Text("\(kind == .today ? "今日页" : kind == .timetable ? "课程表" : "分析页")将使用系统背景。")
         }
         .alert("壁纸操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -193,6 +194,14 @@ struct WallpaperSettingsView: View {
             Button("确定", role: .cancel) { model.clearError() }
         } message: {
             Text(model.errorMessage ?? "")
+        }
+    }
+
+    private var title: String {
+        switch kind {
+        case .today: "今日页壁纸"
+        case .timetable: "课程表壁纸"
+        case .analysis: "分析页壁纸"
         }
     }
 }

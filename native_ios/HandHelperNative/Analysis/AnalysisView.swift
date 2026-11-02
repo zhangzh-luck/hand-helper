@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct AnalysisView: View {
@@ -8,6 +9,10 @@ struct AnalysisView: View {
     @State private var reportRoute: AnalysisReportRoute?
     @State private var historyOpen = false
     @State private var deleteTermID: Int?
+    @State private var wallpaperImage: UIImage?
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
 
     init(state: AppState) {
         self.state = state
@@ -16,8 +21,23 @@ struct AnalysisView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
+            ZStack {
+                if let wallpaperImage, !reduceTransparency, contrast != .increased {
+                    GeometryReader { proxy in
+                        Image(uiImage: wallpaperImage).resizable().scaledToFill()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                    }
+                    .ignoresSafeArea()
+                    Color(uiColor: colorScheme == .dark ? .black : .systemBackground)
+                        .opacity(colorScheme == .dark ? 0.34 : 0.24)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                } else {
+                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 20) {
                     termPicker
                     if model.offline, model.snapshot != nil {
                         Label("当前离线，显示本机缓存的成绩", systemImage: "wifi.slash")
@@ -39,10 +59,10 @@ struct AnalysisView: View {
                                                description: Text(model.errorMessage ?? "请检查网络后重试。"))
                         Button("重试") { model.refresh() }.frame(maxWidth: .infinity)
                     }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 32)
                 }
-                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 32)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("成绩分析")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -51,11 +71,16 @@ struct AnalysisView: View {
                         .disabled(model.refreshing || !state.canAccessPrivateData)
                 }
             }
-            .task { model.loadIfNeeded() }
+            .task { loadWallpaper(); model.loadIfNeeded() }
             .onChange(of: state.selectedTab) { _, tab in
                 if tab == .analysis { model.loadIfNeeded() }
             }
-            .onChange(of: state.authenticationRevision) { _, _ in model.authenticationDidChange() }
+            .onChange(of: state.authenticationRevision) { _, _ in
+                wallpaperImage = nil
+                model.authenticationDidChange()
+                if state.selectedTab == .analysis { loadWallpaper() }
+            }
+            .onChange(of: state.analysisWallpaperVersion) { _, _ in loadWallpaper() }
             .onChange(of: model.selectedTermID) { _, _ in
                 selectedGrade = nil
                 reportRoute = nil
@@ -82,6 +107,13 @@ struct AnalysisView: View {
                 Text("将删除本学期已导入的全部成绩和对应的 AI 分析缓存。此操作无法撤销，其他学期不受影响。")
             }
         }
+    }
+
+    private func loadWallpaper() {
+        guard state.canAccessPrivateData else { wallpaperImage = nil; return }
+        let store = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount,
+                                   kind: .analysis)
+        wallpaperImage = (try? store.load()).flatMap(UIImage.init(data:))
     }
 
     private var termPicker: some View {
