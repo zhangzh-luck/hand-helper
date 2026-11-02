@@ -32,6 +32,8 @@ struct ManualCourseDraft {
 struct ManualCourseEditorRoute: Identifiable {
     let id = UUID()
     let cell: TimetableEmptyCellSelection
+    let operationID: UUID
+    let tappedAt: TimeInterval
 }
 
 @MainActor

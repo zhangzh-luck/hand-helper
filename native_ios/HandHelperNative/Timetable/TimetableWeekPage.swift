@@ -40,7 +40,7 @@ struct TimetableWeekPage<Header: View, Grid: View>: View {
                     }
                     .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { drag in
                         if abs(drag.translation.height) > abs(drag.translation.width) {
-                            emptyCellSelection.clear()
+                            emptyCellSelection.clear(reason: "vertical_drag")
                         }
                     })
                 }
@@ -52,7 +52,7 @@ struct TimetableWeekPage<Header: View, Grid: View>: View {
         .onDisappear {
             if emptyCellSelection.selected?.week == projection.week &&
                 emptyCellSelection.selected?.termID == projection.term.id {
-                emptyCellSelection.clear()
+                emptyCellSelection.clear(reason: "week_page_disappeared")
             }
         }
     }

@@ -50,4 +50,70 @@ final class ManualCourseEditorTests: XCTestCase {
         coordinator.clear()
         XCTAssertNil(coordinator.selected)
     }
+
+    @MainActor
+    private func context(termID: Int? = 8, week: Int = 3, snapshotRevision: Int = 2,
+                         owner: String? = "user:alice", pagerBusy: Bool = false,
+                         tabActive: Bool = true, detailPresenting: Bool = false)
+        -> TimetableEmptyCellSelectionCoordinator.OpeningContext {
+        .init(tabActive: tabActive, detailPresenting: detailPresenting, pagerBusy: pagerBusy,
+              termID: termID, week: week, snapshotRevision: snapshotRevision,
+              verifiedOwner: owner)
+    }
+
+    @MainActor
+    func testPlusOpensOneRouteAndClearsSelectedPlus() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        let operationID = coordinator.selectionOperationID
+        XCTAssertNil(coordinator.open(cell, context: context(), tappedAt: 10))
+        XCTAssertNotNil(coordinator.route)
+        XCTAssertEqual(coordinator.route?.cell, cell)
+        XCTAssertEqual(coordinator.route?.operationID, operationID)
+        XCTAssertNil(coordinator.selected)
+        coordinator.clear(reason: "unrelated_page_update")
+        XCTAssertNotNil(coordinator.route)
+        XCTAssertEqual(coordinator.open(cell, context: context(), tappedAt: 11), .routeActive)
+        coordinator.dismissRoute(reason: "test")
+        XCTAssertNil(coordinator.route)
+    }
+
+    @MainActor
+    func testPagerBusyAndSnapshotRevisionRejectWithoutOpening() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        XCTAssertEqual(coordinator.open(cell, context: context(pagerBusy: true), tappedAt: 10),
+                       .pagerBusy)
+        XCTAssertNil(coordinator.route)
+        coordinator.clear(reason: "pager_busy")
+        XCTAssertEqual(coordinator.open(cell, context: context(), tappedAt: 11), .selectionChanged)
+        coordinator.select(cell)
+        XCTAssertEqual(coordinator.open(cell, context: context(snapshotRevision: 3), tappedAt: 12),
+                       .snapshotChanged)
+        coordinator.clear(reason: "snapshot_changed")
+        XCTAssertNil(coordinator.selected)
+        XCTAssertNil(coordinator.route)
+    }
+
+    @MainActor
+    func testTermAndAccountChangeRejectOldSelection() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        XCTAssertEqual(coordinator.open(cell, context: context(termID: 9), tappedAt: 10), .termChanged)
+        XCTAssertEqual(coordinator.open(cell, context: context(owner: nil), tappedAt: 11), .accountChanged)
+        XCTAssertNil(coordinator.route)
+    }
+
+    @MainActor
+    func testOldSheetDismissCallbackDoesNotClearNewSelection() {
+        let coordinator = TimetableEmptyCellSelectionCoordinator()
+        coordinator.select(cell)
+        XCTAssertNil(coordinator.open(cell, context: context(), tappedAt: 10))
+        coordinator.dismissRoute(reason: "sheet_closed")
+        coordinator.select(cell)
+        coordinator.sheetDidDismiss()
+        XCTAssertEqual(coordinator.selected, cell)
+        XCTAssertNil(coordinator.open(cell, context: context(), tappedAt: 11))
+        XCTAssertNotNil(coordinator.route)
+    }
 }

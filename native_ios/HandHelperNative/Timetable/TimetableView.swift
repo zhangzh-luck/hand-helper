@@ -30,7 +30,6 @@ struct TimetableView: View {
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
-    @State private var manualEditorRoute: ManualCourseEditorRoute?
     @State private var wallpaperImage: UIImage?
     @State private var wallpaperTask: Task<Void, Never>?
     @State private var wallpaperGeneration = 0
@@ -130,8 +129,11 @@ struct TimetableView: View {
                                                layoutScale: gridScale,
                                                reduceMotion: reduceMotion,
                                                 onTransitionStateChange: { busy in
+                                                    TimetableAddCourseDiagnostics.record(
+                                                        busy ? "pager_busy" : "pager_idle",
+                                                        operationID: emptyCellSelection.selectionOperationID)
                                                     detail.setPagerBusy(busy)
-                                                    if busy { emptyCellSelection.clear() }
+                                                    if busy { emptyCellSelection.clear(reason: "pager_busy") }
                                                 }) { projection in
                                 TimetableWeekPage(emptyCellSelection: emptyCellSelection,
                                                   projection: projection,
@@ -161,9 +163,21 @@ struct TimetableView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingUnplaced) { unplacedList }
             .sheet(isPresented: $showingConflicts) { conflictList }
-            .sheet(item: $manualEditorRoute, onDismiss: { emptyCellSelection.clear() }) { route in
+            .sheet(item: Binding(get: { emptyCellSelection.route },
+                                 set: { if $0 == nil { emptyCellSelection.dismissRoute(reason: "sheet_closed") } }),
+                   onDismiss: { emptyCellSelection.sheetDidDismiss() }) { route in
+                let _ = TimetableAddCourseDiagnostics.record("T3_sheet_content_created",
+                    operationID: route.operationID, startedAt: route.tappedAt)
                 ManualCourseEditorView(cell: route.cell, periods: model.periods) { draft in
                     try model.addManualCourse(draft, from: route.cell)
+                }
+                .onAppear {
+                    TimetableAddCourseDiagnostics.record("T4_sheet_onAppear",
+                        operationID: route.operationID, startedAt: route.tappedAt)
+                }
+                .onDisappear {
+                    TimetableAddCourseDiagnostics.record("sheet_onDisappear",
+                        operationID: route.operationID, startedAt: route.tappedAt)
                 }
             }
             .task {
@@ -171,7 +185,10 @@ struct TimetableView: View {
                 await model.updateIfNeeded()
             }
             .onChange(of: state.selectedTab) { _, tab in
-                if tab != .timetable { emptyCellSelection.clear(); manualEditorRoute = nil }
+                if tab != .timetable {
+                    emptyCellSelection.clear(reason: "tab_changed")
+                    emptyCellSelection.dismissRoute(reason: "tab_changed")
+                }
                 if tab == .timetable { Task { await model.updateIfNeeded() } }
             }
             .onChange(of: state.localManualCourseChange) { _, change in
@@ -187,8 +204,8 @@ struct TimetableView: View {
             }
             .onChange(of: state.timetableWallpaperVersion) { _, _ in reloadWallpaper() }
             .onChange(of: state.authenticationRevision) { _, _ in
-                emptyCellSelection.clear()
-                manualEditorRoute = nil
+                emptyCellSelection.clear(reason: "authentication_changed")
+                emptyCellSelection.dismissRoute(reason: "authentication_changed")
                 detail.clear()
                 showingUnplaced = false
                 unplacedCourses = []
@@ -202,22 +219,22 @@ struct TimetableView: View {
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
             }
             .onChange(of: model.selectedTermID) { _, _ in
-                emptyCellSelection.clear()
-                manualEditorRoute = nil
+                emptyCellSelection.clear(reason: "term_changed")
+                emptyCellSelection.dismissRoute(reason: "term_changed")
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
             }
             .onChange(of: model.snapshotRevision) { _, _ in
-                emptyCellSelection.clear()
-                manualEditorRoute = nil
+                emptyCellSelection.clear(reason: "snapshot_changed")
+                emptyCellSelection.dismissRoute(reason: "snapshot_changed")
                 detail.invalidate(termID: model.selectedTermID,
                                  snapshotRevision: model.snapshotRevision,
                                  authenticationRevision: state.authenticationRevision)
             }
             .onChange(of: model.selectedWeek) { _, _ in
-                emptyCellSelection.clear()
-                manualEditorRoute = nil
+                emptyCellSelection.clear(reason: "week_changed")
+                emptyCellSelection.dismissRoute(reason: "week_changed")
             }
         }
     }
@@ -326,10 +343,15 @@ struct TimetableView: View {
                     }
                     let isSelected = selectedCell?.termID == projection.term.id &&
                         selectedCell?.week == projection.week && selectedCell?.weekday == day &&
-                        selectedCell?.periodNumber == periodNumber
+                        selectedCell?.periodNumber == periodNumber &&
+                        selectedCell?.snapshotRevision == model.snapshotRevision &&
+                        selectedCell?.authenticationRevision == state.authenticationRevision
                     Button {
+                        let operationID = UUID()
+                        TimetableAddCourseDiagnostics.record("empty_cell_tapped",
+                            operationID: operationID)
                         selectEmptyCell(projection: projection, weekday: day,
-                                        periodNumber: periodNumber)
+                                        periodNumber: periodNumber, operationID: operationID)
                     } label: {
                         Rectangle()
                             .fill(Color(uiColor: .secondarySystemGroupedBackground)
@@ -345,15 +367,23 @@ struct TimetableView: View {
                     .frame(width: cell.width, height: cell.height)
                     .offset(x: cell.minX, y: cell.minY)
                     if isSelected, let selectedCell {
-                        Button { openManualEditor(for: selectedCell) } label: {
+                        let hitSide = min(44, min(cell.width - 2, cell.height - 2))
+                        Button {
+                            let tappedAt = TimetableAddCourseDiagnostics.now
+                            TimetableAddCourseDiagnostics.record("T0_plus_button_tapped",
+                                operationID: emptyCellSelection.selectionOperationID, startedAt: tappedAt)
+                            openManualEditor(for: selectedCell, tappedAt: tappedAt)
+                        } label: {
                             addCourseSymbol
+                                .frame(width: hitSide, height: hitSide)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("添加课程，\(projection.dates[day - 1])，第 \(periodNumber) 节")
-                        .frame(width: min(44, cell.width - 2), height: min(44, cell.height - 2))
-                        .offset(x: cell.midX - min(44, cell.width - 2) / 2,
-                                y: cell.midY - min(44, cell.height - 2) / 2)
+                        .frame(width: hitSide, height: hitSide)
+                        .offset(x: cell.midX - hitSide / 2, y: cell.midY - hitSide / 2)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        .zIndex(1)
                     }
                 }
             }
@@ -410,26 +440,36 @@ struct TimetableView: View {
     }
 
     private func selectEmptyCell(projection: WeeklyTimetableProjection,
-                                 weekday: Int, periodNumber: Int) {
+                                 weekday: Int, periodNumber: Int, operationID: UUID) {
         guard state.selectedTab == .timetable, state.canAccessPrivateData,
-              !detail.isPresenting, !detail.pagerBusy, manualEditorRoute == nil,
+              !detail.isPresenting, !detail.pagerBusy, emptyCellSelection.route == nil,
               model.selectedWeek == projection.week, model.selectedTermID == projection.term.id,
               (1...20).contains(projection.week),
-              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else { return }
+              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else {
+            TimetableAddCourseDiagnostics.record("cell_selection_rejected", operationID: operationID)
+            return
+        }
         let cell = TimetableEmptyCellSelection(owner: owner,
             authenticationRevision: state.authenticationRevision, termID: projection.term.id,
             week: projection.week, snapshotRevision: model.snapshotRevision,
             weekday: weekday, periodNumber: periodNumber)
-        withAnimation(.easeOut(duration: 0.16)) { emptyCellSelection.select(cell) }
+        withAnimation(.easeOut(duration: 0.16)) {
+            emptyCellSelection.select(cell, operationID: operationID)
+        }
     }
 
-    private func openManualEditor(for cell: TimetableEmptyCellSelection) {
-        guard manualEditorRoute == nil, emptyCellSelection.selected == cell,
-              !detail.isPresenting, !detail.pagerBusy,
-              model.selectedTermID == cell.termID, model.selectedWeek == cell.week,
-              model.snapshotRevision == cell.snapshotRevision,
-              (try? state.requireCurrentAccount(revision: cell.authenticationRevision)) == cell.owner else { return }
-        manualEditorRoute = ManualCourseEditorRoute(cell: cell)
+    private func openManualEditor(for cell: TimetableEmptyCellSelection, tappedAt: TimeInterval) {
+        TimetableAddCourseDiagnostics.record("openManualEditor_entered",
+            operationID: emptyCellSelection.selectionOperationID, startedAt: tappedAt)
+        let context = TimetableEmptyCellSelectionCoordinator.OpeningContext(
+            tabActive: state.selectedTab == .timetable,
+            detailPresenting: detail.isPresenting,
+            pagerBusy: detail.pagerBusy,
+            termID: model.selectedTermID,
+            week: model.selectedWeek,
+            snapshotRevision: model.snapshotRevision,
+            verifiedOwner: try? state.requireCurrentAccount(revision: cell.authenticationRevision))
+        _ = emptyCellSelection.open(cell, context: context, tappedAt: tappedAt)
     }
 
     private func periodLabel(_ period: PeriodInfo) -> some View {
