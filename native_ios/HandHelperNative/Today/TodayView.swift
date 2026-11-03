@@ -54,14 +54,8 @@ struct TodayView: View {
                         .resizable()
                         .scaledToFill()
                         .frame(width: geometry.size.width, height: geometry.size.height)
-                        .offset(y: -geometry.size.height * 0.05)
                         .clipped()
-                        .opacity(dark ? 0.52 : 0.38)
-                        .mask(LinearGradient(stops: [
-                            .init(color: .clear, location: 0.16),
-                            .init(color: .black, location: 0.39),
-                            .init(color: .black, location: 1)
-                        ], startPoint: .top, endPoint: .bottom))
+                        .overlay(TodayStyle.background.opacity(dark ? 0.48 : 0.62))
                 }.ignoresSafeArea().allowsHitTesting(false)
             }
             VStack(spacing: 0) {
@@ -271,13 +265,6 @@ struct TodayView: View {
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(TodayHeroSurface())
-        .contextMenu {
-            if state.canAccessPrivateData {
-                Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task { await state.logout() }
-                }
-            }
-        }
     }
 
     private var heroInformation: some View {
