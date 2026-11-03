@@ -129,5 +129,91 @@ final class LiveActivityTests: XCTestCase {
                                        end: end, location: nil)
         XCTAssertEqual(LiveActivityReconciliation.plan(records: [record], item: next,
                                                        allowed: true, foreground: true), [.end("activity"), .start(next)])
+        XCTAssertEqual(LiveActivityReconciliation.plan(records: [record], item: item,
+                                                       allowed: true, foreground: false), [])
+        XCTAssertEqual(LiveActivityReconciliation.plan(records: [record], item: item,
+                                                       allowed: false, foreground: false), [.end("activity")])
+        let ended = LiveActivityRecord(systemID: "old", itemID: "one", state: state, status: .ended)
+        XCTAssertEqual(LiveActivityReconciliation.plan(records: [ended], item: item,
+                                                       allowed: true, foreground: true), [.start(item)])
+    }
+
+    @MainActor
+    func testRequestFailureIsVisibleAndDoesNotCreateActivity() async {
+        let driver = MockLiveActivityDriver()
+        driver.shouldFail = true
+        let diagnostics = LiveActivityDiagnostics()
+        let item = CurrentActivityItem(id: "test", kind: .course, title: "测试",
+            start: date("2026-10-23T08:30:00Z"), end: date("2026-10-23T10:00:00Z"), location: nil)
+        await LiveActivityActionExecutor.execute([.start(item)], driver: driver,
+            diagnostics: diagnostics, version: 1, reason: "test", selected: "test",
+            foreground: true, isCurrent: { true })
+        XCTAssertEqual(driver.startCount, 1)
+        XCTAssertTrue(driver.records().isEmpty)
+        XCTAssertTrue(diagnostics.lastOutcome.contains("request failed"))
+        XCTAssertTrue(diagnostics.lastOutcome.contains("code=17"))
+    }
+
+    @MainActor
+    func testForegroundRequestIsNotImmediatelyEndedOnBackgroundSync() async {
+        let driver = MockLiveActivityDriver()
+        let diagnostics = LiveActivityDiagnostics()
+        let item = CurrentActivityItem(id: "test", kind: .course, title: "测试",
+            start: date("2026-10-23T08:30:00Z"), end: date("2026-10-23T10:00:00Z"), location: nil)
+        let actions = LiveActivityReconciliation.plan(records: driver.records(), item: item,
+                                                      allowed: true, foreground: true)
+        await LiveActivityActionExecutor.execute(actions, driver: driver,
+            diagnostics: diagnostics, version: 1, reason: "scene_active", selected: "test",
+            foreground: true, isCurrent: { true })
+        XCTAssertEqual(driver.startCount, 1)
+        let background = LiveActivityReconciliation.plan(records: driver.records(), item: item,
+                                                         allowed: true, foreground: false)
+        XCTAssertTrue(background.isEmpty)
+        XCTAssertEqual(driver.endCount, 0)
+        XCTAssertTrue(diagnostics.lastOutcome.contains("request succeeded"))
+    }
+
+    @MainActor
+    func testStaleGenerationSkipsPlannedRequest() async {
+        let driver = MockLiveActivityDriver()
+        let item = CurrentActivityItem(id: "test", kind: .schedule, title: "测试",
+            start: date("2026-10-23T08:30:00Z"), end: date("2026-10-23T10:00:00Z"), location: nil)
+        await LiveActivityActionExecutor.execute([.start(item)], driver: driver,
+            diagnostics: LiveActivityDiagnostics(), version: 1, reason: "stale", selected: "test",
+            foreground: true, isCurrent: { false })
+        XCTAssertEqual(driver.startCount, 0)
+    }
+}
+
+@MainActor
+private final class MockLiveActivityDriver: LiveActivityDriving {
+    var isAvailable = true
+    var shouldFail = false
+    var startCount = 0
+    var endCount = 0
+    private var stored: [LiveActivityRecord] = []
+
+    func records() -> [LiveActivityRecord] { stored }
+
+    func start(item: CurrentActivityItem) async throws -> String {
+        startCount += 1
+        if shouldFail { throw NSError(domain: "TestLiveActivity", code: 17) }
+        let id = "mock-\(startCount)"
+        stored.append(LiveActivityRecord(systemID: id, itemID: item.id,
+            state: HandHelperActivityAttributes.ContentState(kind: item.kind.rawValue,
+                title: item.title, start: item.start, end: item.end, location: item.location)))
+        return id
+    }
+
+    func update(systemID: String, item: CurrentActivityItem) async {
+        guard let index = stored.firstIndex(where: { $0.systemID == systemID }) else { return }
+        stored[index] = LiveActivityRecord(systemID: systemID, itemID: item.id,
+            state: HandHelperActivityAttributes.ContentState(kind: item.kind.rawValue,
+                title: item.title, start: item.start, end: item.end, location: item.location))
+    }
+
+    func end(systemID: String) async {
+        endCount += 1
+        stored.removeAll { $0.systemID == systemID }
     }
 }

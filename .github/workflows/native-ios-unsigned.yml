@@ -2,6 +2,11 @@ name: Native SwiftUI iOS (unsigned)
 
 on:
   workflow_dispatch:
+    inputs:
+      live_activity_diagnostic_ipa:
+        description: 'Also package a clearly marked Debug IPA with Live Activity diagnostics'
+        type: boolean
+        default: false
   push:
     paths:
       - 'native_ios/**'
@@ -105,3 +110,26 @@ jobs:
           path: native_ios/build/HandHelperNative-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
+      - name: Build optional Live Activity diagnostic Debug IPA
+        if: github.event_name == 'workflow_dispatch' && inputs.live_activity_diagnostic_ipa
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DiagnosticData CODE_SIGNING_ALLOWED=NO
+          app=build/DiagnosticData/Build/Products/Debug-iphoneos/HandHelperNative.app
+          test -x "$app/HandHelperNative"
+          test -x "$app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
+          mkdir -p build/diagnostic-ipa/Payload
+          /usr/bin/ditto "$app" build/diagnostic-ipa/Payload/HandHelperNative.app
+          (cd build/diagnostic-ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa)
+          /usr/bin/unzip -tqq build/HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa
+
+      - name: Upload optional diagnostic Debug IPA
+        if: github.event_name == 'workflow_dispatch' && inputs.live_activity_diagnostic_ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned-ipa
+          path: native_ios/build/HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 3

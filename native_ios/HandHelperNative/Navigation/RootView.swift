@@ -11,7 +11,6 @@ struct RootView: View {
     @StateObject private var deleteConfirmation = DestructiveConfirmationCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
-    @State private var liveActivities = LiveActivityCoordinator()
 
     private var presentation: some View {
         ZStack {
@@ -85,7 +84,7 @@ struct RootView: View {
     private var presentationLifecycle: some View {
         presentation
         .onChange(of: state.authenticationRevision) { _, _ in
-            syncLiveActivities()
+            syncLiveActivities(reason: "authentication_revision")
             clearAvatarPreview()
             timetableDetail.clear()
             gradeDetail.clear()
@@ -98,6 +97,7 @@ struct RootView: View {
             deleteConfirmation.clear()
         }
         .onChange(of: state.entry) { _, entry in
+            syncLiveActivities(reason: "entry_changed")
             if entry != .main {
                 clearAvatarPreview()
                 timetableDetail.clear()
@@ -119,26 +119,27 @@ struct RootView: View {
     var body: some View {
         presentationLifecycle
         .onChange(of: scenePhase) { _, phase in
-            syncLiveActivities()
+            syncLiveActivities(reason: "scene_\(phase)")
             if phase != .active {
                 timetableDetail.clear()
                 gradeDetail.clear()
             }
         }
-        .onChange(of: state.liveActivitiesEnabled) { _, _ in syncLiveActivities() }
-        .onChange(of: state.courseSnapshotVersion) { _, _ in syncLiveActivities() }
-        .onChange(of: state.localManualCourseChange) { _, _ in syncLiveActivities() }
-        .onChange(of: state.localScheduleVersion) { _, _ in syncLiveActivities() }
+        .onChange(of: state.liveActivitiesEnabled) { _, _ in syncLiveActivities(reason: "app_switch") }
+        .onChange(of: state.courseSnapshotVersion) { _, _ in syncLiveActivities(reason: "course_snapshot") }
+        .onChange(of: state.localManualCourseChange) { _, _ in syncLiveActivities(reason: "manual_course") }
+        .onChange(of: state.localScheduleVersion) { _, _ in syncLiveActivities(reason: "local_schedule") }
         .onOpenURL { url in
             guard url.scheme == "handhelper", url.host == "today",
                   state.entry == .main, state.canAccessPrivateData else { return }
             state.selectedTab = .today
         }
-        .task { syncLiveActivities() }
+        .task { syncLiveActivities(reason: "root_task") }
     }
 
-    private func syncLiveActivities() {
-        liveActivities.synchronize(state: state, foreground: scenePhase == .active)
+    private func syncLiveActivities(reason: String) {
+        state.liveActivityCoordinator.synchronize(state: state, foreground: scenePhase == .active,
+                                                  reason: reason)
     }
 
     private func showAvatarPreview(_ route: TodayAvatarPreviewRoute) {

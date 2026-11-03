@@ -98,6 +98,7 @@ final class AppState: ObservableObject {
     let api: any APIClientProtocol
     let sessionStore: any SessionStore
     let verifiedAccount = VerifiedAccountContext()
+    let liveActivityCoordinator = LiveActivityCoordinator()
     private let authentication: any AuthenticationClientProtocol
     private let preferences: UserDefaults
     private let profileDirectory: URL?

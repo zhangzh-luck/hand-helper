@@ -61,6 +61,11 @@ struct PersonalizationView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                #if DEBUG
+                NavigationLink("实时活动诊断") {
+                    LiveActivityDiagnosticView(state: state)
+                }
+                #endif
             } header: {
                 Text("实时活动")
             } footer: {

@@ -10,12 +10,23 @@ struct CurrentActivityItem: Equatable {
     let start: Date
     let end: Date
     let location: String?
+}
 
+struct CurrentActivityResolution {
+    let courseCandidates: [CurrentActivityItem]
+    let scheduleCandidates: [CurrentActivityItem]
+    var selected: CurrentActivityItem? { courseCandidates.first ?? scheduleCandidates.first }
+    var candidateCount: Int { courseCandidates.count + scheduleCandidates.count }
 }
 
 enum CurrentActivityResolver {
     static func current(snapshot: CourseSnapshot, schedules: [CustomSchedule], owner: String,
                         at now: Date, calendar: Calendar = .current) -> CurrentActivityItem? {
+        resolve(snapshot: snapshot, schedules: schedules, owner: owner, at: now, calendar: calendar).selected
+    }
+
+    static func resolve(snapshot: CourseSnapshot, schedules: [CustomSchedule], owner: String,
+                        at now: Date, calendar: Calendar = .current) -> CurrentActivityResolution {
         let local = CourseScheduleCalculator.expandedManualCourses(
             on: now, rules: snapshot.manualRules, terms: snapshot.terms,
             periods: snapshot.periods, calendar: calendar)
@@ -30,9 +41,7 @@ enum CurrentActivityResolver {
                          source: "\(course.source ?? "unknown"):\(sourceID):\(course.date)"),
                 kind: .course, title: course.name, start: start, end: end, location: course.room)
         }
-        if let first = courseItems.sorted(by: ordered).first { return first }
-
-        return schedules.compactMap { schedule -> CurrentActivityItem? in
+        let scheduleItems = schedules.compactMap { schedule -> CurrentActivityItem? in
             guard let endTime = schedule.endTime,
                   ScheduleTimeRange.valid(start: schedule.time, end: endTime),
                   let start = ScheduleTimeRange.date(schedule.date, time: schedule.time, calendar: calendar),
@@ -41,7 +50,9 @@ enum CurrentActivityResolver {
             return CurrentActivityItem(id: stableID(owner: owner, kind: "schedule",
                         source: "\(schedule.id):\(schedule.date)"),
                 kind: .schedule, title: schedule.title, start: start, end: end, location: nil)
-        }.sorted(by: ordered).first
+        }
+        return CurrentActivityResolution(courseCandidates: courseItems.sorted(by: ordered),
+                                         scheduleCandidates: scheduleItems.sorted(by: ordered))
     }
 
     static func nextBoundary(snapshot: CourseSnapshot, schedules: [CustomSchedule],
