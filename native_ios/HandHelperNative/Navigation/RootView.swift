@@ -13,7 +13,7 @@ struct RootView: View {
     @State private var avatarPreviewVisible = false
     @State private var liveActivities = LiveActivityCoordinator()
 
-    var body: some View {
+    private var presentation: some View {
         ZStack {
             switch state.entry {
             case .login:
@@ -80,6 +80,10 @@ struct RootView: View {
         } message: { request in
             Text(request.kind.message)
         }
+    }
+
+    private var presentationLifecycle: some View {
+        presentation
         .onChange(of: state.authenticationRevision) { _, _ in
             syncLiveActivities()
             clearAvatarPreview()
@@ -110,6 +114,10 @@ struct RootView: View {
                 timetableDetail.clear()
             }
         }
+    }
+
+    var body: some View {
+        presentationLifecycle
         .onChange(of: scenePhase) { _, phase in
             syncLiveActivities()
             if phase != .active {
