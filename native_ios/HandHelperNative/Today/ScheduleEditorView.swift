@@ -4,18 +4,20 @@ import UIKit
 struct ScheduleEditorView: View {
     let schedule: CustomSchedule?
     let now: Date
-    let onSave: (Int?, String, Date, String) throws -> Void
+    let onSave: (Int?, String, Date, String, String?) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var date: Date
     @State private var time: Date
+    @State private var hasEndTime: Bool
+    @State private var endTime: Date
     @State private var error: String?
     @State private var showDiscardConfirmation = false
     @State private var mayDismiss = false
 
     init(schedule: CustomSchedule?, now: Date,
-         onSave: @escaping (Int?, String, Date, String) throws -> Void) {
+         onSave: @escaping (Int?, String, Date, String, String?) throws -> Void) {
         self.schedule = schedule
         self.now = now
         self.onSave = onSave
@@ -33,6 +35,9 @@ struct ScheduleEditorView: View {
         _date = State(initialValue: initialDate)
         _time = State(initialValue: CourseScheduleCalculator.dateTime(day: initialDate,
                             clock: schedule?.time ?? "09:00") ?? initialDate)
+        _hasEndTime = State(initialValue: schedule?.endTime != nil)
+        _endTime = State(initialValue: CourseScheduleCalculator.dateTime(day: initialDate,
+                            clock: schedule?.endTime ?? "10:00") ?? initialDate)
     }
 
     var body: some View {
@@ -55,11 +60,19 @@ struct ScheduleEditorView: View {
                     Divider()
                     DatePicker("时间", selection: $time, displayedComponents: .hourAndMinute)
                         .frame(minHeight: 57)
+                    Divider()
+                    Toggle("设置结束时间", isOn: $hasEndTime)
+                        .frame(minHeight: 57)
+                    if hasEndTime {
+                        Divider()
+                        DatePicker("结束时间", selection: $endTime, displayedComponents: .hourAndMinute)
+                            .frame(minHeight: 57)
+                    }
                 }
                 .padding(.horizontal, 15)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
                 .padding(.top, 14)
-                Text("只能添加今天及以后的安排；时间仅用于当天排序，不会触发系统通知。")
+                Text("只能添加今天及以后的安排；结束时间须晚于同一天的开始时间。未设置结束时间的安排仍按开始时间排序。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,11 +111,17 @@ struct ScheduleEditorView: View {
 
     private var hasUnsavedChanges: Bool {
         ScheduleEditorState.isDirty(schedule: schedule, title: title, date: date,
-                                    time: timeValue, now: now)
+                                    time: timeValue, endTime: endTimeValue, now: now)
     }
 
     private var timeValue: String {
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
+        clockValue(time)
+    }
+
+    private var endTimeValue: String? { hasEndTime ? clockValue(endTime) : nil }
+
+    private func clockValue(_ value: Date) -> String {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: value)
         return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
     }
 
@@ -113,7 +132,7 @@ struct ScheduleEditorView: View {
 
     private func save() {
         do {
-            try onSave(schedule?.id, title, date, timeValue)
+            try onSave(schedule?.id, title, date, timeValue, endTimeValue)
             mayDismiss = true
             dismiss()
         } catch { self.error = error.localizedDescription }
@@ -122,12 +141,13 @@ struct ScheduleEditorView: View {
 
 enum ScheduleEditorState {
     static func isDirty(schedule: CustomSchedule?, title: String, date: Date,
-                        time: String, now: Date) -> Bool {
+                        time: String, endTime: String? = nil, now: Date) -> Bool {
         let originalDate = schedule?.date ?? CourseScheduleCalculator.dateKey(now)
         let originalTime = schedule?.time ?? "09:00"
         return title.trimmingCharacters(in: .whitespacesAndNewlines) !=
             (schedule?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ||
-            CourseScheduleCalculator.dateKey(date) != originalDate || time != originalTime
+            CourseScheduleCalculator.dateKey(date) != originalDate || time != originalTime ||
+            endTime != schedule?.endTime
     }
 }
 

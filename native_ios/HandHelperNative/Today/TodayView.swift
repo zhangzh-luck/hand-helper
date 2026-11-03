@@ -158,9 +158,10 @@ struct TodayView: View {
             }
         }
         .sheet(item: $editor) { route in
-            ScheduleEditorView(schedule: route.schedule, now: model.now) { id, title, date, time in
+            ScheduleEditorView(schedule: route.schedule, now: model.now) { id, title, date, time, endTime in
                 _ = try state.requireCurrentAccount(revision: route.revision)
-                try model.saveSchedule(id: id, title: title, date: date, time: time)
+                try model.saveSchedule(id: id, title: title, date: date, time: time, endTime: endTime)
+                try? state.localScheduleDidChange(revision: route.revision)
             }
             .presentationDetents([.medium, .large])
         }
@@ -187,6 +188,7 @@ struct TodayView: View {
                                  do {
                                      _ = try state.requireCurrentAccount(revision: pending.revision)
                                      try model.deleteSchedule(id: pending.schedule.id)
+                                      try? state.localScheduleDidChange(revision: pending.revision)
                                  } catch { localError = error.localizedDescription }
                              }, cancel: {
                                  if pendingDelete?.schedule.id == pending.schedule.id {
@@ -338,6 +340,7 @@ struct TodayView: View {
             if result.completed && state.courseDataInvalidation == marker {
                 appliedCourseInvalidationSequence = marker.sequence
                 state.acknowledgeCourseRefresh(marker)
+                try? state.courseSnapshotDidChange(revision: revision)
             }
             if result.unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
                 state.handleUnauthorized()
@@ -347,6 +350,7 @@ struct TodayView: View {
                 state.selectedTab == .today && state.authenticationRevision == revision && state.canAccessPrivateData
             })
             guard revision == state.authenticationRevision else { return }
+            if !unauthorized { try? state.courseSnapshotDidChange(revision: revision) }
             if unauthorized && state.isAuthenticated && !state.isLoginSubmitting {
                 state.handleUnauthorized()
             }

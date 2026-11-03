@@ -1,3 +1,4 @@
+import ActivityKit
 import SwiftUI
 
 @MainActor
@@ -48,6 +49,22 @@ struct PersonalizationView: View {
                 Text("壁纸")
             } footer: {
                 Text("今日页和课程表壁纸分别保存在此设备。")
+            }
+
+            Section {
+                Toggle("课程与安排实时活动", isOn: Binding(
+                    get: { state.liveActivitiesEnabled },
+                    set: { state.setLiveActivitiesEnabled($0) }
+                ))
+                if state.liveActivitiesEnabled && !ActivityAuthorizationInfo().areActivitiesEnabled {
+                    Text("系统未允许实时活动，请在 iPhone 设置中检查本应用的实时活动权限。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("实时活动")
+            } footer: {
+                Text("默认关闭。开启后，正在进行的课程或设有结束时间的安排可显示在锁屏和支持的灵动岛；名称与地点可能在锁屏可见。")
             }
         }
         .navigationTitle("个性化")

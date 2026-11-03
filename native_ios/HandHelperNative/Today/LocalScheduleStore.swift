@@ -63,7 +63,8 @@ final class LocalScheduleStore {
         }
         let id = schedule.id == 0 ? (account.records.map(\.id).filter { $0 < 0 }.min() ?? 0) - 1 : schedule.id
         account.records.removeAll { $0.id == id }
-        account.records.append(CustomSchedule(id: id, title: schedule.title, date: schedule.date, time: schedule.time))
+        account.records.append(CustomSchedule(id: id, title: schedule.title, date: schedule.date,
+                                              time: schedule.time, endTime: schedule.endTime))
         document.accounts[key] = account
         try write(document)
     }

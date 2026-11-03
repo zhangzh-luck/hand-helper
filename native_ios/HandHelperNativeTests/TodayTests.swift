@@ -222,6 +222,33 @@ final class TodayTests: XCTestCase {
                                               time: "09:00", now: day))
         XCTAssertTrue(ScheduleEditorState.isDirty(schedule: schedule, title: "提交作业", date: day,
                                               time: "10:00", now: day))
+        XCTAssertTrue(ScheduleEditorState.isDirty(schedule: schedule, title: "提交作业", date: day,
+                                              time: "09:00", endTime: "10:00", now: day))
+    }
+
+    @MainActor
+    func testScheduleEndTimePersistenceValidationAndRemoval() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = TodayTestSessionStore()
+        session.save(cookie: "session=alice")
+        let account = VerifiedAccountContext()
+        try account.confirm(username: "alice", cookie: "session=alice")
+        let repository = DiskCourseRepository(api: MockAPIClient(), session: session,
+                                              account: account, directory: folder)
+        let model = TodayViewModel(repository: repository,
+            wallpaperStore: WallpaperStore(session: session, account: account, directory: folder),
+            clock: MutableTodayClock(now: localDate(2026, 10, 23, 12, 0)))
+        let day = localDate(2026, 10, 23, 12, 0)
+        XCTAssertThrowsError(try model.saveSchedule(id: nil, title: "安排", date: day,
+                                                    time: "09:00", endTime: "09:00"))
+        XCTAssertTrue(try repository.allLocalSchedules().isEmpty)
+        try model.saveSchedule(id: nil, title: "安排", date: day, time: "09:00", endTime: "10:00")
+        XCTAssertEqual(try repository.allLocalSchedules().first?.endTime, "10:00")
+        let id = try XCTUnwrap(repository.allLocalSchedules().first?.id)
+        try model.saveSchedule(id: id, title: "安排", date: day, time: "09:00", endTime: nil)
+        XCTAssertNil(try repository.allLocalSchedules().first?.endTime)
+        XCTAssertEqual(try repository.allLocalSchedules().first?.id, id)
     }
 
     @MainActor

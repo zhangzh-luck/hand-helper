@@ -144,19 +144,20 @@ final class TodayViewModel: ObservableObject {
         return changed
     }
 
-    func saveSchedule(id: Int?, title: String, date: Date, time: String) throws {
+    func saveSchedule(id: Int?, title: String, date: Date, time: String, endTime: String? = nil) throws {
         guard repository.canEditSchedules else { throw APIError.unauthorized(message: "请先登录后编辑本机安排。") }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 200 else { throw TodayInputError.invalidTitle }
-        let parts = time.split(separator: ":")
-        guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
-              let hour = Int(parts[0]), let minute = Int(parts[1]),
-              (0...23).contains(hour), (0...59).contains(minute) else { throw TodayInputError.invalidTime }
+        guard ScheduleTimeRange.minutes(time) != nil,
+              endTime == nil || ScheduleTimeRange.valid(start: time, end: endTime!) else {
+            throw TodayInputError.invalidTime
+        }
         if let id, !localSchedules.contains(where: { $0.id == id }) {
             throw TodayInputError.missingSchedule
         }
         try repository.saveSchedule(CustomSchedule(id: id ?? 0, title: name,
-                                                   date: CourseScheduleCalculator.dateKey(date), time: time))
+                                                   date: CourseScheduleCalculator.dateKey(date),
+                                                   time: time, endTime: endTime))
         reloadSchedules()
     }
 
@@ -176,7 +177,7 @@ enum TodayInputError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidTitle: "安排事项需为 1 至 200 个字符。"
-        case .invalidTime: "时间格式无效。"
+        case .invalidTime: "结束时间必须晚于同一天的开始时间。"
         case .missingSchedule: "这项安排已不存在，请返回今日页面重试。"
         }
     }

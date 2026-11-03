@@ -11,6 +11,7 @@ struct RootView: View {
     @StateObject private var deleteConfirmation = DestructiveConfirmationCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
+    @State private var liveActivities = LiveActivityCoordinator()
 
     var body: some View {
         ZStack {
@@ -80,6 +81,7 @@ struct RootView: View {
             Text(request.kind.message)
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            syncLiveActivities()
             clearAvatarPreview()
             timetableDetail.clear()
             gradeDetail.clear()
@@ -109,11 +111,26 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            syncLiveActivities()
             if phase != .active {
                 timetableDetail.clear()
                 gradeDetail.clear()
             }
         }
+        .onChange(of: state.liveActivitiesEnabled) { _, _ in syncLiveActivities() }
+        .onChange(of: state.courseSnapshotVersion) { _, _ in syncLiveActivities() }
+        .onChange(of: state.localManualCourseChange) { _, _ in syncLiveActivities() }
+        .onChange(of: state.localScheduleVersion) { _, _ in syncLiveActivities() }
+        .onOpenURL { url in
+            guard url.scheme == "handhelper", url.host == "today",
+                  state.entry == .main, state.canAccessPrivateData else { return }
+            state.selectedTab = .today
+        }
+        .task { syncLiveActivities() }
+    }
+
+    private func syncLiveActivities() {
+        liveActivities.synchronize(state: state, foreground: scenePhase == .active)
     }
 
     private func showAvatarPreview(_ route: TodayAvatarPreviewRoute) {

@@ -64,11 +64,21 @@ struct CustomSchedule: Codable, Equatable, Identifiable {
     let title: String
     let date: String
     let time: String
+    let endTime: String?
+
+    init(id: Int, title: String, date: String, time: String, endTime: String? = nil) {
+        self.id = id
+        self.title = title
+        self.date = date
+        self.time = time
+        self.endTime = endTime
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, title
         case date = "scheduled_date"
         case time = "scheduled_time"
+        case endTime = "end_time"
     }
 }
 

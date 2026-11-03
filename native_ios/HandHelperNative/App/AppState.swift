@@ -75,6 +75,9 @@ final class AppState: ObservableObject {
     @Published private(set) var courseDataInvalidation: CourseDataInvalidation?
     @Published private(set) var completedCourseRefresh: CourseDataInvalidation?
     @Published private(set) var localManualCourseChange: LocalManualCourseChange?
+    @Published private(set) var courseSnapshotVersion = 0
+    @Published private(set) var localScheduleVersion = 0
+    @Published private(set) var liveActivitiesEnabled: Bool
     @Published private(set) var wallpaperVersion = 0
     @Published private(set) var timetableWallpaperVersion = 0
     @Published private(set) var analysisWallpaperVersion = 0
@@ -105,6 +108,7 @@ final class AppState: ObservableObject {
     private var didStartRestore = false
     private static let appearanceKey = "appearance_mode"
     private static let pendingCredentialRemovalKey = "pending_session_credential_removal"
+    private static let liveActivitiesKey = "live_activities_enabled"
 
     init(
         api: (any APIClientProtocol)? = nil,
@@ -117,6 +121,7 @@ final class AppState: ObservableObject {
         self.preferences = preferences
         self.profileDirectory = profileDirectory
         appearance = AppearanceMode(rawValue: preferences.string(forKey: Self.appearanceKey) ?? "") ?? .system
+        liveActivitiesEnabled = preferences.bool(forKey: Self.liveActivitiesKey)
         authenticationStatus = preferences.bool(forKey: Self.pendingCredentialRemovalKey)
             ? .signedOut : (sessionStore.cookie == nil ? .signedOut : .verifying)
         self.api = api ?? APIClient(configuration: .development, sessionStore: sessionStore)
@@ -223,6 +228,21 @@ final class AppState: ObservableObject {
         localManualCourseSequence += 1
         localManualCourseChange = LocalManualCourseChange(owner: owner,
             authenticationRevision: revision, sequence: localManualCourseSequence)
+    }
+
+    func courseSnapshotDidChange(revision: Int) throws {
+        _ = try requireCurrentAccount(revision: revision)
+        courseSnapshotVersion += 1
+    }
+
+    func localScheduleDidChange(revision: Int) throws {
+        _ = try requireCurrentAccount(revision: revision)
+        localScheduleVersion += 1
+    }
+
+    func setLiveActivitiesEnabled(_ enabled: Bool) {
+        preferences.set(enabled, forKey: Self.liveActivitiesKey)
+        liveActivitiesEnabled = enabled
     }
 
     func pendingCourseInvalidation(after appliedSequence: Int?) -> CourseDataInvalidation? {

@@ -73,7 +73,8 @@ struct ScheduleCardView: View {
     let onDelete: () -> Void
 
     var body: some View {
-        TodayEntryFace(kind: "自定义安排", title: schedule.title, time: schedule.time,
+        TodayEntryFace(kind: "自定义安排", title: schedule.title,
+                       time: schedule.endTime.map { "\(schedule.time)—\($0)" } ?? schedule.time,
                        detail: "", active: false, custom: true,
                        hasWallpaper: hasWallpaper)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

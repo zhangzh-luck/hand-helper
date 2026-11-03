@@ -25,6 +25,32 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
+    info:
+      path: HandHelperNative/Resources/AppInfo.plist
+      properties:
+        NSSupportsLiveActivities: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.zhangzh.hangassistant.native.dev.today
+            CFBundleURLSchemes: [handhelper]
+    dependencies:
+      - target: HandHelperLiveActivityWidget
+        embed: true
+  HandHelperLiveActivityWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: HandHelperLiveActivityWidget
+      - path: HandHelperNative/LiveActivities/HandHelperActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.native.dev.liveactivity
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+    info:
+      path: HandHelperLiveActivityWidget/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
   HandHelperNativeTests:
     type: bundle.unit-test
     platform: iOS

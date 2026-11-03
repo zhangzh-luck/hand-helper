@@ -237,6 +237,7 @@ final class TimetableViewModel: ObservableObject {
             guard operation == request, state.selectedTab == .timetable,
                   (try? state.requireCurrentAccount(revision: ticket.authenticationRevision)) == ticket.owner else { return }
             try accept(fresh, ticket: ticket)
+            try? state.courseSnapshotDidChange(revision: ticket.authenticationRevision)
             if let marker, state.courseDataInvalidation == marker {
                 state.acknowledgeCourseRefresh(marker)
                 appliedSequence = marker.sequence

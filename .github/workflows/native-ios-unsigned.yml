@@ -80,6 +80,11 @@ jobs:
           test -f "$app/Assets.car"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = 'com.zhangzh.hangassistant.native.dev'
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$app/Info.plist")" = 'AppIcon'
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSSupportsLiveActivities' "$app/Info.plist")" = 'true'
+          extension="$app/PlugIns/HandHelperLiveActivityWidget.appex"
+          test -x "$extension/HandHelperLiveActivityWidget"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$extension/Info.plist")" = 'com.zhangzh.hangassistant.native.dev.liveactivity'
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSExtension:NSExtensionPointIdentifier' "$extension/Info.plist")" = 'com.apple.widgetkit-extension'
           mkdir -p build/ipa/Payload
           /usr/bin/ditto "$app" build/ipa/Payload/HandHelperNative.app
           (cd build/ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperNative-unsigned.ipa)
@@ -90,6 +95,8 @@ jobs:
           test -x "$extracted/HandHelperNative"
           test -f "$extracted/Assets.car"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$extracted/Info.plist")" = 'com.zhangzh.hangassistant.native.dev'
+          test -x "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSExtension:NSExtensionPointIdentifier' "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/Info.plist")" = 'com.apple.widgetkit-extension'
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
