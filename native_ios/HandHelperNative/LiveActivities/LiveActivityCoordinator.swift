@@ -80,8 +80,8 @@ final class LiveActivityCoordinator {
     private var foreground = false
     private var boundaryTask: Task<Void, Never>?
 
-    init(driver: any LiveActivityDriving = ActivityKitDriver()) {
-        self.driver = driver
+    init(driver: (any LiveActivityDriving)? = nil) {
+        self.driver = driver ?? ActivityKitDriver()
     }
 
     func synchronize(state: AppState, foreground: Bool) {
