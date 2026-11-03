@@ -6,7 +6,7 @@ import XCTest
 final class SettingsLayoutTests: XCTestCase {
     @MainActor
     func testMeasuredSettingsRows() {
-        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        let state = AppState(api: MockAPIClient(), sessionStore: SettingsLayoutSessionStore())
         let host = UIHostingController(rootView: SettingsView(state: state))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
         window.rootViewController = host
@@ -25,4 +25,10 @@ final class SettingsLayoutTests: XCTestCase {
         print("SETTINGS_ROW_HEIGHTS: \(rows.map { String(format: "%.1f", $0.frame.height) }.joined(separator: ", "))")
         XCTAssertGreaterThanOrEqual(rows.count, 5)
     }
+}
+
+private final class SettingsLayoutSessionStore: SessionStore {
+    private(set) var cookie: String?
+    func save(cookie: String) { self.cookie = cookie }
+    func clear() -> Bool { cookie = nil; return true }
 }
