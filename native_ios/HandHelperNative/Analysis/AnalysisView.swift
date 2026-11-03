@@ -15,6 +15,9 @@ struct AnalysisView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .body) private var gradeTitleMinimumHeight: CGFloat = 42
+    @ScaledMetric(relativeTo: .body) private var gradeRowMinimumHeight: CGFloat = 90
+    @ScaledMetric(relativeTo: .title2) private var gradeScoreColumnWidth: CGFloat = 82
 
     init(state: AppState, gradeDetail: GradeDetailCoordinator,
          timetableDetail: TimetableCourseDetailCoordinator,
@@ -299,10 +302,7 @@ struct AnalysisView: View {
             Text("课程成绩").font(.title3.weight(.semibold))
             let grades = model.selectedData?.grades ?? []
             if !grades.isEmpty && !model.offline {
-                Button(role: .destructive) { confirmGradeDeletion() } label: {
-                    Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
-                }
-                .disabled(model.deleting || model.refreshing || model.analyzing)
+                gradeDeleteButton
             }
             if grades.isEmpty {
                 ContentUnavailableView("暂无课程成绩", systemImage: "doc.text",
@@ -317,22 +317,74 @@ struct AnalysisView: View {
                 }
                 .background(Color(uiColor: .secondarySystemGroupedBackground),
                             in: RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
+    }
+
+    private var gradeDeleteButton: some View {
+        let button = Button(role: .destructive) { confirmGradeDeletion() } label: {
+            Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+        }
+        .accessibilityLabel(model.deleting ? "正在删除本学期成绩" : "删除本学期成绩")
+        .disabled(model.deleting || model.refreshing || model.analyzing)
+
+        return Group {
+            if #available(iOS 26.0, *), !reduceTransparency, contrast != .increased {
+                button.buttonStyle(.glass(.regular.tint(.red)))
+                    .foregroundStyle(.red)
+            } else if reduceTransparency || contrast == .increased {
+                button.buttonStyle(.bordered)
+                    .tint(.red)
+            } else {
+                button.buttonStyle(GradeDeleteMaterialButtonStyle())
             }
         }
     }
 
     private func gradeRow(_ grade: GradeRecord) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(grade.courseName).font(.body.weight(.semibold))
+                Text(grade.courseName)
+                    .font(.system(size: 17, weight: .semibold, relativeTo: .body))
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: gradeTitleMinimumHeight, alignment: .topLeading)
                 Text("\(grade.courseType ?? "课程性质未提供") · \(grade.credits.map { String($0) } ?? "—") 学分 · GPA \(grade.gradePoint.map { String($0) } ?? "—")")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.system(size: 13, relativeTo: .footnote))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            Spacer(minLength: 6)
-            Text(grade.score ?? "未公布").font(.headline).multilineTextAlignment(.trailing)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("成绩")
+                    .font(.system(size: 12, relativeTo: .caption))
+                    .foregroundStyle(.secondary)
+                Text(grade.score ?? "未公布")
+                    .font(grade.score == nil
+                          ? .subheadline.weight(.semibold)
+                          : .system(size: 24, weight: .bold, relativeTo: .title2))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(width: gradeScoreColumnWidth, alignment: .trailing)
         }
-        .padding(14)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 13)
+        .frame(minHeight: gradeRowMinimumHeight)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct GradeDeleteMaterialButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.red)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.red.opacity(0.25), lineWidth: 0.5))
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
