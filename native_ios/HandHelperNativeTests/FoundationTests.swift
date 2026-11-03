@@ -3,6 +3,12 @@ import UIKit
 @testable import HandHelperNative
 
 final class FoundationTests: XCTestCase {
+    func testSettingsNavigationSymbolsAreAvailable() {
+        for symbol in ["clock", "square.and.arrow.down", "paintpalette", "info.circle"] {
+            XCTAssertNotNil(UIImage(systemName: symbol), "Missing SF Symbol: \(symbol)")
+        }
+    }
+
     func testEnvelopeAndRealFieldNamesDecode() throws {
         let json = #"{"success":true,"data":{"id":8,"source_term_id":"2026-fall","display_name":"秋季","start_date":null,"is_current":true}}"#.data(using: .utf8)!
         let envelope = try JSONDecoder().decode(APIEnvelope<TermInfo>.self, from: json)

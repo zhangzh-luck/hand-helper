@@ -36,38 +36,35 @@ struct SettingsView: View {
                     NavigationLink {
                         AcademicTimeView(state: state)
                     } label: {
-                        Label("时间设置", systemImage: "clock")
+                        SettingsNavigationRow(title: "时间设置", symbol: "clock",
+                                              color: Color(uiColor: .systemBlue))
                     }
-                } footer: {
-                    Text("调整学期第一周和节次时间。")
-                }
-
-                Section {
                     NavigationLink {
                         DataImportView(state: state)
                     } label: {
-                        Label("数据与导入", systemImage: "square.and.arrow.down")
+                        SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
+                                              color: Color(uiColor: .systemTeal))
                     }
-                } footer: {
-                    Text("从教务系统导出的文件导入课表，或解析并预览成绩。")
-                }
-
-                Section("个性化") {
                     NavigationLink {
                         PersonalizationView(state: state)
                     } label: {
-                        Label("个性化", systemImage: "paintpalette")
+                        SettingsNavigationRow(title: "个性化", symbol: "paintpalette",
+                                              color: Color(uiColor: .systemPurple))
                     }
+                } footer: {
+                    Text("调整教学时间、导入文件，以及管理外观和壁纸。")
                 }
 
                 Section("关于") {
                     NavigationLink {
                         AboutHandHelperView()
                     } label: {
-                        Label("关于航的助手", systemImage: "info.circle")
+                        SettingsNavigationRow(title: "关于航的助手", symbol: "info.circle",
+                                              color: Color(uiColor: .systemGray))
                     }
                 }
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("设置")
         }
     }
@@ -87,6 +84,28 @@ struct SettingsView: View {
         .background(Color.accentColor.opacity(0.12))
         .clipShape(Circle())
         .accessibilityHidden(true)
+    }
+}
+
+private struct SettingsNavigationRow: View {
+    let title: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
+        .frame(minHeight: 44)
     }
 }
 
