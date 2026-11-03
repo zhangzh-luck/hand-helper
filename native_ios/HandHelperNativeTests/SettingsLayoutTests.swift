@@ -41,8 +41,7 @@ final class SettingsLayoutTests: XCTestCase {
         let accountToFunctions = functionRows[0].frame.minY - rows[0].frame.maxY
         let functionsToAbout = rows[4].frame.minY - functionRows[2].frame.maxY
         print("SETTINGS_SECTION_GAPS: account=\(String(format: "%.1f", accountToFunctions)) about=\(String(format: "%.1f", functionsToAbout))")
-        XCTAssertGreaterThanOrEqual(groupHeight, 168)
-        XCTAssertLessThanOrEqual(groupHeight, 180)
+        XCTAssertEqual(groupHeight, 168, accuracy: 0.5)
     }
 }
 
