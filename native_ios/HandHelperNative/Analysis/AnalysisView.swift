@@ -15,6 +15,7 @@ struct AnalysisView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var gradeTitleMinimumHeight: CGFloat = 42
     @ScaledMetric(relativeTo: .body) private var gradeRowMinimumHeight: CGFloat = 90
     @ScaledMetric(relativeTo: .title2) private var gradeScoreColumnWidth: CGFloat = 82
@@ -299,10 +300,18 @@ struct AnalysisView: View {
 
     private var gradesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("课程成绩").font(.title3.weight(.semibold))
             let grades = model.selectedData?.grades ?? []
-            if !grades.isEmpty && !model.offline {
-                gradeDeleteButton
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("课程成绩").font(.title3.weight(.semibold))
+                    if !grades.isEmpty && !model.offline { gradeDeleteButton }
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("课程成绩").font(.title3.weight(.semibold))
+                    Spacer(minLength: 0)
+                    if !grades.isEmpty && !model.offline { gradeDeleteButton }
+                }
             }
             if grades.isEmpty {
                 ContentUnavailableView("暂无课程成绩", systemImage: "doc.text",
@@ -326,9 +335,9 @@ struct AnalysisView: View {
         let button = Button(role: .destructive) { confirmGradeDeletion() } label: {
             Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
                 .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 14)
                 .frame(minHeight: 44)
         }
+        .buttonBorderShape(.capsule)
         .accessibilityLabel(model.deleting ? "正在删除本学期成绩" : "删除本学期成绩")
         .disabled(model.deleting || model.refreshing || model.analyzing)
 
@@ -383,6 +392,7 @@ private struct GradeDeleteMaterialButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.red)
+            .padding(.horizontal, 14)
             .background(.regularMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Color.red.opacity(0.25), lineWidth: 0.5))
             .opacity(configuration.isPressed ? 0.7 : 1)
