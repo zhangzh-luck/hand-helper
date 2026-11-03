@@ -349,23 +349,23 @@ struct AnalysisView: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(grade.courseName)
-                    .font(.system(size: 17, weight: .semibold, relativeTo: .body))
+                    .font(.body.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: gradeTitleMinimumHeight, alignment: .topLeading)
                 Text("\(grade.courseType ?? "课程性质未提供") · \(grade.credits.map { String($0) } ?? "—") 学分 · GPA \(grade.gradePoint.map { String($0) } ?? "—")")
-                    .font(.system(size: 13, relativeTo: .footnote))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 2) {
                 Text("成绩")
-                    .font(.system(size: 12, relativeTo: .caption))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(grade.score ?? "未公布")
                     .font(grade.score == nil
                           ? .subheadline.weight(.semibold)
-                          : .system(size: 24, weight: .bold, relativeTo: .title2))
+                          : .title2.weight(.bold))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
