@@ -10,18 +10,24 @@ struct WallpaperManagementView: View {
                 NavigationLink {
                     WallpaperSettingsView(state: state, kind: .today)
                 } label: {
-                    Label("今日页壁纸", systemImage: "house")
+                    SettingsNavigationRow(title: "今日页壁纸", symbol: "house",
+                                          color: Color(uiColor: .systemBlue))
                 }
+                .listRowInsets(SettingsNavigationRow.rowInsets)
                 NavigationLink {
                     WallpaperSettingsView(state: state, kind: .timetable)
                 } label: {
-                    Label("课程表壁纸", systemImage: "calendar")
+                    SettingsNavigationRow(title: "课程表壁纸", symbol: "calendar",
+                                          color: Color(uiColor: .systemPurple))
                 }
+                .listRowInsets(SettingsNavigationRow.rowInsets)
                 NavigationLink {
                     WallpaperSettingsView(state: state, kind: .analysis)
                 } label: {
-                    Label("分析页壁纸", systemImage: "chart.bar")
+                    SettingsNavigationRow(title: "分析页壁纸", symbol: "chart.bar",
+                                          color: Color(uiColor: .systemTeal))
                 }
+                .listRowInsets(SettingsNavigationRow.rowInsets)
             } footer: {
                 Text("三张壁纸分别保存在此设备，不会上传服务器。")
             }

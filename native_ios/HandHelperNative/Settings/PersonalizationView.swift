@@ -40,8 +40,10 @@ struct PersonalizationView: View {
                 NavigationLink {
                     WallpaperManagementView(state: state)
                 } label: {
-                    Label("壁纸", systemImage: "photo")
+                    SettingsNavigationRow(title: "壁纸", symbol: "photo",
+                                          color: Color(uiColor: .systemPurple))
                 }
+                .listRowInsets(SettingsNavigationRow.rowInsets)
             } header: {
                 Text("壁纸")
             } footer: {

@@ -39,18 +39,21 @@ struct SettingsView: View {
                         SettingsNavigationRow(title: "时间设置", symbol: "clock",
                                               color: Color(uiColor: .systemBlue))
                     }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
                         DataImportView(state: state)
                     } label: {
                         SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
                                               color: Color(uiColor: .systemTeal))
                     }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
                         PersonalizationView(state: state)
                     } label: {
                         SettingsNavigationRow(title: "个性化", symbol: "paintpalette",
                                               color: Color(uiColor: .systemPurple))
                     }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                 } footer: {
                     Text("调整教学时间、导入文件，以及管理外观和壁纸。")
                 }
@@ -59,9 +62,10 @@ struct SettingsView: View {
                     NavigationLink {
                         AboutHandHelperView()
                     } label: {
-                        SettingsNavigationRow(title: "关于航的助手", symbol: "info.circle",
-                                              color: Color(uiColor: .systemGray))
+                        Text("关于航的助手")
+                            .frame(minHeight: 36)
                     }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                 }
             }
             .listStyle(.insetGrouped)
@@ -84,28 +88,6 @@ struct SettingsView: View {
         .background(Color.accentColor.opacity(0.12))
         .clipShape(Circle())
         .accessibilityHidden(true)
-    }
-}
-
-private struct SettingsNavigationRow: View {
-    let title: String
-    let symbol: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .accessibilityHidden(true)
-            Text(title)
-                .font(.body)
-                .foregroundStyle(.primary)
-        }
-        .frame(minHeight: 44)
     }
 }
 

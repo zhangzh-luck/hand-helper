@@ -4,7 +4,8 @@ import UIKit
 
 final class FoundationTests: XCTestCase {
     func testSettingsNavigationSymbolsAreAvailable() {
-        for symbol in ["clock", "square.and.arrow.down", "paintpalette", "info.circle"] {
+        for symbol in ["clock", "square.and.arrow.down", "paintpalette", "photo",
+                       "calendar.badge.plus", "doc.badge.plus", "house", "calendar", "chart.bar"] {
             XCTAssertNotNil(UIImage(systemName: symbol), "Missing SF Symbol: \(symbol)")
         }
     }
