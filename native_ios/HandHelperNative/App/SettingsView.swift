@@ -67,6 +67,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .navigationTitle("设置")
         }
     }
