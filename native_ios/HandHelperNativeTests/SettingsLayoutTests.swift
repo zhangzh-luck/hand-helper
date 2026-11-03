@@ -22,8 +22,24 @@ final class SettingsLayoutTests: XCTestCase {
         }
         let rows = collections(in: host.view).flatMap(\.visibleCells)
             .sorted { $0.frame.minY < $1.frame.minY }
-        print("SETTINGS_ROW_HEIGHTS: \(rows.map { String(format: "%.1f", $0.frame.height) }.joined(separator: ", "))")
-        XCTAssertGreaterThanOrEqual(rows.count, 5)
+        let rowFrames = rows.map {
+            String(format: "y=%.1f h=%.1f", $0.frame.minY, $0.frame.height)
+        }.joined(separator: ", ")
+        print("SETTINGS_ROW_FRAMES: \(rowFrames)")
+        guard rows.count >= 5 else { XCTFail("Missing settings list cells"); return }
+        let functionRows = Array(rows[1...3])
+        for row in functionRows {
+            XCTAssertGreaterThanOrEqual(row.frame.height, 56)
+            XCTAssertLessThanOrEqual(row.frame.height, 60)
+        }
+        for index in 1..<functionRows.count {
+            let gap = functionRows[index].frame.minY - functionRows[index - 1].frame.maxY
+            XCTAssertLessThanOrEqual(abs(gap), 1, "Separators should sit at adjacent row boundaries")
+        }
+        let groupHeight = functionRows[2].frame.maxY - functionRows[0].frame.minY
+        print("SETTINGS_FUNCTION_GROUP_HEIGHT: \(String(format: "%.1f", groupHeight))")
+        XCTAssertGreaterThanOrEqual(groupHeight, 168)
+        XCTAssertLessThanOrEqual(groupHeight, 180)
     }
 }
 

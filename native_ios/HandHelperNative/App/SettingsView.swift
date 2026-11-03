@@ -54,8 +54,6 @@ struct SettingsView: View {
                                               color: Color(uiColor: .systemPurple))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
-                } footer: {
-                    Text("调整教学时间、导入文件，以及管理外观和壁纸。")
                 }
 
                 Section("关于") {
@@ -63,7 +61,7 @@ struct SettingsView: View {
                         AboutHandHelperView()
                     } label: {
                         Text("关于航的助手")
-                            .frame(minHeight: 36)
+                            .frame(minHeight: 56)
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                 }

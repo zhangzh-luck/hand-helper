@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A compact settings navigation label; the containing List/Form row owns the tap target.
 struct SettingsNavigationRow: View {
-    static let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+    static let rowInsets = EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
 
     let title: String
     let symbol: String
@@ -21,6 +21,6 @@ struct SettingsNavigationRow: View {
                 .font(.body)
                 .foregroundStyle(.primary)
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: 56)
     }
 }
