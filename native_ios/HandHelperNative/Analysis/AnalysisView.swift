@@ -15,7 +15,6 @@ struct AnalysisView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var gradeTitleMinimumHeight: CGFloat = 42
     @ScaledMetric(relativeTo: .body) private var gradeRowMinimumHeight: CGFloat = 90
     @ScaledMetric(relativeTo: .title2) private var gradeScoreColumnWidth: CGFloat = 82
@@ -301,17 +300,10 @@ struct AnalysisView: View {
     private var gradesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             let grades = model.selectedData?.grades ?? []
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("课程成绩").font(.title3.weight(.semibold))
-                    if !grades.isEmpty && !model.offline { gradeDeleteButton }
-                }
-            } else {
-                HStack(alignment: .center, spacing: 12) {
-                    Text("课程成绩").font(.title3.weight(.semibold))
-                    Spacer(minLength: 0)
-                    if !grades.isEmpty && !model.offline { gradeDeleteButton }
-                }
+            GradeSectionHeader(showsDelete: !grades.isEmpty && !model.offline,
+                               deleting: model.deleting,
+                               deleteDisabled: model.deleting || model.refreshing || model.analyzing) {
+                confirmGradeDeletion()
             }
             if grades.isEmpty {
                 ContentUnavailableView("暂无课程成绩", systemImage: "doc.text",
@@ -327,29 +319,6 @@ struct AnalysisView: View {
                 .background(Color(uiColor: .secondarySystemGroupedBackground),
                             in: RoundedRectangle(cornerRadius: 16))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
-        }
-    }
-
-    private var gradeDeleteButton: some View {
-        let button = Button(role: .destructive) { confirmGradeDeletion() } label: {
-            Label(model.deleting ? "正在删除" : "删除本学期成绩", systemImage: "trash")
-                .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
-        }
-        .buttonBorderShape(.capsule)
-        .accessibilityLabel(model.deleting ? "正在删除本学期成绩" : "删除本学期成绩")
-        .disabled(model.deleting || model.refreshing || model.analyzing)
-
-        return Group {
-            if #available(iOS 26.0, *), !reduceTransparency, contrast != .increased {
-                button.buttonStyle(.glass(.regular.tint(.red)))
-                    .foregroundStyle(.red)
-            } else if reduceTransparency || contrast == .increased {
-                button.buttonStyle(.bordered)
-                    .tint(.red)
-            } else {
-                button.buttonStyle(GradeDeleteMaterialButtonStyle())
             }
         }
     }
@@ -388,13 +357,84 @@ struct AnalysisView: View {
     }
 }
 
-private struct GradeDeleteMaterialButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(.red)
-            .padding(.horizontal, 14)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.red.opacity(0.25), lineWidth: 0.5))
-            .opacity(configuration.isPressed ? 0.7 : 1)
+struct GradeSectionHeader: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    let showsDelete: Bool
+    let deleting: Bool
+    let deleteDisabled: Bool
+    let onDelete: () -> Void
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    heading
+                    if showsDelete { deleteButton }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    heading
+                    Spacer(minLength: 0)
+                    if showsDelete { deleteButton }
+                }
+            }
+        }
+    }
+
+    private var heading: some View {
+        Text("课程成绩").font(.title3.weight(.semibold))
+    }
+
+    private var deleteButton: some View {
+        GradeDeleteButton(deleting: deleting, disabled: deleteDisabled, action: onDelete)
+    }
+}
+
+struct GradeDeleteButton: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    let deleting: Bool
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: .destructive, action: action) {
+            Group {
+                if #available(iOS 26.0, *), !reduceTransparency, contrast != .increased {
+                    GradeDeleteVisualLabel(deleting: deleting)
+                        .glassEffect(.regular.tint(Color(uiColor: .systemRed)).interactive(),
+                                     in: Capsule())
+                } else {
+                    GradeDeleteVisualLabel(deleting: deleting)
+                        .background(Color(uiColor: .systemRed), in: Capsule())
+                }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(deleting ? "正在删除本学期成绩" : "删除本学期成绩")
+        .disabled(disabled)
+    }
+}
+
+struct GradeDeleteVisualLabel: View {
+    @ScaledMetric(relativeTo: .footnote) private var iconSize: CGFloat = 15
+    let deleting: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "trash")
+                .font(.system(size: iconSize, weight: .semibold))
+            Text(deleting ? "正在删除" : "删除本学期成绩")
+                .font(.footnote.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 8)
+        .frame(minHeight: 38)
     }
 }
