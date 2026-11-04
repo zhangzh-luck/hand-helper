@@ -37,9 +37,7 @@ struct HandHelperLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.state.kind == "course" ? "课程" : "安排",
-                          systemImage: symbol(context.state.kind))
-                        .font(.caption.weight(.semibold))
+                    expandedLeadingContent(context)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(timerInterval: context.state.start...context.state.end, countsDown: true)
@@ -65,7 +63,7 @@ struct HandHelperLiveActivityWidget: Widget {
         kind == "course" ? "book.closed.fill" : "checklist"
     }
 
-    /// Debug-only A-G experiment for measuring Dynamic Island outer width.
+    /// Debug-only A-H experiment for measuring Dynamic Island outer width.
     /// Release and ordinary Debug builds always retain the production A layout.
     @ViewBuilder
     private func compactTrailingTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
@@ -95,6 +93,15 @@ struct HandHelperLiveActivityWidget: Widget {
         } else {
             baselineCompactTimer(context)
         }
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_H
+        // H: keep D's 40 point proposal, but use a pure-numeric, ceil-to-minute
+        // discrete style. SwiftUI owns its minute-boundary refresh schedule.
+        // iOS 17 retains the production A timer as an availability fallback.
+        if #available(iOS 18.0, *) {
+            compactNumericMinuteTimer(context)
+        } else {
+            baselineCompactTimer(context)
+        }
         #else
         baselineCompactTimer(context)
         #endif
@@ -119,6 +126,16 @@ struct HandHelperLiveActivityWidget: Widget {
         .frame(width: 40, alignment: .trailing)
     }
 
+    #if DEBUG
+    @available(iOS 18.0, *)
+    private func compactNumericMinuteTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+        Text(.currentDate, format: CompactMinuteCountdownFormat(end: context.state.end))
+            .font(.caption2.monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .frame(width: 40, alignment: .trailing)
+    }
+    #endif
+
     /// Shared only by Debug D/E. The fixed frame applies to the timer content,
     /// not to the Dynamic Island's system-owned outer capsule.
     private func widthConstrainedTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>,
@@ -131,7 +148,7 @@ struct HandHelperLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func expandedBottomContent(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
-        #if DEBUG && LIVE_ACTIVITY_WIDTH_TEST_G
+        #if DEBUG && (LIVE_ACTIVITY_WIDTH_TEST_G || LIVE_ACTIVITY_WIDTH_TEST_H)
         // G keeps the system's default Dynamic Island margins and only gives a
         // long location a full-width row rather than competing with the time.
         VStack(alignment: .leading, spacing: 5) {
@@ -174,4 +191,62 @@ struct HandHelperLiveActivityWidget: Widget {
         .accessibilityElement(children: .combine)
         #endif
     }
+
+    @ViewBuilder
+    private func expandedLeadingContent(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+        #if DEBUG && LIVE_ACTIVITY_WIDTH_TEST_H
+        // H deliberately changes only the icon's own layout reservation. It does
+        // not override Dynamic Island margins, so a remaining corner clip points
+        // to the system region rather than an HStack compression of the glyph.
+        HStack(alignment: .center, spacing: 4) {
+            Image(systemName: symbol(context.state.kind))
+                .font(.caption.weight(.semibold))
+                .frame(width: 16, height: 16)
+                .fixedSize()
+                .layoutPriority(1)
+            Text(context.state.kind == "course" ? "课程" : "安排")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        #else
+        Label(context.state.kind == "course" ? "课程" : "安排",
+              systemImage: symbol(context.state.kind))
+            .font(.caption.weight(.semibold))
+        #endif
+    }
 }
+
+/// H-only diagnostic format. `Text(.currentDate, format:)` recognizes
+/// `DiscreteFormatStyle` boundaries and schedules refreshes without an app-side
+/// timer or ActivityKit update. This intentionally uses ASCII H:MM output so it
+/// remains compact regardless of the user's language.
+#if DEBUG
+@available(iOS 18.0, *)
+private struct CompactMinuteCountdownFormat: DiscreteFormatStyle {
+    let end: Date
+
+    func format(_ value: Date) -> String {
+        let remaining = max(0, end.timeIntervalSince(value))
+        let totalMinutes = Int(ceil(remaining / 60))
+        let minutes = totalMinutes % 60
+        return "\(totalMinutes / 60):\(minutes < 10 ? "0" : "")\(minutes)"
+    }
+
+    func discreteInput(before input: Date) -> Date? {
+        guard input >= end else {
+            let remaining = max(0, end.timeIntervalSince(input))
+            let displayedMinutes = Int(ceil(remaining / 60))
+            let boundary = end.addingTimeInterval(-Double(displayedMinutes) * 60)
+            return boundary < input ? boundary : boundary.addingTimeInterval(-60)
+        }
+        return input == end ? end.addingTimeInterval(-60) : end
+    }
+
+    func discreteInput(after input: Date) -> Date? {
+        guard input < end else { return nil }
+        let remaining = end.timeIntervalSince(input)
+        let displayedMinutes = max(1, Int(ceil(remaining / 60)))
+        return end.addingTimeInterval(-Double(displayedMinutes - 1) * 60)
+    }
+}
+#endif
