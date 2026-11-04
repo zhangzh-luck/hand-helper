@@ -6,12 +6,12 @@ on:
       timetable_cell_diagnostic:
         description: 'DEBUG-only occupied-cell rendering comparison'
         required: false
-        default: none
+        default: "none"
         type: choice
         options:
-          - none
-          - disabled-button
-          - plain-rectangle
+          - "none"
+          - "disabled-button"
+          - "plain-rectangle"
   push:
     paths:
       - 'native_ios/**'
@@ -117,7 +117,7 @@ jobs:
           retention-days: 14
 
   timetable-cell-render-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.timetable_cell_diagnostic != 'none'
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.timetable_cell_diagnostic != 'none' }}
     runs-on: macos-15
     timeout-minutes: 45
     defaults:
