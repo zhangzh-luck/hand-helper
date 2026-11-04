@@ -397,26 +397,22 @@ struct TimetableView: View {
                         selectedCell?.periodNumber == periodNumber &&
                         selectedCell?.snapshotRevision == model.snapshotRevision &&
                         selectedCell?.authenticationRevision == state.authenticationRevision
-                    Button {
-                        let operationID = UUID()
-                        TimetableAddCourseDiagnostics.record("empty_cell_tapped",
-                            operationID: operationID)
-                        selectEmptyCell(projection: projection, weekday: day,
-                                        periodNumber: periodNumber, operationID: operationID)
-                    } label: {
-                        Rectangle()
-                            .fill(Color(uiColor: .secondarySystemGroupedBackground)
-                                .opacity(TimetableWallpaperStyle.cellOpacity(hasPhoto: showsWallpaper)))
-                            .overlay {
-                                if isSelected { Color.accentColor.opacity(0.17) }
-                            }
-                            .contentShape(Rectangle())
+                    #if DEBUG && TIMETABLE_OCCUPIED_CELL_RECTANGLE
+                    if occupied {
+                        timetableCellBackground(isSelected: false)
+                            .accessibilityHidden(true)
+                            .frame(width: cell.width, height: cell.height)
+                            .offset(x: cell.minX, y: cell.minY)
+                    } else {
+                        emptyCellButton(projection: projection, weekday: day,
+                                        periodNumber: periodNumber, cell: cell,
+                                        isSelected: isSelected, occupied: false)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(occupied)
-                    .accessibilityLabel("\(projection.dates[day - 1])，第 \(periodNumber) 节，选择空白格")
-                    .frame(width: cell.width, height: cell.height)
-                    .offset(x: cell.minX, y: cell.minY)
+                    #else
+                    emptyCellButton(projection: projection, weekday: day,
+                                    periodNumber: periodNumber, cell: cell,
+                                    isSelected: isSelected, occupied: occupied)
+                    #endif
                     if isSelected, let selectedCell {
                         let hitSide = min(44, min(cell.width - 2, cell.height - 2))
                         Button {
@@ -474,6 +470,35 @@ struct TimetableView: View {
             }
         }
         .frame(width: metrics.width, height: metrics.bodyHeight, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func timetableCellBackground(isSelected: Bool) -> some View {
+        Rectangle()
+            .fill(Color(uiColor: .secondarySystemGroupedBackground)
+                .opacity(TimetableWallpaperStyle.cellOpacity(hasPhoto: showsWallpaper)))
+            .overlay {
+                if isSelected { Color.accentColor.opacity(0.17) }
+            }
+            .contentShape(Rectangle())
+    }
+
+    private func emptyCellButton(projection: WeeklyTimetableProjection, weekday: Int,
+                                 periodNumber: Int, cell: CGRect, isSelected: Bool,
+                                 occupied: Bool) -> some View {
+        Button {
+            let operationID = UUID()
+            TimetableAddCourseDiagnostics.record("empty_cell_tapped", operationID: operationID)
+            selectEmptyCell(projection: projection, weekday: weekday,
+                            periodNumber: periodNumber, operationID: operationID)
+        } label: {
+            timetableCellBackground(isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .disabled(occupied)
+        .accessibilityLabel("\(projection.dates[weekday - 1])，第 \(periodNumber) 节，选择空白格")
+        .frame(width: cell.width, height: cell.height)
+        .offset(x: cell.minX, y: cell.minY)
     }
 
     @ViewBuilder
