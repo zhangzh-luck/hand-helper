@@ -223,12 +223,13 @@ final class WallpaperSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testWallpaperCropUsesRecordedPageContainerAspectRatio() {
+    func testWallpaperCropUsesRecordedPageContainerAspectRatio() throws {
         let state = AppState(api: MockAPIClient(), sessionStore: WallpaperTestSession(),
                              authentication: WallpaperTestAuthentication(), preferences: .standard)
         XCTAssertNil(state.wallpaperContainerAspectRatio(for: .analysis))
         state.updateWallpaperContainerSize(CGSize(width: 390, height: 720), for: .analysis)
-        XCTAssertEqual(state.wallpaperContainerAspectRatio(for: .analysis), 390 / 720, accuracy: 0.0001)
+        let aspectRatio = try XCTUnwrap(state.wallpaperContainerAspectRatio(for: .analysis))
+        XCTAssertEqual(aspectRatio, 390.0 / 720.0, accuracy: 0.0001)
     }
 
     @MainActor
