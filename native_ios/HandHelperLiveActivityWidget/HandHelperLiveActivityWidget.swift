@@ -67,8 +67,7 @@ struct HandHelperLiveActivityWidget: Widget {
                 Image(systemName: symbol(context.state.kind))
                     .accessibilityLabel(context.state.kind == "course" ? "课程" : "安排")
             } compactTrailing: {
-                Text(timerInterval: context.state.start...context.state.end, countsDown: true)
-                    .font(.caption2.monospacedDigit())
+                compactTrailingTimer(context)
             } minimal: {
                 Image(systemName: symbol(context.state.kind))
                     .accessibilityLabel(context.state.kind == "course" ? "课程" : "安排")
@@ -79,5 +78,23 @@ struct HandHelperLiveActivityWidget: Widget {
 
     private func symbol(_ kind: String) -> String {
         kind == "course" ? "book.closed.fill" : "checklist"
+    }
+
+    /// Debug-only A/B/C experiment for measuring Dynamic Island outer width.
+    /// Release and ordinary Debug builds always retain the production A layout.
+    @ViewBuilder
+    private func compactTrailingTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+        #if DEBUG && LIVE_ACTIVITY_WIDTH_TEST_C
+        // C: remove only compact trailing content. This is never compiled into Release.
+        EmptyView()
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_B
+        // B: keep the system timer but use proportional digits.
+        Text(timerInterval: context.state.start...context.state.end, countsDown: true)
+            .font(.caption2)
+        #else
+        // A: production baseline with fixed-width timer digits.
+        Text(timerInterval: context.state.start...context.state.end, countsDown: true)
+            .font(.caption2.monospacedDigit())
+        #endif
     }
 }

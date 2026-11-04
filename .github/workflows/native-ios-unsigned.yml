@@ -7,6 +7,14 @@ on:
         description: 'Also package a clearly marked Debug IPA with Live Activity diagnostics'
         type: boolean
         default: false
+      live_activity_width_variant:
+        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional timer digits, C=empty trailing)'
+        type: choice
+        options:
+          - A
+          - B
+          - C
+        default: A
   push:
     paths:
       - 'native_ios/**'
@@ -111,25 +119,37 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Build optional Live Activity diagnostic Debug IPA
-        if: (github.event_name == 'workflow_dispatch' && inputs.live_activity_diagnostic_ipa) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-activity-diagnostic]'))
+      - name: Build Live Activity diagnostic Debug IPA
+        id: live-activity-diagnostic
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-activity-diagnostic]'))
+        env:
+          LIVE_ACTIVITY_WIDTH_VARIANT: ${{ inputs.live_activity_width_variant || 'A' }}
         run: |
+          case "$LIVE_ACTIVITY_WIDTH_VARIANT" in
+            A) width_test_flags=() ;;
+            B) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_B") ;;
+            C) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_C") ;;
+            *) echo "Unsupported Live Activity width variant: $LIVE_ACTIVITY_WIDTH_VARIANT" >&2; exit 1 ;;
+          esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
             -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DiagnosticData CODE_SIGNING_ALLOWED=NO
+            -derivedDataPath build/DiagnosticData CODE_SIGNING_ALLOWED=NO "${width_test_flags[@]}"
           app=build/DiagnosticData/Build/Products/Debug-iphoneos/HandHelperNative.app
           test -x "$app/HandHelperNative"
           test -x "$app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
           mkdir -p build/diagnostic-ipa/Payload
           /usr/bin/ditto "$app" build/diagnostic-ipa/Payload/HandHelperNative.app
-          (cd build/diagnostic-ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa)
-          /usr/bin/unzip -tqq build/HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa
+          ipa="build/HandHelperNative-LiveActivity-WIDTH-${LIVE_ACTIVITY_WIDTH_VARIANT}-DIAGNOSTIC-unsigned.ipa"
+          (cd build/diagnostic-ipa && /usr/bin/ditto -c -k --keepParent Payload "../$(basename "$ipa")")
+          /usr/bin/unzip -tqq "$ipa"
+          echo "variant=$LIVE_ACTIVITY_WIDTH_VARIANT" >> "$GITHUB_OUTPUT"
+          echo "ipa=$ipa" >> "$GITHUB_OUTPUT"
 
       - name: Upload optional diagnostic Debug IPA
-        if: (github.event_name == 'workflow_dispatch' && inputs.live_activity_diagnostic_ipa) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-activity-diagnostic]'))
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-activity-diagnostic]'))
         uses: actions/upload-artifact@v4
         with:
-          name: HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned-ipa
-          path: native_ios/build/HandHelperNative-LiveActivity-DIAGNOSTIC-unsigned.ipa
+          name: HandHelperNative-LiveActivity-WIDTH-${{ steps.live-activity-diagnostic.outputs.variant }}-DIAGNOSTIC-unsigned-ipa
+          path: native_ios/${{ steps.live-activity-diagnostic.outputs.ipa }}
           if-no-files-found: error
           retention-days: 3

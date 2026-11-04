@@ -48,6 +48,9 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG"
     info:
       path: HandHelperLiveActivityWidget/Info.plist
       properties:
