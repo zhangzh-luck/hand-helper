@@ -30,46 +30,20 @@ final class LiveActivityTests: XCTestCase {
                                         at: date(instant), calendar: utc)
     }
 
-    func testCompactMinuteCountdownCeilingDisplay() {
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1 * 3600 + 37 * 60 + 22), "1:38")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1 * 3600 + 4 * 60 + 33), "1:05")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 59 * 60 + 59), "1:00")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 45 * 60 + 30), "0:46")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 10 * 60), "0:10")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 9 * 60 + 59), "0:10")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 4 * 60 + 48), "0:05")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 59), "0:01")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1), "0:01")
-        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 0), "0:00")
-    }
-
-    func testCompactMinuteCountdownDiscreteBoundariesAreStrict() throws {
-        let end = Date(timeIntervalSince1970: 10_000)
-        let input = end.addingTimeInterval(-(4 * 60 + 48))
-        let next = try XCTUnwrap(CompactMinuteCountdown.nextChange(after: input, endingAt: end))
-        let previous = try XCTUnwrap(CompactMinuteCountdown.previousChange(before: input, endingAt: end))
-        XCTAssertEqual(next, end.addingTimeInterval(-4 * 60))
-        XCTAssertEqual(previous, end.addingTimeInterval(-5 * 60))
-        XCTAssertGreaterThan(next, input)
-        XCTAssertLessThan(previous, input)
-        XCTAssertNil(CompactMinuteCountdown.nextChange(after: end, endingAt: end))
-        XCTAssertEqual(CompactMinuteCountdown.previousChange(before: end, endingAt: end),
-                       end.addingTimeInterval(-60))
-    }
-
     @available(iOS 18.0, *)
-    func testSystemDurationHourMinuteFormatRoundsUpWithoutSeconds() {
+    func testProductionCompactDurationFormatRoundsUpWithoutSeconds() {
         let style = Duration.TimeFormatStyle.time(
             pattern: .hourMinute(padHourToLength: 1, roundSeconds: .up)
         )
         .locale(Locale(identifier: "en_US_POSIX"))
 
-        // This is a static Foundation-format assertion only. The M diagnostic
-        // still needs a device test to prove ActivityKit refreshes its
-        // TimeDataSource in the compact Dynamic Island renderer.
+        // These are static Foundation-format assertions only. Device testing
+        // remains necessary to prove Live Activity refresh timing.
         XCTAssertEqual(Duration.seconds(65 * 60).formatted(style), "1:05")
         XCTAssertEqual(Duration.seconds(4 * 60 + 48).formatted(style), "0:05")
         XCTAssertEqual(Duration.seconds(59).formatted(style), "0:01")
+        XCTAssertEqual(Duration.seconds(-4 * 60).formatted(style), "-0:04")
+        XCTAssertEqual(Duration.zero.formatted(style), "0:00")
     }
 
     func testLegacyScheduleAndOptionalEndTimeEncoding() throws {
