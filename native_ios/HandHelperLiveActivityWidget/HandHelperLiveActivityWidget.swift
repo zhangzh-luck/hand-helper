@@ -63,7 +63,7 @@ struct HandHelperLiveActivityWidget: Widget {
         kind == "course" ? "book.closed.fill" : "checklist"
     }
 
-    /// Debug-only A-H experiment for measuring Dynamic Island outer width.
+    /// Debug-only A-N experiment for measuring Dynamic Island outer width.
     /// Release and ordinary Debug builds always retain the production A layout.
     @ViewBuilder
     private func compactTrailingTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
@@ -127,6 +127,24 @@ struct HandHelperLiveActivityWidget: Widget {
             .font(.caption2.monospacedDigit())
             .multilineTextAlignment(.trailing)
             .frame(width: 40, alignment: .trailing)
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_M
+        // M: test the system Duration offset source and hour-minute formatter.
+        // It intentionally remains diagnostic because the system owns both its
+        // sign convention and its Dynamic Island refresh behavior.
+        if #available(iOS 18.0, *) {
+            compactDurationOffsetTimer(context)
+        } else {
+            baselineCompactTimer(context)
+        }
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_N
+        // N: test the system date-range duration source independently from M.
+        // Its localized field selection is an observed diagnostic result, not a
+        // production formatting commitment.
+        if #available(iOS 18.0, *) {
+            compactDateRangeTimer(context)
+        } else {
+            baselineCompactTimer(context)
+        }
         #else
         baselineCompactTimer(context)
         #endif
@@ -149,6 +167,25 @@ struct HandHelperLiveActivityWidget: Widget {
         .font(.caption2.monospacedDigit())
         .multilineTextAlignment(.trailing)
         .frame(width: 40, alignment: .trailing)
+    }
+
+    @available(iOS 18.0, *)
+    private func compactDurationOffsetTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+        Text(
+            .durationOffset(to: context.state.end),
+            format: .time(pattern: .hourMinute(padHourToLength: 1, roundSeconds: .up))
+        )
+        .font(.caption2.monospacedDigit())
+        .multilineTextAlignment(.trailing)
+        .frame(width: 40, alignment: .trailing)
+    }
+
+    @available(iOS 18.0, *)
+    private func compactDateRangeTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+        Text(.dateRange(endingAt: context.state.end), format: .timeDuration)
+            .font(.caption2.monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .frame(width: 40, alignment: .trailing)
     }
 
     #if DEBUG
@@ -174,7 +211,7 @@ struct HandHelperLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func expandedBottomContent(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
-        #if DEBUG && (LIVE_ACTIVITY_WIDTH_TEST_G || LIVE_ACTIVITY_WIDTH_TEST_H)
+        #if DEBUG && (LIVE_ACTIVITY_WIDTH_TEST_G || LIVE_ACTIVITY_WIDTH_TEST_H || LIVE_ACTIVITY_WIDTH_TEST_M || LIVE_ACTIVITY_WIDTH_TEST_N)
         // G keeps the system's default Dynamic Island margins and only gives a
         // long location a full-width row rather than competing with the time.
         VStack(alignment: .leading, spacing: 5) {
@@ -220,7 +257,7 @@ struct HandHelperLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func expandedLeadingContent(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
-        #if DEBUG && LIVE_ACTIVITY_WIDTH_TEST_H
+        #if DEBUG && (LIVE_ACTIVITY_WIDTH_TEST_H || LIVE_ACTIVITY_WIDTH_TEST_M || LIVE_ACTIVITY_WIDTH_TEST_N)
         // H deliberately changes only the icon's own layout reservation. It does
         // not override Dynamic Island margins, so a remaining corner clip points
         // to the system region rather than an HStack compression of the glyph.

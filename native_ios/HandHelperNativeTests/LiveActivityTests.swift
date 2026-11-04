@@ -57,6 +57,21 @@ final class LiveActivityTests: XCTestCase {
                        end.addingTimeInterval(-60))
     }
 
+    @available(iOS 18.0, *)
+    func testSystemDurationHourMinuteFormatRoundsUpWithoutSeconds() {
+        let style = Duration.TimeFormatStyle.time(
+            pattern: .hourMinute(padHourToLength: 1, roundSeconds: .up)
+        )
+        .locale(Locale(identifier: "en_US_POSIX"))
+
+        // This is a static Foundation-format assertion only. The M diagnostic
+        // still needs a device test to prove ActivityKit refreshes its
+        // TimeDataSource in the compact Dynamic Island renderer.
+        XCTAssertEqual(Duration.seconds(65 * 60).formatted(style), "1:05")
+        XCTAssertEqual(Duration.seconds(4 * 60 + 48).formatted(style), "0:05")
+        XCTAssertEqual(Duration.seconds(59).formatted(style), "0:01")
+    }
+
     func testLegacyScheduleAndOptionalEndTimeEncoding() throws {
         let old = try JSONDecoder().decode(CustomSchedule.self, from:
             Data(#"{"id":-1,"title":"旧安排","scheduled_date":"2026-10-23","scheduled_time":"09:00"}"#.utf8))
