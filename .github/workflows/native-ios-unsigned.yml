@@ -219,13 +219,18 @@ jobs:
           test -x "$app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
           mkdir -p build/width-ipa/Payload
           /usr/bin/ditto "$app" build/width-ipa/Payload/HandHelperNative.app
-          (cd build/width-ipa && /usr/bin/ditto -c -k --keepParent Payload "../HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa")
-          /usr/bin/unzip -tqq "build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa"
+          if [ "${{ matrix.variant }}" = H ]; then
+            ipa="build/HandHelperNative-LiveActivity-H-DIAGNOSTIC-unsigned.ipa"
+          else
+            ipa="build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa"
+          fi
+          (cd build/width-ipa && /usr/bin/ditto -c -k --keepParent Payload "../$(basename "$ipa")")
+          /usr/bin/unzip -tqq "$ipa"
 
       - name: Upload width experiment IPA
         uses: actions/upload-artifact@v4
         with:
-          name: HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned-ipa
-          path: native_ios/build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa
+          name: ${{ matrix.variant == 'H' && 'HandHelperNative-LiveActivity-H-DIAGNOSTIC-unsigned-ipa' || format('HandHelperNative-LiveActivity-WIDTH-{0}-DIAGNOSTIC-unsigned-ipa', matrix.variant) }}
+          path: native_ios/build/${{ matrix.variant == 'H' && 'HandHelperNative-LiveActivity-H-DIAGNOSTIC-unsigned.ipa' || format('HandHelperNative-LiveActivity-WIDTH-{0}-DIAGNOSTIC-unsigned.ipa', matrix.variant) }}
           if-no-files-found: error
           retention-days: 3
