@@ -153,3 +153,63 @@ jobs:
           path: native_ios/${{ steps.live-activity-diagnostic.outputs.ipa }}
           if-no-files-found: error
           retention-days: 3
+
+  live-activity-width-experiments:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[live-activity-width-test]')
+    name: Live Activity width experiment (${{ matrix.variant }})
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B, C]
+    defaults:
+      run:
+        shell: bash
+        working-directory: native_ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          test -d /Applications/Xcode_26.1.1.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+
+      - name: Install pinned XcodeGen
+        run: |
+          mkdir -p .tools/xcodegen
+          curl --fail --location --retry 3 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.44.1/xcodegen.zip \
+            --output .tools/xcodegen.zip
+          unzip -q .tools/xcodegen.zip -d .tools/xcodegen
+          binary="$(find .tools/xcodegen -type f -name xcodegen | head -n 1)"
+          test -n "$binary"
+          chmod +x "$binary"
+          echo "XCODEGEN=$PWD/$binary" >> "$GITHUB_ENV"
+
+      - name: Build Debug width experiment
+        run: |
+          "$XCODEGEN" generate --spec project.yml
+          case "${{ matrix.variant }}" in
+            A) width_test_flags=() ;;
+            B) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_B") ;;
+            C) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_C") ;;
+          esac
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "build/Width-${{ matrix.variant }}" CODE_SIGNING_ALLOWED=NO "${width_test_flags[@]}"
+          app="build/Width-${{ matrix.variant }}/Build/Products/Debug-iphoneos/HandHelperNative.app"
+          test -x "$app/HandHelperNative"
+          test -x "$app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
+          mkdir -p build/width-ipa/Payload
+          /usr/bin/ditto "$app" build/width-ipa/Payload/HandHelperNative.app
+          (cd build/width-ipa && /usr/bin/ditto -c -k --keepParent Payload "../HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa")
+          /usr/bin/unzip -tqq "build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa"
+
+      - name: Upload width experiment IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned-ipa
+          path: native_ios/build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 3
