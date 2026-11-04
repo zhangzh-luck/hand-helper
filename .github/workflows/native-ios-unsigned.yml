@@ -2,16 +2,6 @@ name: Native SwiftUI iOS (unsigned)
 
 on:
   workflow_dispatch:
-    inputs:
-      timetable_cell_diagnostic:
-        description: 'DEBUG-only occupied-cell rendering comparison'
-        required: false
-        default: "none"
-        type: choice
-        options:
-          - "none"
-          - "disabled-button"
-          - "plain-rectangle"
   push:
     paths:
       - 'native_ios/**'
@@ -113,73 +103,5 @@ jobs:
         with:
           name: HandHelperNative-unsigned-ipa
           path: native_ios/build/HandHelperNative-unsigned.ipa
-          if-no-files-found: error
-          retention-days: 14
-
-  timetable-cell-render-diagnostic:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.timetable_cell_diagnostic != 'none' }}
-    runs-on: macos-15
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-        working-directory: native_ios
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: |
-          test -d /Applications/Xcode_26.1.1.app/Contents/Developer
-          sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
-
-      - name: Install pinned XcodeGen
-        run: |
-          mkdir -p .tools/xcodegen
-          curl --fail --location --retry 3 \
-            https://github.com/yonaskolb/XcodeGen/releases/download/2.44.1/xcodegen.zip \
-            --output .tools/xcodegen.zip
-          unzip -q .tools/xcodegen.zip -d .tools/xcodegen
-          binary="$(find .tools/xcodegen -type f -name xcodegen | head -n 1)"
-          test -n "$binary"
-          chmod +x "$binary"
-          "$binary" --version | grep -F '2.44.1'
-          echo "XCODEGEN=$PWD/$binary" >> "$GITHUB_ENV"
-
-      - name: Generate Xcode project
-        run: |
-          "$XCODEGEN" generate --spec project.yml
-
-      - name: Build DEBUG diagnostic IPA
-        env:
-          VARIANT: ${{ github.event.inputs.timetable_cell_diagnostic }}
-        run: |
-          flags='$(inherited) DEBUG'
-          if [ "$VARIANT" = 'plain-rectangle' ]; then
-            flags="$flags TIMETABLE_OCCUPIED_CELL_RECTANGLE"
-          fi
-          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
-            -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DiagnosticDerivedData CODE_SIGNING_ALLOWED=NO \
-            SWIFT_ACTIVE_COMPILATION_CONDITIONS="$flags"
-
-      - name: Package and verify DEBUG diagnostic IPA
-        env:
-          VARIANT: ${{ github.event.inputs.timetable_cell_diagnostic }}
-        run: |
-          app=build/DiagnosticDerivedData/Build/Products/Debug-iphoneos/HandHelperNative.app
-          test -x "$app/HandHelperNative"
-          test -x "$app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
-          mkdir -p build/diagnostic-ipa/Payload
-          /usr/bin/ditto "$app" build/diagnostic-ipa/Payload/HandHelperNative.app
-          name="HandHelperNative-TimetableCell-${VARIANT}-DEBUG-unsigned.ipa"
-          (cd build/diagnostic-ipa && /usr/bin/ditto -c -k --keepParent Payload "../$name")
-          /usr/bin/unzip -tqq "build/$name"
-          test -x "build/diagnostic-ipa/Payload/HandHelperNative.app/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
-
-      - name: Upload DEBUG diagnostic IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: HandHelperNative-TimetableCell-${{ inputs.timetable_cell_diagnostic }}-DEBUG-unsigned-ipa
-          path: native_ios/build/HandHelperNative-TimetableCell-${{ inputs.timetable_cell_diagnostic }}-DEBUG-unsigned.ipa
           if-no-files-found: error
           retention-days: 14

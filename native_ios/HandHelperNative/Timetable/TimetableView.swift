@@ -397,7 +397,6 @@ struct TimetableView: View {
                         selectedCell?.periodNumber == periodNumber &&
                         selectedCell?.snapshotRevision == model.snapshotRevision &&
                         selectedCell?.authenticationRevision == state.authenticationRevision
-                    #if DEBUG && TIMETABLE_OCCUPIED_CELL_RECTANGLE
                     if occupied {
                         timetableCellBackground(isSelected: false)
                             .accessibilityHidden(true)
@@ -406,13 +405,8 @@ struct TimetableView: View {
                     } else {
                         emptyCellButton(projection: projection, weekday: day,
                                         periodNumber: periodNumber, cell: cell,
-                                        isSelected: isSelected, occupied: false)
+                                        isSelected: isSelected)
                     }
-                    #else
-                    emptyCellButton(projection: projection, weekday: day,
-                                    periodNumber: periodNumber, cell: cell,
-                                    isSelected: isSelected, occupied: occupied)
-                    #endif
                     if isSelected, let selectedCell {
                         let hitSide = min(44, min(cell.width - 2, cell.height - 2))
                         Button {
@@ -484,8 +478,7 @@ struct TimetableView: View {
     }
 
     private func emptyCellButton(projection: WeeklyTimetableProjection, weekday: Int,
-                                 periodNumber: Int, cell: CGRect, isSelected: Bool,
-                                 occupied: Bool) -> some View {
+                                 periodNumber: Int, cell: CGRect, isSelected: Bool) -> some View {
         Button {
             let operationID = UUID()
             TimetableAddCourseDiagnostics.record("empty_cell_tapped", operationID: operationID)
@@ -495,7 +488,6 @@ struct TimetableView: View {
             timetableCellBackground(isSelected: isSelected)
         }
         .buttonStyle(.plain)
-        .disabled(occupied)
         .accessibilityLabel("\(projection.dates[weekday - 1])，第 \(periodNumber) 节，选择空白格")
         .frame(width: cell.width, height: cell.height)
         .offset(x: cell.minX, y: cell.minY)
