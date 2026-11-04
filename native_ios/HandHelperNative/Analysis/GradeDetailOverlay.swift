@@ -108,7 +108,7 @@ private struct GradeDetailSurface: View {
                     .transition(.opacity)
 
                 panelSurface(ScrollView(.vertical) {
-                    GradeDetailView(grade: route.grade, focusTitle: focusTitle, onClose: close,
+                    GradeDetailView(grade: route.grade, focusTitle: focusTitle, onClose: { close() },
                                     glassHeader: surfaceKind == .glass)
                         .frame(width: destination.width)
                 }
