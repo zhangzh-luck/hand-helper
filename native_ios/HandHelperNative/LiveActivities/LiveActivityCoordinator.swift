@@ -219,7 +219,7 @@ final class LiveActivityCoordinator {
         }
         let now = Date()
         diagnosticItem = CurrentActivityItem(
-            id: "diagnostic:\(UUID().uuidString)", kind: .schedule,
+            id: "diagnostic:\(UUID().uuidString)", kind: .course,
             title: scenario.title, start: now, end: now.addingTimeInterval(duration.rawValue),
             location: scenario.location)
         synchronize(state: state, foreground: true, reason: "diagnostic_start")
