@@ -98,7 +98,7 @@ struct HandHelperLiveActivityWidget: Widget {
         // discrete style. SwiftUI owns its minute-boundary refresh schedule.
         // iOS 17 retains the production A timer as an availability fallback.
         if #available(iOS 18.0, *) {
-            compactNumericMinuteTimer(context)
+            compactNumericMinuteTimer(context, width: 40)
         } else {
             baselineCompactTimer(context)
         }
