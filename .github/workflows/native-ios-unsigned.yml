@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       live_activity_width_variant:
-        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional, C=empty, D=40 pt, E=48 pt, F=fixed-size, G=localized minute timer, H=numeric minute timer plus icon layout)'
+        description: 'Debug Live Activity compact-width experiment (A-H existing; I=custom numeric 48 pt, J=custom numeric natural width, K=system timer control, L=static Text control)'
         type: choice
         options:
           - A
@@ -19,6 +19,10 @@ on:
           - F
           - G
           - H
+          - I
+          - J
+          - K
+          - L
         default: A
   push:
     paths:
@@ -139,6 +143,10 @@ jobs:
             F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
             G) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_G") ;;
             H) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_H") ;;
+            I) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_I") ;;
+            J) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_J") ;;
+            K) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_K") ;;
+            L) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_L") ;;
             *) echo "Unsupported Live Activity width variant: $LIVE_ACTIVITY_WIDTH_VARIANT" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
@@ -172,7 +180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [A, B, C, D, E, F, G, H]
+        variant: [A, B, C, D, E, F, G, H, I, J, K, L]
     defaults:
       run:
         shell: bash
@@ -209,6 +217,10 @@ jobs:
             F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
             G) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_G") ;;
             H) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_H") ;;
+            I) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_I") ;;
+            J) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_J") ;;
+            K) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_K") ;;
+            L) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_L") ;;
             *) echo "Unsupported Live Activity width variant: ${{ matrix.variant }}" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \

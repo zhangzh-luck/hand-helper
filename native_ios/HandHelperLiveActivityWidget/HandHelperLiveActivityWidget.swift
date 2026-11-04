@@ -102,6 +102,31 @@ struct HandHelperLiveActivityWidget: Widget {
         } else {
             baselineCompactTimer(context)
         }
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_I
+        // I: same custom dynamic source as H, widened only to test truncation.
+        if #available(iOS 18.0, *) {
+            compactNumericMinuteTimer(context, width: 48)
+        } else {
+            baselineCompactTimer(context)
+        }
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_J
+        // J: same custom dynamic source with no proposed width.
+        if #available(iOS 18.0, *) {
+            compactNumericMinuteTimer(context, width: nil)
+        } else {
+            baselineCompactTimer(context)
+        }
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_K
+        // K: ActivityKit's established timer renderer, retained only as a
+        // control for custom-format compatibility. It intentionally has seconds.
+        widthConstrainedTimer(context, width: 40)
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_L
+        // L: fixed pure-numeric text. It diagnoses compact Text rendering only;
+        // it is not a production countdown and never updates automatically.
+        Text("1:05")
+            .font(.caption2.monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .frame(width: 40, alignment: .trailing)
         #else
         baselineCompactTimer(context)
         #endif
@@ -128,11 +153,12 @@ struct HandHelperLiveActivityWidget: Widget {
 
     #if DEBUG
     @available(iOS 18.0, *)
-    private func compactNumericMinuteTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
+    private func compactNumericMinuteTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>,
+                                           width: CGFloat?) -> some View {
         Text(.currentDate, format: CompactMinuteCountdownFormat(end: context.state.end))
             .font(.caption2.monospacedDigit())
             .multilineTextAlignment(.trailing)
-            .frame(width: 40, alignment: .trailing)
+            .frame(width: width, alignment: .trailing)
     }
     #endif
 
@@ -226,27 +252,15 @@ private struct CompactMinuteCountdownFormat: DiscreteFormatStyle {
     let end: Date
 
     func format(_ value: Date) -> String {
-        let remaining = max(0, end.timeIntervalSince(value))
-        let totalMinutes = Int(ceil(remaining / 60))
-        let minutes = totalMinutes % 60
-        return "\(totalMinutes / 60):\(minutes < 10 ? "0" : "")\(minutes)"
+        CompactMinuteCountdown.display(at: value, endingAt: end)
     }
 
     func discreteInput(before input: Date) -> Date? {
-        guard input >= end else {
-            let remaining = max(0, end.timeIntervalSince(input))
-            let displayedMinutes = Int(ceil(remaining / 60))
-            let boundary = end.addingTimeInterval(-Double(displayedMinutes) * 60)
-            return boundary < input ? boundary : boundary.addingTimeInterval(-60)
-        }
-        return input == end ? end.addingTimeInterval(-60) : end
+        CompactMinuteCountdown.previousChange(before: input, endingAt: end)
     }
 
     func discreteInput(after input: Date) -> Date? {
-        guard input < end else { return nil }
-        let remaining = end.timeIntervalSince(input)
-        let displayedMinutes = max(1, Int(ceil(remaining / 60)))
-        return end.addingTimeInterval(-Double(displayedMinutes - 1) * 60)
+        CompactMinuteCountdown.nextChange(after: input, endingAt: end)
     }
 }
 #endif

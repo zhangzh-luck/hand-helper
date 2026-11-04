@@ -41,6 +41,7 @@ targets:
     sources:
       - path: HandHelperLiveActivityWidget
       - path: HandHelperNative/LiveActivities/HandHelperActivityAttributes.swift
+      - path: HandHelperNative/LiveActivities/CompactMinuteCountdown.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.native.dev.liveactivity

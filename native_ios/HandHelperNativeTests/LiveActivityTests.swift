@@ -30,6 +30,33 @@ final class LiveActivityTests: XCTestCase {
                                         at: date(instant), calendar: utc)
     }
 
+    func testCompactMinuteCountdownCeilingDisplay() {
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1 * 3600 + 37 * 60 + 22), "1:38")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1 * 3600 + 4 * 60 + 33), "1:05")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 59 * 60 + 59), "1:00")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 45 * 60 + 30), "0:46")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 10 * 60), "0:10")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 9 * 60 + 59), "0:10")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 4 * 60 + 48), "0:05")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 59), "0:01")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 1), "0:01")
+        XCTAssertEqual(CompactMinuteCountdown.display(remaining: 0), "0:00")
+    }
+
+    func testCompactMinuteCountdownDiscreteBoundariesAreStrict() throws {
+        let end = Date(timeIntervalSince1970: 10_000)
+        let input = end.addingTimeInterval(-(4 * 60 + 48))
+        let next = try XCTUnwrap(CompactMinuteCountdown.nextChange(after: input, endingAt: end))
+        let previous = try XCTUnwrap(CompactMinuteCountdown.previousChange(before: input, endingAt: end))
+        XCTAssertEqual(next, end.addingTimeInterval(-4 * 60))
+        XCTAssertEqual(previous, end.addingTimeInterval(-5 * 60))
+        XCTAssertGreaterThan(next, input)
+        XCTAssertLessThan(previous, input)
+        XCTAssertNil(CompactMinuteCountdown.nextChange(after: end, endingAt: end))
+        XCTAssertEqual(CompactMinuteCountdown.previousChange(before: end, endingAt: end),
+                       end.addingTimeInterval(-60))
+    }
+
     func testLegacyScheduleAndOptionalEndTimeEncoding() throws {
         let old = try JSONDecoder().decode(CustomSchedule.self, from:
             Data(#"{"id":-1,"title":"旧安排","scheduled_date":"2026-10-23","scheduled_time":"09:00"}"#.utf8))
