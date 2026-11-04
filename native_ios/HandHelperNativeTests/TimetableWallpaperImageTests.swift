@@ -91,11 +91,14 @@ final class TimetableWallpaperImageTests: XCTestCase {
 
     @MainActor
     func testCropNormalizationAppliesImageOrientation() throws {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40), format: format)
         let sideways = UIImage(cgImage: renderer.image { context in
             UIColor.systemBlue.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
         }.cgImage!, scale: 1, orientation: .right)
+        XCTAssertEqual(sideways.imageOrientation, .right)
         let normalized = try WallpaperCropProcessor.normalized(sideways)
         XCTAssertEqual(normalized.imageOrientation, .up)
         XCTAssertEqual(normalized.size, CGSize(width: 40, height: 80))

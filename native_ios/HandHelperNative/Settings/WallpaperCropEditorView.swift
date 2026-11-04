@@ -20,8 +20,13 @@ enum WallpaperCropProcessor {
         guard image.cgImage != nil, image.size.width > 0, image.size.height > 0 else {
             throw WallpaperCropError.invalidImage
         }
-        let rotatesDimensions = image.imageOrientation == .left || image.imageOrientation == .leftMirrored ||
-            image.imageOrientation == .right || image.imageOrientation == .rightMirrored
+        let rotatesDimensions: Bool
+        switch image.imageOrientation {
+        case .left, .leftMirrored, .right, .rightMirrored:
+            rotatesDimensions = true
+        default:
+            rotatesDimensions = false
+        }
         let size = rotatesDimensions ? CGSize(width: image.size.height, height: image.size.width) : image.size
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
