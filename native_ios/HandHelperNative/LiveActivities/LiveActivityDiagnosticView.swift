@@ -82,10 +82,10 @@ struct LiveActivityDiagnosticView: View {
 }
 
 enum LiveActivityDiagnosticDuration: TimeInterval, CaseIterable, Identifiable {
-    case fiveMinutes = 5 * 60
-    case tenMinutes = 10 * 60
-    case fifteenMinutes = 15 * 60
-    case sixtyFiveMinutes = 65 * 60
+    case fiveMinutes = 300
+    case tenMinutes = 600
+    case fifteenMinutes = 900
+    case sixtyFiveMinutes = 3900
 
     var id: TimeInterval { rawValue }
 
