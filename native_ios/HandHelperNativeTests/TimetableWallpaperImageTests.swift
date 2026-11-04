@@ -80,6 +80,28 @@ final class TimetableWallpaperImageTests: XCTestCase {
     }
 
     @MainActor
+    func testCropProducesExpectedAspectRatioAndBoundedJPEG() throws {
+        let source = try WallpaperCropProcessor.normalized(UIImage(data: imageData(size: CGSize(width: 1600, height: 800)))!)
+        let output = try WallpaperCropProcessor.jpeg(image: source,
+                                                      crop: CGRect(x: 400, y: 0, width: 800, height: 800))
+        let image = try XCTUnwrap(UIImage(data: output))
+        XCTAssertEqual(image.size.width, image.size.height, accuracy: 0.5)
+        XCTAssertLessThanOrEqual(output.count, TimetableWallpaperImage.maxStoredBytes)
+    }
+
+    @MainActor
+    func testCropNormalizationAppliesImageOrientation() throws {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40))
+        let sideways = UIImage(cgImage: renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        }.cgImage!, scale: 1, orientation: .right)
+        let normalized = try WallpaperCropProcessor.normalized(sideways)
+        XCTAssertEqual(normalized.imageOrientation, .up)
+        XCTAssertEqual(normalized.size, CGSize(width: 40, height: 80))
+    }
+
+    @MainActor
     private func imageData(size: CGSize) -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

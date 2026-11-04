@@ -81,6 +81,7 @@ final class AppState: ObservableObject {
     @Published private(set) var wallpaperVersion = 0
     @Published private(set) var timetableWallpaperVersion = 0
     @Published private(set) var analysisWallpaperVersion = 0
+    private var wallpaperContainerSizes: [WallpaperKind: CGSize] = [:]
     private var courseDataSequence = 0
     private var localManualCourseSequence = 0
     @Published private(set) var pendingTimetableImport: PendingTimetableImport?
@@ -155,6 +156,20 @@ final class AppState: ObservableObject {
     func analysisWallpaperDidChange(revision: Int) throws {
         _ = try requireCurrentAccount(revision: revision)
         analysisWallpaperVersion += 1
+    }
+
+    /// The tab controller supplies actual page-host dimensions, so a wallpaper
+    /// crop uses the receiving page's layout ratio rather than a screen ratio.
+    func updateWallpaperContainerSize(_ size: CGSize, for kind: WallpaperKind) {
+        guard size.width > 0, size.height > 0 else { return }
+        wallpaperContainerSizes[kind] = size
+    }
+
+    func wallpaperContainerAspectRatio(for kind: WallpaperKind) -> CGFloat? {
+        guard let size = wallpaperContainerSizes[kind], size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return size.width / size.height
     }
 
     var homeAvatar: UIImage? { cachedHomeAvatar }

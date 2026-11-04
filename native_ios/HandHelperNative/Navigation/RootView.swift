@@ -207,6 +207,7 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
 }
 
 final class NativeTabController: UITabBarController, UITabBarControllerDelegate {
+    private weak var appState: AppState?
     private var keyboardCoversBottom = false
     private var detailPresented = false
 
@@ -215,6 +216,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
          gradeDetail: GradeDetailCoordinator? = nil,
          deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
         super.init(nibName: nil, bundle: nil)
+        appState = state
         viewControllers = AppTab.allCases.map { tab in
             let page: AnyView
             switch tab {
@@ -242,6 +244,19 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(state:)") }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard let appState else { return }
+        for (tab, controller) in zip(AppTab.allCases, viewControllers ?? []) {
+            switch tab {
+            case .today: appState.updateWallpaperContainerSize(controller.view.bounds.size, for: .today)
+            case .timetable: appState.updateWallpaperContainerSize(controller.view.bounds.size, for: .timetable)
+            case .analysis: appState.updateWallpaperContainerSize(controller.view.bounds.size, for: .analysis)
+            case .settings: continue
+            }
+        }
+    }
 
     deinit { NotificationCenter.default.removeObserver(self) }
 

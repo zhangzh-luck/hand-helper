@@ -223,6 +223,42 @@ final class WallpaperSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testWallpaperCropUsesRecordedPageContainerAspectRatio() {
+        let state = AppState(api: MockAPIClient(), sessionStore: WallpaperTestSession(),
+                             authentication: WallpaperTestAuthentication(), preferences: .standard)
+        XCTAssertNil(state.wallpaperContainerAspectRatio(for: .analysis))
+        state.updateWallpaperContainerSize(CGSize(width: 390, height: 720), for: .analysis)
+        XCTAssertEqual(state.wallpaperContainerAspectRatio(for: .analysis), 390 / 720, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testCroppedSelectionWritesOnlyAfterExplicitConfirmation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = WallpaperTestSession()
+        session.save(cookie: "session=fixture")
+        let suite = "wallpaper-crop-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let state = AppState(api: MockAPIClient(), sessionStore: session,
+                             authentication: WallpaperTestAuthentication(), preferences: preferences)
+        await state.restoreSession()
+        let store = WallpaperStore(session: session, account: state.verifiedAccount, directory: folder)
+        let model = WallpaperSettingsModel(state: state, revision: state.authenticationRevision, store: store)
+        let source = sampleImage()
+        let pending = await model.selectPhoto(using: { source }, aspectRatio: 9 / 16)
+        XCTAssertNotNil(pending)
+        XCTAssertNil(try store.load())
+
+        let normalized = try WallpaperCropProcessor.normalized(try XCTUnwrap(UIImage(data: source)))
+        let crop = try WallpaperCropProcessor.jpeg(image: normalized,
+                                                    crop: CGRect(origin: .zero, size: normalized.size))
+        await model.saveCropped(crop, generation: try XCTUnwrap(pending).generation)
+        XCTAssertEqual(try store.load(), crop)
+        XCTAssertEqual(state.wallpaperVersion, 1)
+    }
+
+    @MainActor
     private func sampleImage() -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
