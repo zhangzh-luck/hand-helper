@@ -239,7 +239,7 @@ struct WallpaperSettingsView: View {
                 return
             }
             selectionTask = Task {
-                cropSelection = await model.selectPhoto({ try await item.loadTransferable(type: Data.self) },
+                cropSelection = await model.selectPhoto(using: { try await item.loadTransferable(type: Data.self) },
                                                         aspectRatio: aspectRatio)
                 selectedPhoto = nil
                 selectionTask = nil
