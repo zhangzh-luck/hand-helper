@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreImage
 
 enum WallpaperCropError: LocalizedError {
     case invalidImage
@@ -17,22 +18,30 @@ enum WallpaperCropError: LocalizedError {
 
 enum WallpaperCropProcessor {
     static func normalized(_ image: UIImage) throws -> UIImage {
-        guard image.cgImage != nil, image.size.width > 0, image.size.height > 0 else {
+        guard let source = image.cgImage, image.size.width > 0, image.size.height > 0 else {
             throw WallpaperCropError.invalidImage
         }
-        let rotatesDimensions: Bool
-        switch image.imageOrientation {
-        case .left, .leftMirrored, .right, .rightMirrored:
-            rotatesDimensions = true
-        default:
-            rotatesDimensions = false
+        let oriented = CIImage(cgImage: source)
+            .oriented(forExifOrientation: exifOrientation(for: image.imageOrientation))
+        let extent = oriented.extent.integral
+        guard extent.width > 0, extent.height > 0,
+              let output = CIContext().createCGImage(oriented, from: extent) else {
+            throw WallpaperCropError.invalidImage
         }
-        let size = rotatesDimensions ? CGSize(width: image.size.height, height: image.size.width) : image.size
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
+        return UIImage(cgImage: output, scale: 1, orientation: .up)
+    }
+
+    private static func exifOrientation(for orientation: UIImage.Orientation) -> Int32 {
+        switch orientation {
+        case .up: 1
+        case .upMirrored: 2
+        case .down: 3
+        case .downMirrored: 4
+        case .leftMirrored: 5
+        case .right: 6
+        case .rightMirrored: 7
+        case .left: 8
+        @unknown default: 1
         }
     }
 
