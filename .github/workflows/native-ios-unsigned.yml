@@ -146,11 +146,12 @@ jobs:
           echo "XCODEGEN=$PWD/$binary" >> "$GITHUB_ENV"
 
       - name: Generate Xcode project
-        run: "$XCODEGEN" generate --spec project.yml
+        run: |
+          "$XCODEGEN" generate --spec project.yml
 
       - name: Build DEBUG diagnostic IPA
         env:
-          VARIANT: ${{ inputs.timetable_cell_diagnostic }}
+          VARIANT: ${{ github.event.inputs.timetable_cell_diagnostic }}
         run: |
           flags='$(inherited) DEBUG'
           if [ "$VARIANT" = 'plain-rectangle' ]; then
@@ -163,7 +164,7 @@ jobs:
 
       - name: Package and verify DEBUG diagnostic IPA
         env:
-          VARIANT: ${{ inputs.timetable_cell_diagnostic }}
+          VARIANT: ${{ github.event.inputs.timetable_cell_diagnostic }}
         run: |
           app=build/DiagnosticDerivedData/Build/Products/Debug-iphoneos/HandHelperNative.app
           test -x "$app/HandHelperNative"
