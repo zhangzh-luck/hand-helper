@@ -220,6 +220,8 @@ jobs:
           mkdir -p build/width-ipa/Payload
           /usr/bin/ditto "$app" build/width-ipa/Payload/HandHelperNative.app
           if [ "${{ matrix.variant }}" = H ]; then
+            # H is a combined timer-and-expanded-layout diagnostic, so keep its
+            # artifact name distinct from the historical compact-width series.
             ipa="build/HandHelperNative-LiveActivity-H-DIAGNOSTIC-unsigned.ipa"
           else
             ipa="build/HandHelperNative-LiveActivity-WIDTH-${{ matrix.variant }}-DIAGNOSTIC-unsigned.ipa"
