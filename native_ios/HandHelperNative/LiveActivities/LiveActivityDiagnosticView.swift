@@ -6,6 +6,7 @@ struct LiveActivityDiagnosticView: View {
     @ObservedObject var state: AppState
     @ObservedObject private var diagnostics: LiveActivityDiagnostics
     @Environment(\.scenePhase) private var scenePhase
+    @State private var testDuration = LiveActivityDiagnosticDuration.tenMinutes
 
     init(state: AppState) {
         self.state = state
@@ -36,9 +37,14 @@ struct LiveActivityDiagnosticView: View {
                     .textSelection(.enabled)
             }
             Section {
-                Button("启动 10 分钟测试活动") {
+                Picker("测试时长", selection: $testDuration) {
+                    ForEach(LiveActivityDiagnosticDuration.allCases) { duration in
+                        Text(duration.label).tag(duration)
+                    }
+                }
+                Button("启动\(testDuration.label)测试活动") {
                     state.liveActivityCoordinator.startDiagnosticTest(state: state,
-                        foreground: scenePhase == .active)
+                        foreground: scenePhase == .active, duration: testDuration)
                 }
                 .disabled(!canStart)
                 Button("结束测试活动") {
@@ -50,7 +56,7 @@ struct LiveActivityDiagnosticView: View {
                         foreground: scenePhase == .active, reason: "diagnostic_refresh")
                 }
             } footer: {
-                Text("仅 Debug 构建可见。测试活动也要求应用开关开启、系统授权、账号已验证且 App 正在前台。Xcode Console 可用 [LiveActivity] 过滤完整事件。")
+                Text("仅 Debug 构建可见。5、15、65 分钟用于覆盖计时格式边界。测试活动也要求应用开关开启、系统授权、账号已验证且 App 正在前台。Xcode Console 可用 [LiveActivity] 过滤完整事件。")
             }
         }
         .navigationTitle("实时活动诊断")
@@ -71,6 +77,24 @@ struct LiveActivityDiagnosticView: View {
             Text(label)
             Spacer()
             Text(value).foregroundStyle(.secondary)
+        }
+    }
+}
+
+enum LiveActivityDiagnosticDuration: TimeInterval, CaseIterable, Identifiable {
+    case fiveMinutes = 5 * 60
+    case tenMinutes = 10 * 60
+    case fifteenMinutes = 15 * 60
+    case sixtyFiveMinutes = 65 * 60
+
+    var id: TimeInterval { rawValue }
+
+    var label: String {
+        switch self {
+        case .fiveMinutes: "5 分钟"
+        case .tenMinutes: "10 分钟"
+        case .fifteenMinutes: "15 分钟"
+        case .sixtyFiveMinutes: "65 分钟"
         }
     }
 }

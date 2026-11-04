@@ -80,7 +80,7 @@ struct HandHelperLiveActivityWidget: Widget {
         kind == "course" ? "book.closed.fill" : "checklist"
     }
 
-    /// Debug-only A/B/C experiment for measuring Dynamic Island outer width.
+    /// Debug-only A-F experiment for measuring Dynamic Island outer width.
     /// Release and ordinary Debug builds always retain the production A layout.
     @ViewBuilder
     private func compactTrailingTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>) -> some View {
@@ -91,10 +91,31 @@ struct HandHelperLiveActivityWidget: Widget {
         // B: keep the system timer but use proportional digits.
         Text(timerInterval: context.state.start...context.state.end, countsDown: true)
             .font(.caption2)
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_D
+        // D: constrain only the system timer's proposed width to 40 points.
+        widthConstrainedTimer(context, width: 40)
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_E
+        // E: same as D, with a 48 point proposed width.
+        widthConstrainedTimer(context, width: 48)
+        #elseif DEBUG && LIVE_ACTIVITY_WIDTH_TEST_F
+        // F: preserve the timer's natural horizontal intrinsic size.
+        Text(timerInterval: context.state.start...context.state.end, countsDown: true)
+            .font(.caption2.monospacedDigit())
+            .fixedSize(horizontal: true, vertical: false)
         #else
         // A: production baseline with fixed-width timer digits.
         Text(timerInterval: context.state.start...context.state.end, countsDown: true)
             .font(.caption2.monospacedDigit())
         #endif
+    }
+
+    /// Shared only by Debug D/E. The fixed frame applies to the timer content,
+    /// not to the Dynamic Island's system-owned outer capsule.
+    private func widthConstrainedTimer(_ context: ActivityViewContext<HandHelperActivityAttributes>,
+                                       width: CGFloat) -> some View {
+        Text(timerInterval: context.state.start...context.state.end, countsDown: true)
+            .font(.caption2.monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .frame(width: width, alignment: .trailing)
     }
 }

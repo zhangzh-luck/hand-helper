@@ -8,12 +8,15 @@ on:
         type: boolean
         default: false
       live_activity_width_variant:
-        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional timer digits, C=empty trailing)'
+        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional timer digits, C=empty trailing, D=40 pt timer, E=48 pt timer, F=fixed-size timer)'
         type: choice
         options:
           - A
           - B
           - C
+          - D
+          - E
+          - F
         default: A
   push:
     paths:
@@ -129,6 +132,9 @@ jobs:
             A) width_test_flags=() ;;
             B) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_B") ;;
             C) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_C") ;;
+            D) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_D") ;;
+            E) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_E") ;;
+            F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
             *) echo "Unsupported Live Activity width variant: $LIVE_ACTIVITY_WIDTH_VARIANT" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
@@ -162,7 +168,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [A, B, C]
+        variant: [A, B, C, D, E, F]
     defaults:
       run:
         shell: bash
@@ -194,6 +200,10 @@ jobs:
             A) width_test_flags=() ;;
             B) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_B") ;;
             C) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_C") ;;
+            D) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_D") ;;
+            E) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_E") ;;
+            F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
+            *) echo "Unsupported Live Activity width variant: ${{ matrix.variant }}" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
             -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
