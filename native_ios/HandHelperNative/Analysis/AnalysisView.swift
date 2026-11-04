@@ -135,7 +135,9 @@ struct AnalysisView: View {
         let context = GradeDetailContext(owner: owner,
             authenticationRevision: state.authenticationRevision,
             termID: termID, gradeID: grade.id)
-        _ = gradeDetail.open(grade: grade, context: context)
+        if gradeDetail.open(grade: grade, context: context) {
+            AppHaptics.trigger(.detailOpened)
+        }
     }
 
     private func validateGradeDetail() {

@@ -286,7 +286,10 @@ struct TodayView: View {
 
     private var avatarButton: some View {
         Button {
-            if let route = avatarPreviewRoute { onAvatarPreview(route) }
+            if let route = avatarPreviewRoute {
+                AppHaptics.trigger(.detailOpened)
+                onAvatarPreview(route)
+            }
         } label: {
             Group {
                 if let avatarData, let image = UIImage(data: avatarData) {

@@ -291,7 +291,10 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
-        selectedTabDidChange?(AppTab(rawValue: selectedIndex) ?? .today)
+        let tab = AppTab(rawValue: selectedIndex) ?? .today
+        guard appState?.selectedTab != tab else { return }
+        AppHaptics.trigger(.tabChanged)
+        selectedTabDidChange?(tab)
     }
 
     var selectedTabDidChange: ((AppTab) -> Void)?

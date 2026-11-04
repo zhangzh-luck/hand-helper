@@ -145,7 +145,7 @@ private struct GradeDetailSurface: View {
             open(at: GradeDetailLayout.frame(in: bounds, safeArea: safeArea,
                                              contentHeight: height), contentHeight: height)
         }
-        .onChange(of: bounds.size) { _, _ in close() }
+        .onChange(of: bounds.size) { _, _ in close(userInitiated: false) }
     }
 
     private func open(at frame: CGRect, contentHeight: CGFloat) {
@@ -160,8 +160,9 @@ private struct GradeDetailSurface: View {
         }
     }
 
-    private func close() {
+    private func close(userInitiated: Bool = true) {
         guard !closing, detail.beginClose(id: route.id) else { return }
+        if userInitiated { AppHaptics.trigger(.detailClosed) }
         closing = true
         focusTitle = false
         guard destination != nil else { detail.finish(id: route.id); return }

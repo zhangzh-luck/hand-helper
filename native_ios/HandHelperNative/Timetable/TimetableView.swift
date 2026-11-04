@@ -333,7 +333,9 @@ struct TimetableView: View {
     }
 
     private func changeWeek(_ delta: Int?) {
+        let previousWeek = model.selectedWeek
         if let delta { model.moveWeek(delta) } else { model.jumpToCurrentWeek() }
+        if model.selectedWeek != previousWeek { AppHaptics.trigger(.discreteSelection) }
     }
 
     @ViewBuilder
@@ -521,8 +523,12 @@ struct TimetableView: View {
             authenticationRevision: state.authenticationRevision, termID: projection.term.id,
             week: projection.week, snapshotRevision: model.snapshotRevision,
             weekday: weekday, periodNumber: periodNumber)
+        let previousSelection = emptyCellSelection.selected
         withAnimation(.easeOut(duration: 0.16)) {
             emptyCellSelection.select(cell, operationID: operationID)
+        }
+        if emptyCellSelection.selected == cell, previousSelection != cell {
+            AppHaptics.trigger(.discreteSelection)
         }
     }
 
@@ -537,7 +543,9 @@ struct TimetableView: View {
             week: model.selectedWeek,
             snapshotRevision: model.snapshotRevision,
             verifiedOwner: try? state.requireCurrentAccount(revision: cell.authenticationRevision))
-        _ = emptyCellSelection.open(cell, context: context, tappedAt: tappedAt)
+        if emptyCellSelection.open(cell, context: context, tappedAt: tappedAt) == nil {
+            AppHaptics.trigger(.detailOpened)
+        }
     }
 
     private func periodLabel(_ period: PeriodInfo) -> some View {
@@ -577,6 +585,7 @@ struct TimetableView: View {
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
             if detail.open(course: course, context: context, color: courseColor(course.name),
                            editableManualCourse: model.editableManualCourse(for: course, context: context)) {
+                AppHaptics.trigger(.detailOpened)
                 emptyCellSelection.clear(reason: "course_detail_opened")
             }
         } label: {

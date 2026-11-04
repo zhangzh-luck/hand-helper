@@ -28,6 +28,9 @@ struct SettingsView: View {
                         .padding(.vertical, 6)
                         .accessibilityElement(children: .combine)
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
                 } footer: {
                     Text("头像和显示名称仅保存在此设备。")
                 }
@@ -39,6 +42,9 @@ struct SettingsView: View {
                         SettingsNavigationRow(title: "时间设置", symbol: "clock",
                                               color: Color(uiColor: .systemBlue))
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
                         DataImportView(state: state)
@@ -46,6 +52,9 @@ struct SettingsView: View {
                         SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
                                               color: Color(uiColor: .systemTeal))
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
                         PersonalizationView(state: state)
@@ -53,6 +62,9 @@ struct SettingsView: View {
                         SettingsNavigationRow(title: "个性化", symbol: "paintpalette",
                                               color: Color(uiColor: .systemPurple))
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                 }
 
@@ -63,6 +75,9 @@ struct SettingsView: View {
                         Text("关于航的助手")
                             .frame(minHeight: 56)
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                 }
             }

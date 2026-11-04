@@ -134,7 +134,9 @@ struct WallpaperCropEditorView: View {
                         Button("完成") {
                             do {
                                 let crop = cropRect(imageSize: imageSize, cropSize: cropSize, scale: scale)
-                                onComplete(try WallpaperCropProcessor.jpeg(image: image, crop: crop))
+                                let data = try WallpaperCropProcessor.jpeg(image: image, crop: crop)
+                                AppHaptics.trigger(.cropCompleted)
+                                onComplete(data)
                             } catch {
                                 errorMessage = error.localizedDescription
                             }

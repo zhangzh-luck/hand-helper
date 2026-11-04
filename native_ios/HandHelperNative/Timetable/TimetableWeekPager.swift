@@ -160,6 +160,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             }
             if let committed = TimetablePageTransition.committedWeek(
                 from: visibleWeek, to: displayed.week, completed: completed), !externalSelection {
+                if committed != visibleWeek { AppHaptics.trigger(.discreteSelection) }
                 visibleWeek = committed
                 parent.model.selectWeek(committed)
             }

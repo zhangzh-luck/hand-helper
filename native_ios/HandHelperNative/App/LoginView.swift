@@ -68,6 +68,9 @@ struct LoginView: View {
             }
             .background(loginBackground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: state.loginError) { _, error in
+                if error != nil { AppHaptics.trigger(.loginFailed) }
+            }
         }
     }
 

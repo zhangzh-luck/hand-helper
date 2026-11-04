@@ -159,7 +159,7 @@ private struct TimetableDetailSurface: View {
                                                  preferredHeight: height),
                  contentHeight: height)
         }
-        .onChange(of: bounds.size) { _, _ in close() }
+        .onChange(of: bounds.size) { _, _ in close(userInitiated: false) }
     }
 
     private func open(at frame: CGRect, contentHeight: CGFloat) {
@@ -176,13 +176,14 @@ private struct TimetableDetailSurface: View {
         }
     }
 
-    private func close(action: TimetableManualCourseAction? = nil) {
+    private func close(action: TimetableManualCourseAction? = nil, userInitiated: Bool = true) {
         guard !closing else { return }
         if let action {
             guard detail.beginAction(action, id: route.id) else { return }
         } else {
             guard detail.beginClose(id: route.id) else { return }
         }
+        if userInitiated { AppHaptics.trigger(.detailClosed) }
         closing = true
         focusTitle = false
         withAnimation(TimetableDetailMotion.animation(opening: false, reduceMotion: reduceMotion),
