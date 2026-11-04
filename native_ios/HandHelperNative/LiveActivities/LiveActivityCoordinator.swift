@@ -210,7 +210,8 @@ final class LiveActivityCoordinator {
 
     #if DEBUG
     func startDiagnosticTest(state: AppState, foreground: Bool,
-                             duration: LiveActivityDiagnosticDuration = .tenMinutes) {
+                             duration: LiveActivityDiagnosticDuration = .tenMinutes,
+                             scenario: LiveActivityDiagnosticScenario = .standard) {
         guard foreground, state.liveActivitiesEnabled, driver.isAvailable,
               (try? state.requireCurrentAccount(revision: state.authenticationRevision)) != nil else {
             diagnostics.record("test rejected: foreground, switch, system permission or verified account missing", outcome: true)
@@ -219,7 +220,8 @@ final class LiveActivityCoordinator {
         let now = Date()
         diagnosticItem = CurrentActivityItem(
             id: "diagnostic:\(UUID().uuidString)", kind: .schedule,
-            title: "灵动岛测试", start: now, end: now.addingTimeInterval(duration.rawValue), location: nil)
+            title: scenario.title, start: now, end: now.addingTimeInterval(duration.rawValue),
+            location: scenario.location)
         synchronize(state: state, foreground: true, reason: "diagnostic_start")
     }
 

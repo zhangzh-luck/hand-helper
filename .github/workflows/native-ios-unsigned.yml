@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       live_activity_width_variant:
-        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional timer digits, C=empty trailing, D=40 pt timer, E=48 pt timer, F=fixed-size timer)'
+        description: 'Debug Live Activity compact-width experiment (A=baseline, B=proportional, C=empty, D=40 pt, E=48 pt, F=fixed-size, G=minute timer plus expanded layout)'
         type: choice
         options:
           - A
@@ -17,6 +17,7 @@ on:
           - D
           - E
           - F
+          - G
         default: A
   push:
     paths:
@@ -135,6 +136,7 @@ jobs:
             D) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_D") ;;
             E) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_E") ;;
             F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
+            G) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_G") ;;
             *) echo "Unsupported Live Activity width variant: $LIVE_ACTIVITY_WIDTH_VARIANT" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
@@ -168,7 +170,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [A, B, C, D, E, F]
+        variant: [A, B, C, D, E, F, G]
     defaults:
       run:
         shell: bash
@@ -203,6 +205,7 @@ jobs:
             D) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_D") ;;
             E) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_E") ;;
             F) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_F") ;;
+            G) width_test_flags=("OTHER_SWIFT_FLAGS=-D LIVE_ACTIVITY_WIDTH_TEST_G") ;;
             *) echo "Unsupported Live Activity width variant: ${{ matrix.variant }}" >&2; exit 1 ;;
           esac
           xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
