@@ -10,13 +10,38 @@ enum AppHapticInteraction: CaseIterable {
     case detailClosed
     case settingsNavigation
     case cropCompleted
-    case loginFailed
+    case loginCredentialsRejected
+    case loginRequestFailed
 }
 
 enum AppHapticFeedback: Equatable {
     case selection
     case lightImpact
     case mediumImpact
+    case notificationError
+    case notificationWarning
+}
+
+enum LoginFailureFeedback: Equatable {
+    case credentialsRejected
+    case recoverable
+
+    static func classify(_ error: Error) -> Self {
+        if case APIError.unauthorized = error { return .credentialsRejected }
+        return .recoverable
+    }
+
+    var hapticInteraction: AppHapticInteraction {
+        switch self {
+        case .credentialsRejected: .loginCredentialsRejected
+        case .recoverable: .loginRequestFailed
+        }
+    }
+}
+
+struct LoginFailureFeedbackEvent: Identifiable, Equatable {
+    let id = UUID()
+    let feedback: LoginFailureFeedback
 }
 
 enum AppHaptics {
@@ -26,8 +51,10 @@ enum AppHaptics {
             .selection
         case .detailOpened, .detailClosed, .settingsNavigation, .cropCompleted:
             .lightImpact
-        case .loginFailed:
-            .mediumImpact
+        case .loginCredentialsRejected:
+            .notificationError
+        case .loginRequestFailed:
+            .notificationWarning
         }
     }
 
@@ -39,6 +66,10 @@ enum AppHaptics {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .mediumImpact:
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .notificationError:
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        case .notificationWarning:
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
     }
 }

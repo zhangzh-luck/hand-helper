@@ -94,6 +94,7 @@ final class AppState: ObservableObject {
     private var rotationPendingCourseOwner: String?
     @Published private(set) var isLoginSubmitting = false
     @Published private(set) var loginError: String?
+    @Published private(set) var loginFailureFeedback: LoginFailureFeedbackEvent?
     @Published private(set) var credentialRemovalError: String?
 
     let api: any APIClientProtocol
@@ -619,7 +620,7 @@ final class AppState: ObservableObject {
     func login(username: String, password: String) async {
         guard !Task.isCancelled, !isLoginSubmitting else { return }
         guard !preferences.bool(forKey: Self.pendingCredentialRemovalKey) else {
-            loginError = credentialRemovalError ?? "请先清除旧登录凭据。"
+            presentLoginError(credentialRemovalError ?? "请先清除旧登录凭据。", feedback: .recoverable)
             return
         }
         let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -629,6 +630,7 @@ final class AppState: ObservableObject {
         }
         isLoginSubmitting = true
         loginError = nil
+        loginFailureFeedback = nil
         authenticationGeneration += 1
         (api as? APIClient)?.invalidatePendingSessionRequests()
         let generation = authenticationGeneration
@@ -641,7 +643,7 @@ final class AppState: ObservableObject {
                   !result.cookie.isEmpty else { throw APIError.invalidResponse }
             sessionStore.save(cookie: result.cookie)
             guard sessionStore.cookie == result.cookie else {
-                loginError = "无法保存登录状态，请检查设备钥匙串。"
+                presentLoginError("无法保存登录状态，请检查设备钥匙串。", feedback: .recoverable)
                 return
             }
             try verifiedAccount.confirm(username: result.identity.username, cookie: result.cookie)
@@ -656,8 +658,13 @@ final class AppState: ObservableObject {
         } catch {
             guard generation == authenticationGeneration, !Task.isCancelled else { return }
             if isAuthenticated && sessionStore.cookie == nil { handleUnauthorized() }
-            loginError = error.localizedDescription
+            presentLoginError(error.localizedDescription, feedback: LoginFailureFeedback.classify(error))
         }
+    }
+
+    private func presentLoginError(_ message: String, feedback: LoginFailureFeedback) {
+        loginError = message
+        loginFailureFeedback = LoginFailureFeedbackEvent(feedback: feedback)
     }
 
     func reverifyRotatedSession() async {
@@ -741,6 +748,7 @@ final class AppState: ObservableObject {
         isAuthenticated = false
         clearProfile()
         loginError = nil
+        loginFailureFeedback = nil
         authenticationRevision += 1
         _ = retryCredentialRemoval()
         if let cookie { try? await authentication.logout(cookie: cookie) }

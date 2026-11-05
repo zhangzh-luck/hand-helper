@@ -186,6 +186,23 @@ final class AuthenticationTests: XCTestCase {
     }
 
     @MainActor
+    func testConfirmedLoginFailuresPublishOneClassifiedFeedbackEventPerAttempt() async throws {
+        let auth = TestAuthenticationClient()
+        let state = AppState(api: MockAPIClient(), sessionStore: TestSessionStore(), authentication: auth)
+
+        auth.loginError = APIError.unauthorized(message: "用户名或密码错误")
+        await state.login(username: "student", password: "wrong")
+        let credentials = try XCTUnwrap(state.loginFailureFeedback)
+        XCTAssertEqual(credentials.feedback, .credentialsRejected)
+
+        auth.loginError = APIError.connection
+        await state.login(username: "student", password: "example")
+        let connection = try XCTUnwrap(state.loginFailureFeedback)
+        XCTAssertEqual(connection.feedback, .recoverable)
+        XCTAssertNotEqual(credentials.id, connection.id)
+    }
+
+    @MainActor
     func testRotatedCookieRequiresReverificationAndSameAccount() async {
         let session = TestSessionStore()
         session.save(cookie: "session=old")
