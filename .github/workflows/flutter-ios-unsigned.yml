@@ -16,7 +16,9 @@ jobs:
         working-directory: flutter_client
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       # device_info_plus 13.3.0 references NSProcessInfo.isiOSAppOnVision,
       # which is declared in the iOS 26.1 SDK but not Xcode 16.4's SDK.
@@ -26,7 +28,7 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         with:
           channel: stable
           flutter-version: '3.47.3'
@@ -57,7 +59,7 @@ jobs:
           tar -czf build/Runner-ios-release-unsigned.tar.gz -C build/ios/iphoneos Runner.app
 
       - name: Upload unsigned app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flutter-ios-release-unsigned-app
           path: flutter_client/build/Runner-ios-release-unsigned.tar.gz
@@ -92,7 +94,7 @@ jobs:
           done < <(cd "$app" && find . -type l -print)
 
       - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: HandHelper-unsigned-ipa
           path: flutter_client/build/HandHelper-unsigned.ipa

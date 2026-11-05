@@ -11,17 +11,23 @@ from PIL import Image
 
 # API 回归测试绝不读取开发者的 .env、账号或真实缓存。
 TEST_DB = Path(__file__).resolve().parents[1] / "data" / "test_api.db"
+TEST_ADMIN_USERNAME = "test-admin"
+TEST_ADMIN_PASSWORD = "change-me"
+# Deterministic, test-only material. This is generated in-process rather than
+# resembling a deployable credential; production configuration is never read.
+TEST_SESSION_SECRET = "test-session-secret-only-for-unit-tests-1234567890"
+TEST_FERNET_KEY = base64.urlsafe_b64encode(bytes(range(32))).decode("ascii")
 if TEST_DB.exists():
     TEST_DB.unlink()
-os.environ["ADMIN_USERNAME"] = "admin"
-os.environ["ADMIN_PASSWORD_HASH"] = PasswordHasher(type=Type.ID).hash("change-me")
-os.environ["SESSION_SECRET"] = "test-session-secret-only-for-unit-tests-1234567890"
+os.environ["ADMIN_USERNAME"] = TEST_ADMIN_USERNAME
+os.environ["ADMIN_PASSWORD_HASH"] = PasswordHasher(type=Type.ID).hash(TEST_ADMIN_PASSWORD)
+os.environ["SESSION_SECRET"] = TEST_SESSION_SECRET
 os.environ["SESSION_MAX_AGE"] = "3600"
 os.environ["SESSION_COOKIE_SECURE"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./data/test_api.db"
 os.environ["AUTO_CREATE_SCHEMA"] = "true"
-# 仅用于测试数据库的固定 Fernet 密钥；与任何开发或生产密钥无关。
-os.environ["AI_CREDENTIAL_MASTER_KEY"] = "0o-MuR1Cj_rJcOE5iO-1rSo6GF4vf95CIzv0c0cHkN4="
+# 仅用于测试数据库的派生 Fernet 密钥；与任何开发或生产密钥无关。
+os.environ["AI_CREDENTIAL_MASTER_KEY"] = TEST_FERNET_KEY
 
 from app.main import app, cleanup_expired_custom_schedules
 from app import ai_analysis
@@ -40,7 +46,7 @@ def avatar_data_url(width: int, height: int) -> str:
 
 
 def login_headers(client: TestClient) -> dict[str, str]:
-    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "change-me"})
+    login = client.post("/api/v1/auth/login", json={"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD})
     assert login.status_code == 200
     assert "httponly" in login.headers["set-cookie"].lower()
     assert "samesite=lax" in login.headers["set-cookie"].lower()
@@ -65,10 +71,10 @@ def import_test_grades(client: TestClient, headers: dict[str, str]) -> tuple[int
 def test_api_auth_and_local_file_import():
     with TestClient(app) as client:
         assert client.get("/api/v1/grades").status_code == 401
-        assert client.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"}).status_code == 401
+        assert client.post("/api/v1/auth/login", json={"username": TEST_ADMIN_USERNAME, "password": "wrong"}).status_code == 401
         assert client.post("/api/v1/auth/login", json={"username": "非ASCII用户", "password": "wrong"}).status_code == 401
         headers = login_headers(client)
-        assert client.get("/api/v1/auth/me").json()["data"] == {"authenticated": True, "username": "admin"}
+        assert client.get("/api/v1/auth/me").json()["data"] == {"authenticated": True, "username": TEST_ADMIN_USERNAME}
         assert client.get("/api/v1/profile", headers=headers).json()["data"]["display_name"] == "用户"
         profile = client.put("/api/v1/profile", headers=headers, json={"display_name": "测试同学", "avatar_data_url": avatar_data_url(512, 512)})
         assert profile.json()["data"]["display_name"] == "测试同学"
@@ -212,7 +218,7 @@ def test_passkey_ceremonies_require_reauthentication_and_consume_challenges():
 
         login_headers(client)
         assert client.post("/api/v1/auth/passkey/registration/options", json={"password": "wrong", "label": "测试设备"}).status_code == 401
-        registration = client.post("/api/v1/auth/passkey/registration/options", json={"password": "change-me", "label": "测试设备"})
+        registration = client.post("/api/v1/auth/passkey/registration/options", json={"password": TEST_ADMIN_PASSWORD, "label": "测试设备"})
         assert registration.status_code == 200
         registration_data = registration.json()["data"]
         assert registration_data["label"] == "测试设备"

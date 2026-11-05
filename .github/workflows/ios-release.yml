@@ -34,8 +34,11 @@ jobs:
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
       IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
       IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      WEB_URL: ${{ inputs.web_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Validate signing secrets
         run: |
           test -n "$IOS_CERTIFICATE_BASE64"
@@ -59,7 +62,6 @@ jobs:
           cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
       - name: Archive signed application
         run: |
-          WEB_URL='${{ inputs.web_url }}'
           WEB_HOST="${WEB_URL#https://}"
           WEB_HOST="${WEB_HOST%%/*}"
           test -n "$WEB_HOST"
@@ -91,7 +93,7 @@ jobs:
           EOF
       - name: Export IPA
         run: xcodebuild -exportArchive -archivePath build/YNNuJwHelper.xcarchive -exportPath build/export -exportOptionsPlist build/ExportOptions.plist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: YNNuJwHelper-${{ inputs.distribution }}-ipa
           path: build/export/*.ipa

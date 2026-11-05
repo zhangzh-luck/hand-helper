@@ -1,4 +1,9 @@
+# Local environment files. Keep documented templates in version control.
 .env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
 .venv/
 __pycache__/
 *.py[cod]
@@ -8,11 +13,20 @@ __pycache__/
 node_modules/
 dist/
 coverage/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 private/
 backend/data/
 backend/.coverage
 web/.env.local
 web/.env.android.local
+web/.vite/
+web/.cache/
 web/android/key.properties
 web/android/*.jks
 web/android/*.keystore
@@ -26,3 +40,7 @@ ios/Config/HandHelper.local.xcconfig
 ios/**/*.mobileprovision
 ios/**/*.p12
 ios/**/*.xcarchive
+native_ios/build/
+native_ios/.tools/
+native_ios/**/*.xcuserstate
+native_ios/**/*.xcuserdata/
