@@ -1,0 +1,110 @@
+name: Native SwiftUI iOS (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native_ios/**'
+      - '.github/workflows/native-ios-unsigned.yml'
+  pull_request:
+    paths:
+      - 'native_ios/**'
+      - '.github/workflows/native-ios-unsigned.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: native_ios
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Select and inspect Xcode
+        run: |
+          test -d /Applications/Xcode_26.1.1.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          xcrun simctl list devices available
+
+      - name: Install pinned XcodeGen
+        run: |
+          mkdir -p .tools/xcodegen
+          curl --fail --location --retry 3 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.44.1/xcodegen.zip \
+            --output .tools/xcodegen.zip
+          echo 'a2e905fb68446e9bb4008cdfe2e13e3f176d0cbcca828b71770f8e53fca91b73  .tools/xcodegen.zip' | shasum -a 256 -c -
+          unzip -q .tools/xcodegen.zip -d .tools/xcodegen
+          binary="$(find .tools/xcodegen -type f -name xcodegen | head -n 1)"
+          test -n "$binary"
+          chmod +x "$binary"
+          "$binary" --version | grep -F '2.44.1'
+          echo "XCODEGEN=$PWD/$binary" >> "$GITHUB_ENV"
+
+      - name: Generate Xcode project
+        run: |
+          "$XCODEGEN" generate --spec project.yml
+          xcodebuild -list -project HandHelperNative.xcodeproj
+
+      - name: Build iOS Simulator Debug
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Run XCTest
+        run: |
+          xcodebuild test -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Build iOS Device Release
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Package and verify unsigned IPA
+        run: |
+          app=build/DerivedData/Build/Products/Release-iphoneos/HandHelperNative.app
+          test -x "$app/HandHelperNative"
+          test -f "$app/Assets.car"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = 'com.zhangzh.hangassistant.native.dev'
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$app/Info.plist")" = 'AppIcon'
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSSupportsLiveActivities' "$app/Info.plist")" = 'true'
+          extension="$app/PlugIns/HandHelperLiveActivityWidget.appex"
+          test -x "$extension/HandHelperLiveActivityWidget"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$extension/Info.plist")" = 'com.zhangzh.hangassistant.native.dev.liveactivity'
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSExtension:NSExtensionPointIdentifier' "$extension/Info.plist")" = 'com.apple.widgetkit-extension'
+          mkdir -p build/ipa/Payload
+          /usr/bin/ditto "$app" build/ipa/Payload/HandHelperNative.app
+          (cd build/ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperNative-unsigned.ipa)
+          /usr/bin/unzip -tqq build/HandHelperNative-unsigned.ipa
+          mkdir -p build/verified
+          /usr/bin/ditto -x -k build/HandHelperNative-unsigned.ipa build/verified
+          extracted=build/verified/Payload/HandHelperNative.app
+          test -x "$extracted/HandHelperNative"
+          test -f "$extracted/Assets.car"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$extracted/Info.plist")" = 'com.zhangzh.hangassistant.native.dev'
+          test -x "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
+          test "$(/usr/libexec/PlistBuddy -c 'Print NSExtension:NSExtensionPointIdentifier' "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/Info.plist")" = 'com.apple.widgetkit-extension'
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: HandHelperNative-unsigned-ipa
+          path: native_ios/build/HandHelperNative-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
