@@ -1,21 +1,17 @@
 name: Native SwiftUI iOS (unsigned)
 
+# Kept on the default branch so manual dispatch can safely target the native
+# development branch. main itself does not contain native_ios/, so its regular
+# push and pull-request events must not schedule a non-runnable macOS job.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'native_ios/**'
-      - '.github/workflows/native-ios-unsigned.yml'
-  pull_request:
-    paths:
-      - 'native_ios/**'
-      - '.github/workflows/native-ios-unsigned.yml'
 
 permissions:
   contents: read
 
 jobs:
   build-and-test:
+    if: github.ref != 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
