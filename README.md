@@ -2,6 +2,8 @@
 
 个人使用的学习助手：React PWA / Android 外壳、FastAPI、SQLite WAL。课程表与成绩分析均通过你主动上传教务系统导出的文件写入本地缓存；后端不会登录、抓取或自动请求教务系统。
 
+> **公开说明：** 本仓库公开仅用于使用 GitHub Actions 构建与验证；它仍是个人自用项目，不提供托管服务、账号或数据集，也不接受真实凭据、课程表或成绩数据。除非另行添加 `LICENSE`，代码与素材均保留所有权利，不授予再分发或商用许可。
+
 ```mermaid
 flowchart LR
   U[浏览器 / PWA / Android] --> API[FastAPI]
