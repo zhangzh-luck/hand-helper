@@ -17,6 +17,10 @@ services:
     build:
       context: ../backend
     command: ["python", "-m", "app.ai_worker"]
+    # This process has no HTTP listener; inheriting the backend image's
+    # /health probe would permanently mark an otherwise healthy worker down.
+    healthcheck:
+      disable: true
     env_file: ../.env
     volumes:
       - jw-data:/app/data
