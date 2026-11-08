@@ -39,7 +39,9 @@ struct PersonalizationView: View {
 
             Section {
                 NavigationLink {
-                    WallpaperManagementView(state: state)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        WallpaperManagementView(state: state)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "壁纸", symbol: "photo",
                                           color: Color(uiColor: .systemPurple))
@@ -63,7 +65,9 @@ struct PersonalizationView: View {
                 }
                 #if DEBUG
                 NavigationLink("实时活动诊断") {
-                    LiveActivityDiagnosticView(state: state)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        LiveActivityDiagnosticView(state: state)
+                    }
                 }
                 #endif
             } header: {

@@ -210,6 +210,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private weak var appState: AppState?
     private var keyboardCoversBottom = false
     private var detailPresented = false
+    private var navigationDestinationPresented = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
@@ -285,6 +286,10 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             detailPresented = state.isDetailPresented
             updateTabVisibility()
         }
+        if navigationDestinationPresented != state.shouldHideTabBarForNavigation {
+            navigationDestinationPresented = state.shouldHideTabBarForNavigation
+            updateTabVisibility()
+        }
         let image = state.homeAvatar?.withRenderingMode(.alwaysOriginal) ?? UIImage(systemName: AppTab.today.symbol)
         viewControllers?.first?.tabBarItem.image = image
         viewControllers?.first?.tabBarItem.selectedImage = state.homeAvatar?.withRenderingMode(.alwaysOriginal)
@@ -300,11 +305,15 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     var selectedTabDidChange: ((AppTab) -> Void)?
 
     private func updateTabVisibility() {
-        let shouldHide = detailPresented || keyboardCoversBottom
+        let shouldHide = detailPresented || navigationDestinationPresented || keyboardCoversBottom
         guard tabBar.isHidden != shouldHide else { return }
-        tabBar.isHidden = shouldHide
-        // UITabBarController recalculates child safe areas when the bar changes.
-        view.setNeedsLayout()
+        // UIKit owns the child safe-area inset. Change that ownership atomically so a
+        // SwiftUI push/pop cannot briefly render one frame with the old inset.
+        UIView.performWithoutAnimation {
+            tabBar.isHidden = shouldHide
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+        }
     }
 
     @objc private func keyboardChanged(_ notification: Notification) {

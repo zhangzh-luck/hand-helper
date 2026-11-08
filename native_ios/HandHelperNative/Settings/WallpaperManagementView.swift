@@ -8,21 +8,27 @@ struct WallpaperManagementView: View {
         Form {
             Section {
                 NavigationLink {
-                    WallpaperSettingsView(state: state, kind: .today)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        WallpaperSettingsView(state: state, kind: .today)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "今日页壁纸", symbol: "house",
                                           color: Color(uiColor: .systemBlue))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
                 NavigationLink {
-                    WallpaperSettingsView(state: state, kind: .timetable)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        WallpaperSettingsView(state: state, kind: .timetable)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "课程表壁纸", symbol: "calendar",
                                           color: Color(uiColor: .systemPurple))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
                 NavigationLink {
-                    WallpaperSettingsView(state: state, kind: .analysis)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        WallpaperSettingsView(state: state, kind: .analysis)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "分析页壁纸", symbol: "chart.bar",
                                           color: Color(uiColor: .systemTeal))

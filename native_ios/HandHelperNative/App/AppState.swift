@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum AppTab: Int, CaseIterable {
+enum AppTab: Int, CaseIterable, Hashable {
     case today, timetable, analysis, settings
 
     var title: String {
@@ -67,6 +67,7 @@ final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .today
     @Published private(set) var appearance: AppearanceMode
     @Published var isDetailPresented = false
+    @Published private(set) var activeNavigationDestinationTokens: [AppTab: Set<UUID>] = [:]
     @Published private(set) var currentProfile: LocalProfile = .empty
     @Published private(set) var profileError: String?
     @Published private(set) var isAuthenticated = false
@@ -112,6 +113,34 @@ final class AppState: ObservableObject {
     private static let appearanceKey = "appearance_mode"
     private static let pendingCredentialRemovalKey = "pending_session_credential_removal"
     private static let liveActivitiesKey = "live_activities_enabled"
+
+    /// `NavigationStack` lives inside each UIKit tab host, so UIKit cannot infer pushed
+    /// destinations through `hidesBottomBarWhenPushed`. Destinations register their own
+    /// lifetime here; the selected tab alone determines whether the native bar is hidden.
+    var shouldHideTabBarForNavigation: Bool {
+        !(activeNavigationDestinationTokens[selectedTab] ?? []).isEmpty
+    }
+
+    func setNavigationDestinationVisible(_ isVisible: Bool, token: UUID, in tab: AppTab) {
+        var tokens = activeNavigationDestinationTokens[tab] ?? []
+        let changed: Bool
+        if isVisible {
+            changed = tokens.insert(token).inserted
+        } else {
+            changed = tokens.remove(token) != nil
+        }
+        guard changed else { return }
+        if tokens.isEmpty {
+            activeNavigationDestinationTokens.removeValue(forKey: tab)
+        } else {
+            activeNavigationDestinationTokens[tab] = tokens
+        }
+    }
+
+    func clearNavigationDestinationTokens() {
+        guard !activeNavigationDestinationTokens.isEmpty else { return }
+        activeNavigationDestinationTokens.removeAll()
+    }
 
     init(
         api: (any APIClientProtocol)? = nil,
@@ -592,6 +621,7 @@ final class AppState: ObservableObject {
             try verifiedAccount.confirm(username: identity.username, cookie: verification.cookie)
             rotationExpectedOwner = nil
             verifyingCookie = nil
+            clearNavigationDestinationTokens()
             selectedTab = .today
             authenticationStatus = .signedIn(identity.username)
             isAuthenticated = true
@@ -649,6 +679,7 @@ final class AppState: ObservableObject {
             try verifiedAccount.confirm(username: result.identity.username, cookie: result.cookie)
             rotationExpectedOwner = nil
             verifyingCookie = nil
+            clearNavigationDestinationTokens()
             selectedTab = .today
             authenticationStatus = .signedIn(result.identity.username)
             isAuthenticated = true
@@ -742,6 +773,7 @@ final class AppState: ObservableObject {
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
         verifyingCookie = nil
+        clearNavigationDestinationTokens()
         selectedTab = .today
         isDetailPresented = false
         authenticationStatus = .signedOut
@@ -773,6 +805,7 @@ final class AppState: ObservableObject {
         rotationPendingCourseOwner = nil
         rotationExpectedOwner = nil
         verifyingCookie = nil
+        clearNavigationDestinationTokens()
         selectedTab = .today
         isDetailPresented = false
         clearProfile()

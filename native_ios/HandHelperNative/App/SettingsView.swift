@@ -10,8 +10,10 @@ struct SettingsView: View {
             List {
                 Section {
                     NavigationLink {
-                        ProfileView(state: state, revision: state.authenticationRevision,
-                                    presentation: .navigation)
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            ProfileView(state: state, revision: state.authenticationRevision,
+                                        presentation: .navigation)
+                        }
                     } label: {
                         HStack(spacing: 14) {
                             profileAvatar
@@ -37,7 +39,9 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
-                        AcademicTimeView(state: state)
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            AcademicTimeView(state: state)
+                        }
                     } label: {
                         SettingsNavigationRow(title: "时间设置", symbol: "clock",
                                               color: Color(uiColor: .systemBlue))
@@ -47,7 +51,9 @@ struct SettingsView: View {
                     })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
-                        DataImportView(state: state)
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            DataImportView(state: state)
+                        }
                     } label: {
                         SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
                                               color: Color(uiColor: .systemTeal))
@@ -57,7 +63,9 @@ struct SettingsView: View {
                     })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
-                        PersonalizationView(state: state)
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            PersonalizationView(state: state)
+                        }
                     } label: {
                         SettingsNavigationRow(title: "个性化", symbol: "paintpalette",
                                               color: Color(uiColor: .systemPurple))
@@ -67,7 +75,9 @@ struct SettingsView: View {
                     })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     NavigationLink {
-                        AIModelSettingsView(state: state)
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            AIModelSettingsView(state: state)
+                        }
                     } label: {
                         SettingsNavigationRow(title: "AI 模型配置", symbol: "sparkles",
                                               color: Color(uiColor: .systemIndigo))
@@ -80,7 +90,9 @@ struct SettingsView: View {
 
                 Section("关于") {
                     NavigationLink {
-                        AboutHandHelperView()
+                        TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                            AboutHandHelperView()
+                        }
                     } label: {
                         Text("关于航的助手")
                             .frame(minHeight: 56)

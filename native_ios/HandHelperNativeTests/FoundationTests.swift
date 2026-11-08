@@ -166,6 +166,49 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(tabs.overrideUserInterfaceStyle, .unspecified)
     }
 
+    @MainActor
+    func testNavigationDestinationVisibilityIsScopedToSelectedTab() {
+        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        let settingsRoot = UUID()
+        let settingsChild = UUID()
+
+        state.setNavigationDestinationVisible(true, token: settingsRoot, in: .settings)
+        XCTAssertFalse(state.shouldHideTabBarForNavigation)
+
+        state.selectedTab = .settings
+        XCTAssertTrue(state.shouldHideTabBarForNavigation)
+
+        state.setNavigationDestinationVisible(true, token: settingsChild, in: .settings)
+        state.setNavigationDestinationVisible(false, token: settingsRoot, in: .settings)
+        XCTAssertTrue(state.shouldHideTabBarForNavigation, "A deeper destination must keep the bar hidden")
+
+        state.selectedTab = .today
+        XCTAssertFalse(state.shouldHideTabBarForNavigation, "Other root tabs remain visible")
+
+        state.selectedTab = .settings
+        state.setNavigationDestinationVisible(false, token: settingsChild, in: .settings)
+        XCTAssertFalse(state.shouldHideTabBarForNavigation)
+    }
+
+    @MainActor
+    func testNativeTabBarFollowsNavigationDestinationVisibility() {
+        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        let tabs = NativeTabController(state: state)
+        tabs.loadViewIfNeeded()
+        tabs.apply(state: state)
+        XCTAssertFalse(tabs.tabBar.isHidden)
+
+        let token = UUID()
+        state.selectedTab = .settings
+        state.setNavigationDestinationVisible(true, token: token, in: .settings)
+        tabs.apply(state: state)
+        XCTAssertTrue(tabs.tabBar.isHidden)
+
+        state.setNavigationDestinationVisible(false, token: token, in: .settings)
+        tabs.apply(state: state)
+        XCTAssertFalse(tabs.tabBar.isHidden)
+    }
+
     func testSessionStoreContract() {
         let store: any SessionStore = MemorySessionStore()
         XCTAssertNil(store.cookie)

@@ -8,14 +8,18 @@ struct DataImportView: View {
         List {
             Section {
                 NavigationLink {
-                    TimetableImportView(state: state)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        TimetableImportView(state: state)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "导入课表", symbol: "calendar.badge.plus",
                                           color: Color(uiColor: .systemBlue))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
                 NavigationLink {
-                    GradeImportView(state: state)
+                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                        GradeImportView(state: state)
+                    }
                 } label: {
                     SettingsNavigationRow(title: "导入成绩", symbol: "doc.badge.plus",
                                           color: Color(uiColor: .systemTeal))
