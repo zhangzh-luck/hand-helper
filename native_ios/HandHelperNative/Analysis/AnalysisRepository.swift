@@ -60,6 +60,12 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
                                                        debugDescription: "Unsupported AI-job cache version")
             }
         }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(2, forKey: .version)
+            try container.encode(scopes, forKey: .scopes)
+        }
     }
 
     private let state: AppState
