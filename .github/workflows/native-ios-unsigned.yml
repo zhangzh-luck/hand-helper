@@ -53,7 +53,7 @@ jobs:
           swift build --package-path .tools/XcodeGen --configuration release
           binary="$PWD/.tools/XcodeGen/.build/release/xcodegen"
           test -x "$binary"
-          "$binary" --version | grep -Fx "$XCODEGEN_VERSION"
+          "$binary" --version | grep -F "$XCODEGEN_VERSION"
           echo "XCODEGEN=$binary" >> "$GITHUB_ENV"
 
       - name: Generate Xcode project
