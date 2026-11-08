@@ -245,7 +245,22 @@ struct AnalysisView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("AI 成绩分析").font(.title3.weight(.semibold))
             VStack(alignment: .leading, spacing: 0) {
-                if model.analyzing || model.analysisJob?.status.isActive == true {
+                if model.recoveringAnalysisJob {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("分析任务等待恢复")
+                                .font(.body.weight(.medium))
+                            Text("网络恢复后可使用相同任务标识继续查询，不会重复创建分析。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Button("重试连接") { model.resumeAnalysisJob() }
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .frame(minHeight: 54)
+                } else if model.analyzing || model.analysisJob?.status.isActive == true {
                     HStack(spacing: 12) {
                         ProgressView()
                         VStack(alignment: .leading, spacing: 2) {
@@ -262,18 +277,18 @@ struct AnalysisView: View {
                     }
                     .frame(minHeight: 54)
                     .accessibilityElement(children: .combine)
-                } else if model.recoveringAnalysisJob {
+                } else if model.analysisJobNeedsManualAttention {
                     HStack(spacing: 12) {
-                        Image(systemName: "arrow.clockwise.circle")
+                        Image(systemName: "questionmark.circle")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("分析任务等待恢复")
+                            Text("分析任务状态待确认")
                                 .font(.body.weight(.medium))
-                            Text("网络恢复后可使用相同任务标识继续查询，不会重复创建分析。")
+                            Text("可使用原任务标识重新查询；不会自动创建新的分析请求。")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 8)
-                        Button("重试连接") { model.resumeAnalysisJob() }
+                        Button("重新查询") { model.resumeAnalysisJob() }
                             .font(.subheadline.weight(.medium))
                     }
                     .frame(minHeight: 54)

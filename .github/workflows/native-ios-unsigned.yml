@@ -38,17 +38,23 @@ jobs:
 
       - name: Install pinned XcodeGen
         run: |
-          mkdir -p .tools/xcodegen
-          curl --fail --location --retry 3 \
-            https://github.com/yonaskolb/XcodeGen/releases/download/2.44.1/xcodegen.zip \
-            --output .tools/xcodegen.zip
-          echo 'a2e905fb68446e9bb4008cdfe2e13e3f176d0cbcca828b71770f8e53fca91b73  .tools/xcodegen.zip' | shasum -a 256 -c -
-          unzip -q .tools/xcodegen.zip -d .tools/xcodegen
-          binary="$(find .tools/xcodegen -type f -name xcodegen | head -n 1)"
-          test -n "$binary"
-          chmod +x "$binary"
-          "$binary" --version | grep -F '2.44.1'
-          echo "XCODEGEN=$PWD/$binary" >> "$GITHUB_ENV"
+          # Source build avoids the intermittent GitHub Release-asset 504 while
+          # remaining fixed to XcodeGen 2.44.1's immutable commit.
+          readonly XCODEGEN_VERSION='2.44.1'
+          readonly XCODEGEN_REVISION='21ac9944b0ab546a07422dbed86f33dd2ebd76f8'
+          readonly XCODEGEN_SOURCE='https://github.com/yonaskolb/XcodeGen.git'
+          rm -rf .tools/XcodeGen
+          git init --quiet .tools/XcodeGen
+          git -C .tools/XcodeGen remote add origin "$XCODEGEN_SOURCE"
+          git -C .tools/XcodeGen fetch --quiet --depth 1 origin \
+            "refs/tags/$XCODEGEN_VERSION:refs/tags/$XCODEGEN_VERSION"
+          git -C .tools/XcodeGen checkout --quiet --detach "refs/tags/$XCODEGEN_VERSION"
+          test "$(git -C .tools/XcodeGen rev-parse HEAD)" = "$XCODEGEN_REVISION"
+          swift build --package-path .tools/XcodeGen --configuration release
+          binary="$PWD/.tools/XcodeGen/.build/release/xcodegen"
+          test -x "$binary"
+          "$binary" --version | grep -Fx "$XCODEGEN_VERSION"
+          echo "XCODEGEN=$binary" >> "$GITHUB_ENV"
 
       - name: Generate Xcode project
         run: |

@@ -22,11 +22,44 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         let snapshot: AnalysisSnapshot
     }
 
-    private struct JobDocument: Codable {
-        let version: Int
+    private struct JobScope: Codable {
         let owner: String
         let baseURL: String
         var jobs: [PersistedGradeAIJob]
+    }
+
+    private struct JobDocument: Codable {
+        let version: Int
+        var scopes: [JobScope]
+
+        private enum CodingKeys: String, CodingKey {
+            case version, scopes, owner, baseURL, jobs
+        }
+
+        init(scopes: [JobScope]) {
+            self.version = 2
+            self.scopes = scopes
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let version = try container.decode(Int.self, forKey: .version)
+            switch version {
+            case 2:
+                self.version = version
+                self.scopes = try container.decode([JobScope].self, forKey: .scopes)
+            case 1:
+                // Preserve the first implementation's recovery record while
+                // migrating it to independently scoped documents.
+                self.version = 2
+                self.scopes = [JobScope(owner: try container.decode(String.self, forKey: .owner),
+                                        baseURL: try container.decode(String.self, forKey: .baseURL),
+                                        jobs: try container.decode([PersistedGradeAIJob].self, forKey: .jobs))]
+            default:
+                throw DecodingError.dataCorruptedError(forKey: .version, in: container,
+                                                       debugDescription: "Unsupported AI-job cache version")
+            }
+        }
     }
 
     private let state: AppState
@@ -102,27 +135,31 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         guard try state.requireCurrentAccount(revision: revision) == owner else { return [] }
         guard FileManager.default.fileExists(atPath: jobsFile.path) else { return [] }
         let document = try JSONDecoder().decode(JobDocument.self, from: Data(contentsOf: jobsFile))
-        guard document.version == 1, document.owner == owner,
-              document.baseURL == baseURL.absoluteString else { return [] }
-        return document.jobs
+        return document.scopes.first(where: { $0.owner == owner && $0.baseURL == baseURL.absoluteString })?.jobs ?? []
     }
 
     func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws {
         guard try state.requireCurrentAccount(revision: revision) == owner else {
             throw APIError.unauthorized(message: "账号已变化")
         }
-        var jobs = try persistedJobs(owner: owner, revision: revision)
+        var document = try loadJobsDocument()
+        let index = document.scopes.firstIndex(where: { $0.owner == owner && $0.baseURL == baseURL.absoluteString })
+        var jobs = index.map { document.scopes[$0].jobs } ?? []
         jobs.removeAll { $0.id == job.id || ($0.termID == job.termID && $0.idempotencyKey == job.idempotencyKey) }
         jobs.append(job)
-        try save(jobs: jobs, owner: owner)
+        let scope = JobScope(owner: owner, baseURL: baseURL.absoluteString, jobs: jobs)
+        if let index { document.scopes[index] = scope } else { document.scopes.append(scope) }
+        try save(document)
     }
 
     func removePersistedJob(id: String, owner: String, revision: Int) throws {
         guard try state.requireCurrentAccount(revision: revision) == owner else {
             throw APIError.unauthorized(message: "账号已变化")
         }
-        let jobs = try persistedJobs(owner: owner, revision: revision).filter { $0.id != id }
-        try save(jobs: jobs, owner: owner)
+        var document = try loadJobsDocument()
+        guard let index = document.scopes.firstIndex(where: { $0.owner == owner && $0.baseURL == baseURL.absoluteString }) else { return }
+        document.scopes[index].jobs.removeAll { $0.id == id }
+        try save(document)
     }
 
     func deleteGrades(termID: Int, owner: String, revision: Int) async throws {
@@ -149,10 +186,13 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         try JSONEncoder().encode(document).write(to: file, options: .atomic)
     }
 
-    private func save(jobs: [PersistedGradeAIJob], owner: String) throws {
+    private func loadJobsDocument() throws -> JobDocument {
+        guard FileManager.default.fileExists(atPath: jobsFile.path) else { return JobDocument(scopes: []) }
+        return try JSONDecoder().decode(JobDocument.self, from: Data(contentsOf: jobsFile))
+    }
+
+    private func save(_ document: JobDocument) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let document = JobDocument(version: 1, owner: owner,
-                                   baseURL: baseURL.absoluteString, jobs: jobs)
         try JSONEncoder().encode(document).write(to: jobsFile, options: .atomic)
     }
 }

@@ -20,6 +20,10 @@ final class AnalysisViewModel: ObservableObject {
     private let repository: any AnalysisRepositoryProtocol
     private var owner: String?
     private var generation = 0
+    /// Refreshing grades must not invalidate a durable AI-job poll. These are
+    /// deliberately separate because a refresh can fail while a server job is
+    /// still running and recoverable.
+    private var refreshGeneration = 0
     private var attemptedOnline = false
     private var refreshTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
@@ -48,6 +52,9 @@ final class AnalysisViewModel: ObservableObject {
     }
 
     var canCancelAnalysisJob: Bool { analysisJob?.status.isActive == true && !recoveringAnalysisJob }
+    var analysisJobNeedsManualAttention: Bool {
+        analysisJob?.status == .unknown && !recoveringAnalysisJob
+    }
 
     func loadIfNeeded() {
         guard state.selectedTab == .analysis, state.canAccessPrivateData else { return }
@@ -87,22 +94,28 @@ final class AnalysisViewModel: ObservableObject {
               let currentOwner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else { return }
         let revision = state.authenticationRevision
         attemptedOnline = true
-        generation += 1
-        let token = generation
+        refreshGeneration += 1
+        let refreshToken = refreshGeneration
         refreshing = true
         loading = snapshot == nil
         refreshTask = Task {
-            defer { if generation == token { refreshing = false; loading = false; refreshTask = nil } }
+            defer {
+                if refreshGeneration == refreshToken {
+                    refreshing = false
+                    loading = false
+                    refreshTask = nil
+                }
+            }
             do {
                 let fresh = try await repository.refresh(owner: currentOwner, revision: revision)
-                guard isCurrent(owner: currentOwner, revision: revision, token: token) else { return }
+                guard isCurrentRefresh(owner: currentOwner, revision: revision, token: refreshToken) else { return }
                 snapshot = fresh
                 offline = false
                 errorMessage = nil
                 selectDefaultTerm()
                 restoreSelectedTermJob(owner: currentOwner, revision: revision)
             } catch {
-                guard isCurrent(owner: currentOwner, revision: revision, token: token) else { return }
+                guard isCurrentRefresh(owner: currentOwner, revision: revision, token: refreshToken) else { return }
                 offline = true
                 errorMessage = error.localizedDescription
             }
@@ -131,10 +144,6 @@ final class AnalysisViewModel: ObservableObject {
         visible = isVisible
         if !isVisible { stopPolling(); return }
         loadIfNeeded()
-        guard let owner,
-              let currentOwner = try? state.requireCurrentAccount(revision: state.authenticationRevision),
-              owner == currentOwner else { return }
-        restoreSelectedTermJob(owner: owner, revision: state.authenticationRevision)
     }
 
     func cancelAnalysis() {
@@ -274,6 +283,7 @@ final class AnalysisViewModel: ObservableObject {
                 } catch {
                     guard isCurrent(owner: owner, revision: revision, token: token) else { return }
                     analyzing = false
+                    recoveringAnalysisJob = true
                     actionError = "暂时无法获取分析状态：\(error.localizedDescription)"
                     return
                 }
@@ -299,9 +309,9 @@ final class AnalysisViewModel: ObservableObject {
         }
         stopPolling()
         analyzing = false
-        removePersisted(id: matching.id, owner: owner, revision: revision)
         switch job.status {
         case .succeeded:
+            removePersisted(id: matching.id, owner: owner, revision: revision)
             if let analysis = job.analysis {
                 currentAnalysis = analysis
                 actionError = nil
@@ -310,7 +320,13 @@ final class AnalysisViewModel: ObservableObject {
             } else {
                 actionError = "分析任务已完成，但报告暂不可用，请刷新后查看历史记录。"
             }
-        case .failed, .cancelled, .unknown:
+        case .failed, .cancelled:
+            removePersisted(id: matching.id, owner: owner, revision: revision)
+            actionError = job.errorMessage ?? job.status.displayName
+        case .unknown:
+            // An unknown server state is deliberately retained. The only next
+            // action is an explicit status query using the existing job ID;
+            // never create a fresh, potentially billable request automatically.
             actionError = job.errorMessage ?? job.status.displayName
         case .queued, .running:
             break
@@ -344,6 +360,11 @@ final class AnalysisViewModel: ObservableObject {
             (try? state.requireCurrentAccount(revision: revision)) == currentOwner
     }
 
+    private func isCurrentRefresh(owner currentOwner: String, revision: Int, token: Int) -> Bool {
+        refreshGeneration == token && owner == currentOwner &&
+            (try? state.requireCurrentAccount(revision: revision)) == currentOwner
+    }
+
     private func selectDefaultTerm() {
         guard let terms = snapshot?.terms else { selectedTermID = nil; return }
         if let selectedTermID, terms.contains(where: { $0.id == selectedTermID }) { return }
@@ -353,6 +374,7 @@ final class AnalysisViewModel: ObservableObject {
 
     private func reset() {
         generation += 1
+        refreshGeneration += 1
         refreshTask?.cancel()
         refreshTask = nil
         stopPolling()

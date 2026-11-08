@@ -82,8 +82,15 @@ final class AnalysisDataTests: XCTestCase {
 
         let bob = await makeState(user: "bob", api: api)
         let bobOwner = try bob.requireCurrentAccount(revision: bob.authenticationRevision)
-        XCTAssertTrue(try AnalysisRepository(state: bob, api: api, directory: folder)
-            .persistedJobs(owner: bobOwner, revision: bob.authenticationRevision).isEmpty)
+        let bobRepository = AnalysisRepository(state: bob, api: api, directory: folder)
+        XCTAssertTrue(try bobRepository.persistedJobs(owner: bobOwner, revision: bob.authenticationRevision).isEmpty)
+        let bobDraft = PersistedGradeAIJob(termID: 9, idempotencyKey: "bob-key",
+                                           forceRefresh: false, job: nil, createdAt: Date())
+        try bobRepository.savePersistedJob(bobDraft, owner: bobOwner, revision: bob.authenticationRevision)
+        XCTAssertEqual(try bobRepository.persistedJobs(owner: bobOwner, revision: bob.authenticationRevision).first?.id,
+                       "bob-key")
+        XCTAssertEqual(try repo.persistedJobs(owner: owner, revision: revision).first?.job?.jobID, "job-1",
+                       "Saving Bob's recovery metadata must not overwrite Alice's job.")
 
         try await repo.deleteGrades(termID: 8, owner: owner, revision: revision)
         XCTAssertNil(try repo.cached(owner: owner, revision: revision)?.byTerm[8])
@@ -153,6 +160,33 @@ final class AnalysisDataTests: XCTestCase {
         XCTAssertEqual(model.currentAnalysis?.content, "## 异步报告")
         XCTAssertFalse(model.analyzing)
         XCTAssertTrue(repository.saved.isEmpty, "terminal jobs are removed after their report is persisted server-side")
+    }
+
+    @MainActor
+    func testUnknownJobRequiresExplicitQueryWithoutCreatingAnotherTask() async throws {
+        let term = try XCTUnwrap(JSONDecoder().decode([TermInfo].self, from: Data(terms.utf8)).first)
+        let grade = try XCTUnwrap(JSONDecoder().decode([GradeRecord].self, from: Data(grades.utf8)).first)
+        let summary = try JSONDecoder().decode(GradeSummary.self, from: Data(summary.utf8))
+        let snapshot = AnalysisSnapshot(terms: [term], byTerm: [
+            term.id: AnalysisTermData(grades: [grade], summary: summary, history: [])
+        ], savedAt: Date())
+        let repository = AnalysisJobRepository(snapshot: snapshot, terminalStatus: .unknown)
+        let api = AnalysisAPIStub(responses: [:])
+        let state = await makeState(user: "alice", api: api)
+        state.selectedTab = .analysis
+        let model = AnalysisViewModel(state: state, repository: repository)
+        model.loadIfNeeded()
+        for _ in 0..<10 { await Task.yield() }
+
+        model.generateAnalysis { _ in XCTFail("Unknown jobs must not publish a report") }
+        for _ in 0..<100 where repository.pollCalls == 0 { await Task.yield() }
+        XCTAssertEqual(repository.createCalls, 1)
+        XCTAssertTrue(model.analysisJobNeedsManualAttention)
+        XCTAssertEqual(repository.saved.count, 1, "Unknown jobs remain resumable by their original job ID.")
+
+        model.resumeAnalysisJob()
+        for _ in 0..<100 where repository.pollCalls < 2 { await Task.yield() }
+        XCTAssertEqual(repository.createCalls, 1, "Manual status retry must not create a new billable job.")
     }
 
     @MainActor
