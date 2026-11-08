@@ -22,7 +22,7 @@ from app.db import Base, SessionLocal, engine, get_db
 from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PasskeyCredential, PeriodTime
 from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PasskeyCredentialOut, PasskeyDeleteRequest, PasskeyRegistrationOptionsRequest, PasskeyVerificationRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
 from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, migrate_legacy_apikey_fun_setting, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
-from app.ai_jobs import AiJobError, cancel_job, create_or_reuse_job, get_job
+from app.ai_jobs import AiJobConflictError, AiJobError, cancel_job, create_or_reuse_job, get_job
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
 from app.passkeys import PasskeyError, authentication_options, consume_challenge, issue_challenge, owner_for, registration_options, verify_authentication, verify_registration
 from app.services import import_grades, import_printed_timetable, period_times, rebuild_sessions, set_period_time, set_term_start_date
@@ -707,6 +707,8 @@ async def create_grade_ai_analysis_job(
             idempotency_key=idempotency_key or request.headers.get("Idempotency-Key"),
         )
         return response(job)
+    except AiJobConflictError as exc:
+        raise HTTPException(409, str(exc))
     except (AiConfigurationError, AiServiceError, AiJobError) as exc:
         raise HTTPException(422, str(exc))
 

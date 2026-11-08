@@ -176,7 +176,14 @@ class AiProviderSetting(TimestampMixin, Base):
 class GradeAiAnalysis(Base):
     """按学期和成绩快照缓存的分析结果，不保存原始上传文件。"""
     __tablename__ = "grade_ai_analyses"
-    __table_args__ = (UniqueConstraint("term_id", "input_hash", name="uq_grade_ai_analysis_snapshot"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "term_id",
+            "input_hash",
+            "configuration_hash",
+            name="uq_grade_ai_analysis_snapshot_config",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     term_id: Mapped[int] = mapped_column(ForeignKey("academic_terms.id", ondelete="CASCADE"), index=True)
     input_hash: Mapped[str] = mapped_column(String(64), index=True)
@@ -225,6 +232,9 @@ class GradeAiJob(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), index=True, default="queued")
     attempt: Mapped[int] = mapped_column(Integer, default=0)
     lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # A fresh token on every claim fences a late worker even if a process name
+    # is reused after a restart.
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

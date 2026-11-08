@@ -34,7 +34,7 @@ from app import ai_analysis
 from app import ai_jobs
 from app.ai_worker import run_once
 from app.db import SessionLocal
-from app.db_models import GradeAiJob
+from app.db_models import Grade, GradeAiJob
 
 
 GRADE_HTML = """<html><body><table>
@@ -364,6 +364,30 @@ def test_durable_ai_jobs_are_deduplicated_cancelable_and_persist_results(monkeyp
         assert cached.json()["data"]["status"] == "succeeded"
         assert cached.json()["data"]["cached"] is True
 
+        # Reusing a client key for a different provider configuration must not
+        # silently return the original completed job.
+        keyed = client.post(
+            f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}&force_refresh=true",
+            headers={**headers, "Idempotency-Key": "configuration-conflict"},
+        )
+        assert keyed.status_code == 202
+        changed = client.put(
+            "/api/v1/ai/settings",
+            headers=headers,
+            json={"provider": "APIKEY.FAN", "base_url": "https://api2.apikey.fan/v1", "model": "job-model", "api_key": "test-api-key-1234"},
+        )
+        assert changed.status_code == 200
+        conflict = client.post(
+            f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}&force_refresh=true",
+            headers={**headers, "Idempotency-Key": "configuration-conflict"},
+        )
+        assert conflict.status_code == 409
+        assert client.put(
+            "/api/v1/ai/settings",
+            headers=headers,
+            json={"provider": "APIKEY.FAN", "base_url": "https://api.apikey.fan/v1", "model": "job-model", "api_key": "test-api-key-1234"},
+        ).status_code == 200
+
         async def submit_from_independent_session() -> str:
             async with SessionLocal() as db:
                 result = await ai_jobs.create_or_reuse_job(
@@ -396,6 +420,58 @@ def test_durable_ai_jobs_are_deduplicated_cancelable_and_persist_results(monkeyp
         failed_status = client.get(f"/api/v1/grades/ai-analysis/jobs/{failed_job}", headers=headers).json()["data"]
         assert failed_status["status"] == "failed"
         assert failed_status["error_code"] == "UPSTREAM_RATE_LIMITED"
+
+
+def test_ai_job_snapshot_change_and_late_worker_cannot_overwrite_cancelled_result(monkeypatch):
+    async def fake_model_list(_endpoint, _api_key):
+        return ["job-model"]
+
+    async def fake_model_call(*_args, **_kwargs):
+        return "## 整体概览\n- 不应在已取消任务中保存"
+
+    monkeypatch.setattr(ai_analysis, "_get_openai_compatible_models", fake_model_list)
+    monkeypatch.setattr(ai_jobs, "_post_openai_compatible", fake_model_call)
+    with TestClient(app) as client:
+        headers = login_headers(client)
+        term_id, _ = import_test_grades(client, headers)
+        assert client.put(
+            "/api/v1/ai/settings",
+            headers=headers,
+            json={"provider": "APIKEY.FAN", "base_url": "https://api.apikey.fan/v1", "model": "job-model", "api_key": "test-api-key-1234"},
+        ).status_code == 200
+
+        stale = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}&force_refresh=true", headers=headers)
+        stale_id = stale.json()["data"]["job_id"]
+
+        async def change_snapshot() -> None:
+            async with SessionLocal() as db:
+                grade = await db.scalar(select(Grade).where(Grade.term_id == term_id))
+                assert grade is not None
+                grade.score = "89"
+                await db.commit()
+
+        from sqlalchemy import select
+        asyncio.run(change_snapshot())
+        assert asyncio.run(run_once("snapshot-change-worker")) is True
+        stale_status = client.get(f"/api/v1/grades/ai-analysis/jobs/{stale_id}", headers=headers).json()["data"]
+        assert stale_status["status"] == "failed"
+        assert stale_status["error_code"] == "SNAPSHOT_CHANGED"
+
+        late = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}&force_refresh=true", headers=headers)
+        late_id = late.json()["data"]["job_id"]
+
+        async def claim_then_cancel() -> None:
+            async with SessionLocal() as db:
+                assert await ai_jobs.claim_next_job(db, worker_id="late-worker") == late_id
+            async with SessionLocal() as db:
+                await ai_jobs.cancel_job(db, owner=TEST_ADMIN_USERNAME, job_id=late_id)
+            async with SessionLocal() as db:
+                await ai_jobs.execute_job(db, worker_id="late-worker", job_id=late_id)
+
+        asyncio.run(claim_then_cancel())
+        late_status = client.get(f"/api/v1/grades/ai-analysis/jobs/{late_id}", headers=headers).json()["data"]
+        assert late_status["status"] == "cancelled"
+        assert late_status["analysis_id"] is None
 
 
 def test_ai_worker_marks_expired_running_lease_unknown():

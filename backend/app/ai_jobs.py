@@ -37,6 +37,10 @@ class AiJobError(ValueError):
     """Safe client-facing job API error."""
 
 
+class AiJobConflictError(AiJobError):
+    """A caller reused an idempotency key for a different request."""
+
+
 def _now() -> datetime:
     return datetime.utcnow()
 
@@ -48,6 +52,36 @@ def _owner_key(owner: str) -> str:
 def _normal_idempotency_key(owner: str, term_id: int, input_hash: str, configuration_hash: str) -> str:
     value = "\x1f".join([_owner_key(owner), str(term_id), input_hash, configuration_hash])
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _same_request(
+    job: GradeAiJob,
+    *,
+    term_id: int,
+    input_hash: str,
+    provider: str,
+    model: str,
+    configuration_hash: str,
+) -> bool:
+    return (
+        job.term_id == term_id
+        and job.input_hash == input_hash
+        and job.provider == provider
+        and job.model == model
+        and job.configuration_hash == configuration_hash
+    )
+
+
+def _lease_where(job_id: str, worker_id: str, lease_token: str, now: datetime):
+    """Fence writes so a late/expired worker cannot overwrite newer state."""
+    return (
+        GradeAiJob.job_id == job_id,
+        GradeAiJob.status == "running",
+        GradeAiJob.lease_owner == worker_id,
+        GradeAiJob.lease_token == lease_token,
+        GradeAiJob.lease_expires_at.is_not(None),
+        GradeAiJob.lease_expires_at > now,
+    )
 
 
 def _analysis_out(row: GradeAiAnalysis, *, cached: bool) -> GradeAiAnalysisOut:
@@ -117,6 +151,15 @@ async def create_or_reuse_job(
         select(GradeAiJob).where(GradeAiJob.owner == owner, GradeAiJob.idempotency_key == key)
     )
     if prior is not None:
+        if not _same_request(
+            prior,
+            term_id=term_id,
+            input_hash=input_hash,
+            provider=setting.provider,
+            model=setting.model,
+            configuration_hash=configuration_hash,
+        ):
+            raise AiJobConflictError("该幂等键已用于不同的成绩分析请求，请使用新的幂等键")
         return await _job_out(db, prior, reused=True, cached=prior.status == "succeeded")
 
     existing_analysis = await db.scalar(
@@ -201,6 +244,15 @@ async def create_or_reuse_job(
         )
         if existing is None:
             raise
+        if existing.idempotency_key == key and not _same_request(
+            existing,
+            term_id=term_id,
+            input_hash=input_hash,
+            provider=setting.provider,
+            model=setting.model,
+            configuration_hash=configuration_hash,
+        ):
+            raise AiJobConflictError("该幂等键已用于不同的成绩分析请求，请使用新的幂等键")
         return await _job_out(db, existing, reused=True, cached=existing.status == "succeeded")
     await db.refresh(job)
     return await _job_out(db, job)
@@ -214,18 +266,29 @@ async def get_job(db: AsyncSession, *, owner: str, job_id: str) -> GradeAiJobOut
 
 
 async def cancel_job(db: AsyncSession, *, owner: str, job_id: str) -> GradeAiJobOut:
-    job = await db.scalar(select(GradeAiJob).where(GradeAiJob.job_id == job_id, GradeAiJob.owner == _owner_key(owner)))
+    owner = _owner_key(owner)
+    job = await db.scalar(select(GradeAiJob).where(GradeAiJob.job_id == job_id, GradeAiJob.owner == owner))
     if job is None:
         raise AiJobError("分析任务不存在")
     if job.status in {"queued", "running"}:
         now = _now()
-        job.status = "cancelled"
-        job.finished_at = now
-        job.lease_expires_at = None
-        job.error_code = "CANCELLED"
-        job.error_message = "已取消本地分析任务；上游请求如已发出，可能仍在处理。"
+        await db.execute(
+            update(GradeAiJob)
+            .where(GradeAiJob.job_id == job_id, GradeAiJob.owner == owner, GradeAiJob.status.in_(("queued", "running")))
+            .values(
+                status="cancelled",
+                finished_at=now,
+                lease_expires_at=None,
+                lease_owner=None,
+                lease_token=None,
+                error_code="CANCELLED",
+                error_message="已取消本地分析任务；上游请求如已发出，可能仍在处理。",
+            )
+        )
         await db.commit()
-        await db.refresh(job)
+        job = await db.scalar(select(GradeAiJob).where(GradeAiJob.job_id == job_id, GradeAiJob.owner == owner))
+        if job is None:
+            raise AiJobError("分析任务不存在")
     return await _job_out(db, job)
 
 
@@ -238,6 +301,8 @@ async def recover_expired_leases(db: AsyncSession) -> int:
             status="unknown",
             finished_at=now,
             lease_expires_at=None,
+            lease_owner=None,
+            lease_token=None,
             error_code="WORKER_LEASE_EXPIRED",
             error_message="工作进程在上游结果确认前失联；为避免重复计费，未自动重试。",
         )
@@ -255,6 +320,7 @@ async def claim_next_job(db: AsyncSession, *, worker_id: str, lease_seconds: int
     if candidate is None:
         return None
     now = _now()
+    lease_token = uuid.uuid4().hex
     result = await db.execute(
         update(GradeAiJob)
         .where(GradeAiJob.job_id == candidate, GradeAiJob.status == "queued")
@@ -262,6 +328,7 @@ async def claim_next_job(db: AsyncSession, *, worker_id: str, lease_seconds: int
             status="running",
             attempt=GradeAiJob.attempt + 1,
             lease_owner=worker_id,
+            lease_token=lease_token,
             lease_expires_at=now + timedelta(seconds=lease_seconds),
             started_at=now,
             error_code=None,
@@ -272,14 +339,29 @@ async def claim_next_job(db: AsyncSession, *, worker_id: str, lease_seconds: int
     return candidate if result.rowcount == 1 else None
 
 
-async def _fail_job(db: AsyncSession, job: GradeAiJob, *, code: str, message: str) -> None:
-    if job.status != "running":
-        return
-    job.status = "failed"
-    job.finished_at = _now()
-    job.lease_expires_at = None
-    job.error_code = code[:64]
-    job.error_message = message[:512]
+async def _fail_job(
+    db: AsyncSession,
+    *,
+    job_id: str,
+    worker_id: str,
+    lease_token: str,
+    code: str,
+    message: str,
+) -> None:
+    now = _now()
+    await db.execute(
+        update(GradeAiJob)
+        .where(*_lease_where(job_id, worker_id, lease_token, now))
+        .values(
+            status="failed",
+            finished_at=now,
+            lease_expires_at=None,
+            lease_owner=None,
+            lease_token=None,
+            error_code=code[:64],
+            error_message=message[:512],
+        )
+    )
     await db.commit()
 
 
@@ -294,69 +376,100 @@ async def execute_job(db: AsyncSession, *, worker_id: str, job_id: str) -> None:
     )
     if job is None:
         return
+    lease_token = job.lease_token
+    if not lease_token:
+        return
+    job_term_id = job.term_id
+    job_input_hash = job.input_hash
+    job_provider = job.provider
+    job_model = job.model
+    job_configuration_hash = job.configuration_hash
     setting = await db.get(AiProviderSetting, 1)
     if setting is None or not setting.is_enabled:
-        await _fail_job(db, job, code="CONFIGURATION_MISSING", message="模型服务配置已不存在或已关闭")
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_MISSING", message="模型服务配置已不存在或已关闭")
         return
-    if analysis_configuration_hash(setting.provider, setting.base_url, setting.model) != job.configuration_hash:
-        await _fail_job(db, job, code="CONFIGURATION_CHANGED", message="模型服务配置已变化，未发送旧任务")
+    if analysis_configuration_hash(setting.provider, setting.base_url, setting.model) != job_configuration_hash:
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_CHANGED", message="模型服务配置已变化，未发送旧任务")
         return
-    grades = list((await db.scalars(select(Grade).where(Grade.term_id == job.term_id))).all())
+    grades = list((await db.scalars(select(Grade).where(Grade.term_id == job_term_id))).all())
     current_hash, items = _grade_snapshot(grades)
-    if not grades or current_hash != job.input_hash:
-        await _fail_job(db, job, code="SNAPSHOT_CHANGED", message="成绩数据已变化，请重新创建分析任务")
+    if not grades or current_hash != job_input_hash:
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="SNAPSHOT_CHANGED", message="成绩数据已变化，请重新创建分析任务")
         return
+    # Never retain an SQLite read transaction while waiting for an upstream
+    # model. All writes below are additionally fenced by the lease token.
+    await db.rollback()
     try:
+        endpoint = _chat_endpoint(setting.base_url)
+        api_key = _decrypt_saved_api_key(setting)
         content = await _post_openai_compatible(
-            _chat_endpoint(setting.base_url),
-            _decrypt_saved_api_key(setting),
-            setting.model,
+            endpoint,
+            api_key,
+            job_model,
             _analysis_messages(items),
         )
     except AiConfigurationError as exc:
-        await _fail_job(db, job, code="CONFIGURATION_ERROR", message=str(exc))
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_ERROR", message=str(exc))
         return
     except AiServiceError as exc:
-        await _fail_job(db, job, code=exc.code, message=str(exc))
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code=exc.code, message=str(exc))
         return
     except Exception:
         # Do not include an upstream exception body: it may contain credentials
         # or provider-specific request details.
-        await _fail_job(db, job, code="UNEXPECTED_ERROR", message="模型服务处理异常，请稍后重新生成")
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="UNEXPECTED_ERROR", message="模型服务处理异常，请稍后重新生成")
         return
 
-    await db.refresh(job)
-    if job.status != "running" or job.lease_owner != worker_id:
-        return
-    analysis = await db.scalar(
-        select(GradeAiAnalysis).where(
-            GradeAiAnalysis.term_id == job.term_id,
-            GradeAiAnalysis.input_hash == job.input_hash,
+    now = _now()
+    async with db.begin():
+        # This starts the write transaction before mutating the cache. A cancel,
+        # lease expiry, or another claimant that won the race makes rowcount 0,
+        # leaving no late result in the shared cache.
+        held = await db.execute(
+            update(GradeAiJob)
+            .where(*_lease_where(job_id, worker_id, lease_token, now))
+            .values(lease_expires_at=now + timedelta(seconds=LEASE_SECONDS))
         )
-    )
-    if analysis is None:
-        analysis = GradeAiAnalysis(
-            term_id=job.term_id,
-            input_hash=job.input_hash,
-            provider=job.provider,
-            model=job.model,
-            configuration_hash=job.configuration_hash,
-            content=content,
+        if held.rowcount != 1:
+            return
+        analysis = await db.scalar(
+            select(GradeAiAnalysis).where(
+                GradeAiAnalysis.term_id == job_term_id,
+                GradeAiAnalysis.input_hash == job_input_hash,
+                GradeAiAnalysis.configuration_hash == job_configuration_hash,
+            )
         )
-        db.add(analysis)
-        await db.flush()
-    else:
-        analysis.provider = job.provider
-        analysis.model = job.model
-        analysis.configuration_hash = job.configuration_hash
-        analysis.content = content
-        analysis.created_at = _now()
-        await db.flush()
-    job.status = "succeeded"
-    job.finished_at = _now()
-    job.lease_expires_at = None
-    job.error_code = None
-    job.error_message = None
-    job.analysis_id = analysis.id
-    await db.commit()
+        if analysis is None:
+            analysis = GradeAiAnalysis(
+                term_id=job_term_id,
+                input_hash=job_input_hash,
+                provider=job_provider,
+                model=job_model,
+                configuration_hash=job_configuration_hash,
+                content=content,
+            )
+            db.add(analysis)
+            await db.flush()
+        else:
+            analysis.provider = job_provider
+            analysis.model = job_model
+            analysis.content = content
+            analysis.created_at = now
+            await db.flush()
+        completed = await db.execute(
+            update(GradeAiJob)
+            .where(*_lease_where(job_id, worker_id, lease_token, now))
+            .values(
+                status="succeeded",
+                finished_at=now,
+                lease_expires_at=None,
+                lease_owner=None,
+                lease_token=None,
+                error_code=None,
+                error_message=None,
+                analysis_id=analysis.id,
+            )
+        )
+        if completed.rowcount != 1:
+            raise RuntimeError("AI job lease was lost while persisting its result")
 
