@@ -13,6 +13,22 @@ services:
     logging:
       driver: local
       options: {max-size: "10m", max-file: "3"}
+  ai-worker:
+    build:
+      context: ../backend
+    command: ["python", "-m", "app.ai_worker"]
+    env_file: ../.env
+    volumes:
+      - jw-data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
   web:
     build:
       context: ../web

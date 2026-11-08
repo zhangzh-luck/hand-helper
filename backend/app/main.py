@@ -22,6 +22,7 @@ from app.db import Base, SessionLocal, engine, get_db
 from app.db_models import AiProviderSetting, AppProfile, AcademicTerm, Course, CourseRule, CourseSession, CustomSchedule, ManualCourse, Grade, GradeAiAnalysis, PasskeyCredential, PeriodTime
 from app.schemas import AiConnectionTestOut, AiModelListOut, AiModelLookupInput, AiModelSelectionInput, AiProviderSettingInput, ApiError, ApiResponse, AppProfileInput, AppProfileOut, AuthMeOut, CourseSessionOut, CustomScheduleInput, CustomScheduleOut, GradeImportConfirmInput, GradeImportItem, GradeImportPreviewOut, ManualCourseInput, ManualCourseOut, GradeOut, LoginRequest, PasskeyCredentialOut, PasskeyDeleteRequest, PasskeyRegistrationOptionsRequest, PasskeyVerificationRequest, PeriodTimeInput, PeriodTimeOut, TermOut, TermStartDateInput
 from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades, clear_grade_ai_analyses, delete_ai_setting, list_available_models, list_grade_ai_analyses, migrate_legacy_apikey_fun_setting, refresh_saved_models, save_ai_setting, select_saved_model, setting_out, test_ai_connection
+from app.ai_jobs import AiJobError, cancel_job, create_or_reuse_job, get_job
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
 from app.passkeys import PasskeyError, authentication_options, consume_challenge, issue_challenge, owner_for, registration_options, verify_authentication, verify_registration
 from app.services import import_grades, import_printed_timetable, period_times, rebuild_sessions, set_period_time, set_term_start_date
@@ -59,7 +60,7 @@ async def lifespan(_app: FastAPI):
             scheduler.shutdown(wait=False)
         await engine.dispose()
 app=FastAPI(title="航的助手 · Hand Helper", version="0.2.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type", "Idempotency-Key"])
 
 PUBLIC_API_PATHS = {
     "/api/auth/login", "/api/v1/auth/login",
@@ -686,6 +687,44 @@ async def grade_ai_analysis(term_id: int, force_refresh: bool = False, db: Async
         raise HTTPException(422, str(exc))
     except AiServiceError as exc:
         raise HTTPException(422, str(exc))
+
+
+@app.post("/api/v1/grades/ai-analysis/jobs", status_code=202)
+async def create_grade_ai_analysis_job(
+    request: Request,
+    term_id: int,
+    force_refresh: bool = False,
+    idempotency_key: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist work before a worker contacts the provider; safe to retry."""
+    try:
+        job = await create_or_reuse_job(
+            db,
+            owner=get_settings().admin_username,
+            term_id=term_id,
+            force_refresh=force_refresh,
+            idempotency_key=idempotency_key or request.headers.get("Idempotency-Key"),
+        )
+        return response(job)
+    except (AiConfigurationError, AiServiceError, AiJobError) as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.get("/api/v1/grades/ai-analysis/jobs/{job_id}")
+async def grade_ai_analysis_job_status(job_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return response(await get_job(db, owner=get_settings().admin_username, job_id=job_id))
+    except AiJobError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/v1/grades/ai-analysis/jobs/{job_id}/cancel")
+async def cancel_grade_ai_analysis_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return response(await cancel_job(db, owner=get_settings().admin_username, job_id=job_id))
+    except AiJobError as exc:
+        raise HTTPException(404, str(exc))
 
 @app.get("/api/v1/grades/ai-analyses")
 async def grade_ai_analysis_history(term_id: int | None = None, db: AsyncSession = Depends(get_db)):

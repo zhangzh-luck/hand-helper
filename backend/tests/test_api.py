@@ -2,7 +2,7 @@ import asyncio
 import base64
 import io
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -31,6 +31,10 @@ os.environ["AI_CREDENTIAL_MASTER_KEY"] = TEST_FERNET_KEY
 
 from app.main import app, cleanup_expired_custom_schedules
 from app import ai_analysis
+from app import ai_jobs
+from app.ai_worker import run_once
+from app.db import SessionLocal
+from app.db_models import GradeAiJob
 
 
 GRADE_HTML = """<html><body><table>
@@ -318,3 +322,116 @@ def test_ai_grade_analysis_is_encrypted_and_cached(monkeypatch):
         assert cleared_history.status_code == 200 and cleared_history.json()["data"]["deleted"] == 1
         assert client.get(f"/api/v1/grades/ai-analyses?term_id={term_id}", headers=headers).json()["data"] == []
         assert client.delete("/api/v1/ai/settings", headers=headers).json()["data"]["deleted"]
+
+
+def test_durable_ai_jobs_are_deduplicated_cancelable_and_persist_results(monkeypatch):
+    async def fake_model_call(_endpoint, _api_key, _model, _messages, **_kwargs):
+        return "## 整体概览\n- 稳定\n## 优势课程\n- 基础\n## 需要关注\n- 复盘\n## 可执行建议\n- 计划"
+
+    async def fake_model_list(_endpoint, _api_key):
+        return ["job-model"]
+
+    monkeypatch.setattr(ai_analysis, "_get_openai_compatible_models", fake_model_list)
+    monkeypatch.setattr(ai_jobs, "_post_openai_compatible", fake_model_call)
+    with TestClient(app) as client:
+        headers = login_headers(client)
+        term_id, _ = import_test_grades(client, headers)
+        configured = client.put(
+            "/api/v1/ai/settings",
+            headers=headers,
+            json={"provider": "APIKEY.FAN", "base_url": "https://api.apikey.fan/v1", "model": "job-model", "api_key": "test-api-key-1234"},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}", headers=headers)
+        assert first.status_code == 202
+        first_data = first.json()["data"]
+        assert first_data["status"] == "queued" and not first_data["reused"]
+
+        duplicate = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}", headers=headers)
+        assert duplicate.status_code == 202
+        assert duplicate.json()["data"]["job_id"] == first_data["job_id"]
+        assert duplicate.json()["data"]["reused"] is True
+
+        # The task survives a client that no longer polls its status.
+        assert asyncio.run(run_once("test-ai-worker")) is True
+        completed = client.get(f"/api/v1/grades/ai-analysis/jobs/{first_data['job_id']}", headers=headers)
+        completed_data = completed.json()["data"]
+        assert completed_data["status"] == "succeeded"
+        assert completed_data["analysis"]["content"].startswith("## 整体概览")
+
+        cached = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}", headers=headers)
+        assert cached.json()["data"]["status"] == "succeeded"
+        assert cached.json()["data"]["cached"] is True
+
+        async def submit_from_independent_session() -> str:
+            async with SessionLocal() as db:
+                result = await ai_jobs.create_or_reuse_job(
+                    db,
+                    owner=TEST_ADMIN_USERNAME,
+                    term_id=term_id,
+                    force_refresh=True,
+                    idempotency_key=None,
+                )
+                return result.job_id
+
+        # Separate request sessions converge on the one active snapshot job.
+        # The partial unique index remains the race-safe guard for true overlap.
+        first_force = asyncio.run(submit_from_independent_session())
+        second_force = asyncio.run(submit_from_independent_session())
+        assert first_force == second_force
+        force_job = first_force
+        assert client.post(f"/api/v1/grades/ai-analysis/jobs/{force_job}/cancel", headers=headers).json()["data"]["status"] == "cancelled"
+
+        async def fake_rate_limited(*_args, **_kwargs):
+            raise ai_analysis.AiServiceError("模型服务请求过于频繁或额度不足，请稍后再试", code="UPSTREAM_RATE_LIMITED")
+
+        monkeypatch.setattr(ai_jobs, "_post_openai_compatible", fake_rate_limited)
+        failed = client.post(
+            f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}&force_refresh=true",
+            headers={**headers, "Idempotency-Key": "rate-limit-test"},
+        )
+        failed_job = failed.json()["data"]["job_id"]
+        assert asyncio.run(run_once("test-ai-worker")) is True
+        failed_status = client.get(f"/api/v1/grades/ai-analysis/jobs/{failed_job}", headers=headers).json()["data"]
+        assert failed_status["status"] == "failed"
+        assert failed_status["error_code"] == "UPSTREAM_RATE_LIMITED"
+
+
+def test_ai_worker_marks_expired_running_lease_unknown():
+    with TestClient(app) as client:
+        headers = login_headers(client)
+        term_id, _ = import_test_grades(client, headers)
+
+    async def create_expired() -> str:
+        async with SessionLocal() as db:
+            row = GradeAiJob(
+                job_id="expired-worker-lease-job",
+                owner=TEST_ADMIN_USERNAME,
+                term_id=term_id,
+                input_hash="f" * 64,
+                provider="APIKEY.FAN",
+                model="job-model",
+                configuration_hash="c" * 64,
+                idempotency_key="expired-lease",
+                status="running",
+                attempt=1,
+                lease_owner="dead-worker",
+                lease_expires_at=datetime.utcnow() - timedelta(days=1),
+            )
+            db.add(row)
+            await db.commit()
+            return row.job_id
+
+    async def assert_recovered() -> None:
+        async with SessionLocal() as db:
+            recovered = await ai_jobs.recover_expired_leases(db)
+            assert recovered >= 1
+            # Other tests may have already inserted jobs; look up by stable ID.
+            from sqlalchemy import select
+            row = await db.scalar(select(GradeAiJob).where(GradeAiJob.job_id == "expired-worker-lease-job"))
+            assert row is not None and row.status == "unknown"
+            assert row.error_code == "WORKER_LEASE_EXPIRED"
+
+    asyncio.run(create_expired())
+    asyncio.run(assert_recovered())

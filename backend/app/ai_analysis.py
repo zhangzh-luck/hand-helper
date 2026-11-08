@@ -1,6 +1,7 @@
 """第三方模型成绩分析：配置加密、最小化传输与结果缓存。"""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -22,7 +23,9 @@ class AiConfigurationError(ValueError):
 
 
 class AiServiceError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "UPSTREAM_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 LEGACY_APIKEY_FUN_PROVIDER = "APIKEY.FUN"
@@ -136,6 +139,14 @@ def _grade_snapshot(grades: list[Grade]) -> tuple[str, list[dict[str, object]]]:
     return hashlib.sha256(canonical).hexdigest(), items
 
 
+def analysis_configuration_hash(provider: str, base_url: str, model: str) -> str:
+    """Stable, non-secret identity for a result-producing model configuration."""
+    value = "\x1f".join(
+        [provider.strip(), _validate_base_url(base_url).lower(), model.strip()]
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _analysis_messages(items: list[dict[str, object]]) -> list[dict[str, str]]:
     return [
         {
@@ -155,6 +166,61 @@ def _analysis_messages(items: list[dict[str, object]]) -> list[dict[str, str]]:
     ]
 
 
+class OpenAIChatCompletionsAdapter:
+    """The only provider adapter used in phase one.
+
+    APIKEY.FAN documents this endpoint as OpenAI Chat Completions compatible;
+    Responses and Anthropic Messages can be added as separate adapters later.
+    """
+
+    async def generate(
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        payload: dict[str, object] = {"model": model, "messages": messages, "temperature": 0.3}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        try:
+            # A worker may outlive the original HTTP request.  The bounded total
+            # prevents one unavailable provider from occupying a lease forever.
+            async with asyncio.timeout(90):
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(75.0, connect=10.0, read=75.0, write=20.0, pool=10.0),
+                    follow_redirects=False,
+                ) as client:
+                    result = await client.post(
+                        endpoint,
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json=payload,
+                    )
+        except TimeoutError as exc:
+            raise AiServiceError("模型服务响应超时，请稍后再试", code="UPSTREAM_TIMEOUT") from exc
+        except httpx.HTTPError as exc:
+            raise AiServiceError("无法连接模型服务，请检查地址、网络和服务状态", code="UPSTREAM_CONNECTION") from exc
+        if result.status_code in {401, 403}:
+            raise AiServiceError("模型服务认证失败，请检查 API Key", code="UPSTREAM_AUTH")
+        if result.status_code == 404:
+            raise AiServiceError("模型服务未找到 Chat Completions 接口，请检查服务地址", code="UPSTREAM_NOT_FOUND")
+        if result.status_code == 429:
+            raise AiServiceError("模型服务请求过于频繁或额度不足，请稍后再试", code="UPSTREAM_RATE_LIMITED")
+        if result.status_code >= 500:
+            raise AiServiceError("模型服务暂时不可用，请稍后再试", code="UPSTREAM_UNAVAILABLE")
+        if result.status_code >= 400:
+            raise AiServiceError("模型服务拒绝了请求，请检查模型名称与服务配置", code="UPSTREAM_REJECTED")
+        try:
+            content = result.json()["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise AiServiceError("模型服务返回格式异常", code="UPSTREAM_INVALID_RESPONSE") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise AiServiceError("模型服务未返回有效分析内容", code="UPSTREAM_EMPTY_RESPONSE")
+        return content.strip()[:8000]
+
+
 async def _post_openai_compatible(
     endpoint: str,
     api_key: str,
@@ -163,35 +229,10 @@ async def _post_openai_compatible(
     *,
     max_tokens: int | None = None,
 ) -> str:
-    payload: dict[str, object] = {"model": model, "messages": messages, "temperature": 0.3}
-    if max_tokens is not None:
-        payload["max_tokens"] = max_tokens
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=10.0), follow_redirects=False) as client:
-            result = await client.post(
-                endpoint,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-    except httpx.HTTPError as exc:
-        raise AiServiceError("无法连接模型服务，请检查地址、网络和服务状态") from exc
-    if result.status_code in {401, 403}:
-        raise AiServiceError("模型服务认证失败，请检查 API Key")
-    if result.status_code == 404:
-        raise AiServiceError("模型服务未找到 Chat Completions 接口，请检查服务地址")
-    if result.status_code == 429:
-        raise AiServiceError("模型服务请求过于频繁或额度不足，请稍后再试")
-    if result.status_code >= 500:
-        raise AiServiceError("模型服务暂时不可用，请稍后再试")
-    if result.status_code >= 400:
-        raise AiServiceError("模型服务拒绝了请求，请检查模型名称与服务配置")
-    try:
-        content = result.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise AiServiceError("模型服务返回格式异常") from exc
-    if not isinstance(content, str) or not content.strip():
-        raise AiServiceError("模型服务未返回有效分析内容")
-    return content.strip()[:8000]
+    """Compatibility seam retained for the synchronous API and existing tests."""
+    return await OpenAIChatCompletionsAdapter().generate(
+        endpoint, api_key, model, messages, max_tokens=max_tokens
+    )
 
 
 async def _get_openai_compatible_models(endpoint: str, api_key: str) -> list[str]:
@@ -364,15 +405,16 @@ async def analyze_grades(db: AsyncSession, term_id: int, force_refresh: bool = F
     if not grades:
         raise AiServiceError("该学期尚无导入成绩，无法分析")
     input_hash, items = _grade_snapshot(grades)
+    configuration_hash = analysis_configuration_hash(setting.provider, setting.base_url, setting.model)
     existing = await db.scalar(select(GradeAiAnalysis).where(GradeAiAnalysis.term_id == term_id, GradeAiAnalysis.input_hash == input_hash))
-    if existing is not None and not force_refresh:
+    if existing is not None and existing.configuration_hash == configuration_hash and not force_refresh:
         return GradeAiAnalysisOut(term_id=term_id, content=existing.content, provider=existing.provider, model=existing.model, created_at=existing.created_at, cached=True)
     content = await _post_openai_compatible(_chat_endpoint(setting.base_url), api_key, setting.model, _analysis_messages(items))
     if existing is None:
-        existing = GradeAiAnalysis(term_id=term_id, input_hash=input_hash, provider=setting.provider, model=setting.model, content=content)
+        existing = GradeAiAnalysis(term_id=term_id, input_hash=input_hash, provider=setting.provider, model=setting.model, configuration_hash=configuration_hash, content=content)
         db.add(existing)
     else:
-        existing.provider, existing.model, existing.content, existing.created_at = setting.provider, setting.model, content, datetime.utcnow()
+        existing.provider, existing.model, existing.configuration_hash, existing.content, existing.created_at = setting.provider, setting.model, configuration_hash, content, datetime.utcnow()
     await db.commit()
     await db.refresh(existing)
     return GradeAiAnalysisOut(term_id=term_id, content=existing.content, provider=existing.provider, model=existing.model, created_at=existing.created_at, cached=False)

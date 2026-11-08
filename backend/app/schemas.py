@@ -247,3 +247,23 @@ class GradeAiAnalysisHistoryOut(BaseModel):
     provider: str
     model: str
     created_at: datetime
+
+
+class GradeAiJobOut(BaseModel):
+    job_id: str
+    term_id: int
+    input_hash: str
+    provider: str
+    model: str
+    status: str
+    reused: bool = False
+    cached: bool = False
+    attempt: int
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    analysis_id: int | None = None
+    analysis: GradeAiAnalysisOut | None = None

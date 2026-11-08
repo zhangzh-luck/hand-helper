@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import date, datetime
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -182,8 +182,55 @@ class GradeAiAnalysis(Base):
     input_hash: Mapped[str] = mapped_column(String(64), index=True)
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(128))
+    # A provider/model label alone is not enough to safely reuse a result: the
+    # same model can point at a different endpoint after a settings change.
+    configuration_hash: Mapped[str] = mapped_column(String(64), default="")
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GradeAiJob(TimestampMixin, Base):
+    """Durable, single-owner AI generation work item.
+
+    The job deliberately stores only a snapshot hash and provider metadata.  Grades,
+    prompts, and decrypted provider credentials remain outside this table.
+    """
+    __tablename__ = "grade_ai_jobs"
+    __table_args__ = (
+        UniqueConstraint("owner", "idempotency_key", name="uq_grade_ai_job_owner_idempotency"),
+        Index(
+            "uq_grade_ai_job_active_snapshot",
+            "owner",
+            "term_id",
+            "input_hash",
+            "provider",
+            "model",
+            "configuration_hash",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+        Index("ix_grade_ai_jobs_owner_created", "owner", "created_at"),
+        Index("ix_grade_ai_jobs_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner: Mapped[str] = mapped_column(String(128), index=True)
+    term_id: Mapped[int] = mapped_column(ForeignKey("academic_terms.id", ondelete="CASCADE"), index=True)
+    input_hash: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(128))
+    configuration_hash: Mapped[str] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(16), index=True, default="queued")
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    analysis_id: Mapped[int | None] = mapped_column(ForeignKey("grade_ai_analyses.id", ondelete="SET NULL"), nullable=True)
 
 class SyncJob(TimestampMixin, Base):
     __tablename__ = "sync_jobs"
