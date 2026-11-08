@@ -4,7 +4,12 @@ import Foundation
 protocol AnalysisRepositoryProtocol {
     func cached(owner: String, revision: Int) throws -> AnalysisSnapshot?
     func refresh(owner: String, revision: Int) async throws -> AnalysisSnapshot
-    func analyze(termID: Int, force: Bool) async throws -> GradeAIAnalysis
+    func createAnalysisJob(termID: Int, force: Bool, idempotencyKey: String) async throws -> GradeAIJob
+    func analysisJob(id: String) async throws -> GradeAIJob
+    func cancelAnalysisJob(id: String) async throws -> GradeAIJob
+    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob]
+    func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws
+    func removePersistedJob(id: String, owner: String, revision: Int) throws
     func deleteGrades(termID: Int, owner: String, revision: Int) async throws
 }
 
@@ -15,6 +20,13 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         let owner: String
         let baseURL: String
         let snapshot: AnalysisSnapshot
+    }
+
+    private struct JobDocument: Codable {
+        let version: Int
+        let owner: String
+        let baseURL: String
+        var jobs: [PersistedGradeAIJob]
     }
 
     private let state: AppState
@@ -32,6 +44,7 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
     }
 
     private var file: URL { directory.appendingPathComponent("analysis_native_snapshot_v1.json") }
+    private var jobsFile: URL { directory.appendingPathComponent("analysis_native_ai_jobs_v1.json") }
 
     func cached(owner: String, revision: Int) throws -> AnalysisSnapshot? {
         guard try state.requireCurrentAccount(revision: revision) == owner else { return nil }
@@ -68,10 +81,48 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         return snapshot
     }
 
-    func analyze(termID: Int, force: Bool) async throws -> GradeAIAnalysis {
-        let path = "/api/v1/grades/ai-analysis?term_id=\(termID)" + (force ? "&force_refresh=true" : "")
+    func createAnalysisJob(termID: Int, force: Bool, idempotencyKey: String) async throws -> GradeAIJob {
+        let encodedKey = idempotencyKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? idempotencyKey
+        let path = "/api/v1/grades/ai-analysis/jobs?term_id=\(termID)&force_refresh=\(force ? "true" : "false")&idempotency_key=\(encodedKey)"
         return try await api.request("POST", path: path, body: nil,
                                      preserveSessionOnPasswordError: false)
+    }
+
+    func analysisJob(id: String) async throws -> GradeAIJob {
+        try await api.request("GET", path: "/api/v1/grades/ai-analysis/jobs/\(id)", body: nil,
+                              preserveSessionOnPasswordError: false)
+    }
+
+    func cancelAnalysisJob(id: String) async throws -> GradeAIJob {
+        try await api.request("POST", path: "/api/v1/grades/ai-analysis/jobs/\(id)/cancel", body: nil,
+                              preserveSessionOnPasswordError: false)
+    }
+
+    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob] {
+        guard try state.requireCurrentAccount(revision: revision) == owner else { return [] }
+        guard FileManager.default.fileExists(atPath: jobsFile.path) else { return [] }
+        let document = try JSONDecoder().decode(JobDocument.self, from: Data(contentsOf: jobsFile))
+        guard document.version == 1, document.owner == owner,
+              document.baseURL == baseURL.absoluteString else { return [] }
+        return document.jobs
+    }
+
+    func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws {
+        guard try state.requireCurrentAccount(revision: revision) == owner else {
+            throw APIError.unauthorized(message: "账号已变化")
+        }
+        var jobs = try persistedJobs(owner: owner, revision: revision)
+        jobs.removeAll { $0.id == job.id || ($0.termID == job.termID && $0.idempotencyKey == job.idempotencyKey) }
+        jobs.append(job)
+        try save(jobs: jobs, owner: owner)
+    }
+
+    func removePersistedJob(id: String, owner: String, revision: Int) throws {
+        guard try state.requireCurrentAccount(revision: revision) == owner else {
+            throw APIError.unauthorized(message: "账号已变化")
+        }
+        let jobs = try persistedJobs(owner: owner, revision: revision).filter { $0.id != id }
+        try save(jobs: jobs, owner: owner)
     }
 
     func deleteGrades(termID: Int, owner: String, revision: Int) async throws {
@@ -96,6 +147,13 @@ final class AnalysisRepository: AnalysisRepositoryProtocol {
         let document = CacheDocument(version: 1, owner: owner,
                                      baseURL: baseURL.absoluteString, snapshot: snapshot)
         try JSONEncoder().encode(document).write(to: file, options: .atomic)
+    }
+
+    private func save(jobs: [PersistedGradeAIJob], owner: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let document = JobDocument(version: 1, owner: owner,
+                                   baseURL: baseURL.absoluteString, jobs: jobs)
+        try JSONEncoder().encode(document).write(to: jobsFile, options: .atomic)
     }
 }
 

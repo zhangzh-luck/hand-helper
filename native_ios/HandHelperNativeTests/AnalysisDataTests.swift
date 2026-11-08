@@ -49,16 +49,17 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
-    func testAIUsesExplicitRequestAndDeletionEvictsOnlySelectedTerm() async throws {
+    func testAIJobUsesIdempotencyAndPersistsAccountScopedRecoveryMetadata() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let result = ###"{"term_id":8,"content":"## 报告","provider":"test","model":"model","created_at":"2026-09-08T10:00:00","cached":false}"###
+        let job = ###"{"job_id":"job-1","term_id":8,"input_hash":"hash","provider":"test","model":"model","status":"succeeded","reused":false,"cached":false,"attempt":1,"created_at":"2026-09-08T10:00:00","updated_at":"2026-09-08T10:00:01","started_at":"2026-09-08T10:00:00","finished_at":"2026-09-08T10:00:01","error_code":null,"error_message":null,"analysis_id":4,"analysis":{"term_id":8,"content":"## 报告","provider":"test","model":"model","created_at":"2026-09-08T10:00:00","cached":false}}"###
         let api = AnalysisAPIStub(responses: [
             "/api/v1/terms": terms,
             "/api/v1/grades?term_id=8": grades,
             "/api/v1/grades/summary?term_id=8": summary,
             "/api/v1/grades/ai-analyses?term_id=8": "[]",
-            "/api/v1/grades/ai-analysis?term_id=8&force_refresh=true": result,
+            "/api/v1/grades/ai-analysis/jobs?term_id=8&force_refresh=true": job,
             "/api/v1/grades?term_id=8#DELETE": #"{"term_id":8,"grades_deleted":1,"analyses_deleted":1}"#
         ])
         let state = await makeState(user: "alice", api: api)
@@ -68,8 +69,22 @@ final class AnalysisDataTests: XCTestCase {
         _ = try await repo.refresh(owner: owner, revision: revision)
         XCTAssertFalse(api.paths.contains(where: { $0.contains("ai-analysis?") }),
                        "普通加载不能主动生成 AI 报告")
-        let generated = try await repo.analyze(termID: 8, force: true)
-        XCTAssertEqual(generated.content, "## 报告")
+        let draft = PersistedGradeAIJob(termID: 8, idempotencyKey: "stable-key",
+                                        forceRefresh: true, job: nil, createdAt: Date())
+        try repo.savePersistedJob(draft, owner: owner, revision: revision)
+        let generated = try await repo.createAnalysisJob(termID: 8, force: true, idempotencyKey: "stable-key")
+        XCTAssertEqual(generated.analysis?.content, "## 报告")
+        XCTAssertTrue(api.paths.contains(where: { $0.hasPrefix("/api/v1/grades/ai-analysis/jobs?term_id=8&force_refresh=true") }))
+        let saved = PersistedGradeAIJob(termID: 8, idempotencyKey: "stable-key",
+                                        forceRefresh: true, job: generated, createdAt: draft.createdAt)
+        try repo.savePersistedJob(saved, owner: owner, revision: revision)
+        XCTAssertEqual(try repo.persistedJobs(owner: owner, revision: revision).first?.job?.jobID, "job-1")
+
+        let bob = await makeState(user: "bob", api: api)
+        let bobOwner = try bob.requireCurrentAccount(revision: bob.authenticationRevision)
+        XCTAssertTrue(try AnalysisRepository(state: bob, api: api, directory: folder)
+            .persistedJobs(owner: bobOwner, revision: bob.authenticationRevision).isEmpty)
+
         try await repo.deleteGrades(termID: 8, owner: owner, revision: revision)
         XCTAssertNil(try repo.cached(owner: owner, revision: revision)?.byTerm[8])
         XCTAssertTrue(api.paths.contains("/api/v1/grades?term_id=8#DELETE"))
@@ -112,6 +127,35 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
+    func testDurableJobPollingPersistsOneKeyAndPublishesSucceededReport() async throws {
+        let term = try XCTUnwrap(JSONDecoder().decode([TermInfo].self, from: Data(terms.utf8)).first)
+        let grade = try XCTUnwrap(JSONDecoder().decode([GradeRecord].self, from: Data(grades.utf8)).first)
+        let summary = try JSONDecoder().decode(GradeSummary.self, from: Data(summary.utf8))
+        let snapshot = AnalysisSnapshot(terms: [term], byTerm: [
+            term.id: AnalysisTermData(grades: [grade], summary: summary, history: [])
+        ], savedAt: Date())
+        let repository = AnalysisJobRepository(snapshot: snapshot, terminalStatus: .succeeded)
+        let api = AnalysisAPIStub(responses: [:])
+        let state = await makeState(user: "alice", api: api)
+        state.selectedTab = .analysis
+        let model = AnalysisViewModel(state: state, repository: repository)
+        model.loadIfNeeded()
+        for _ in 0..<10 { await Task.yield() }
+
+        let completed = expectation(description: "durable job completes")
+        model.generateAnalysis {
+            XCTAssertEqual($0.content, "## 异步报告")
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 3)
+        XCTAssertEqual(repository.createCalls, 1)
+        XCTAssertEqual(repository.pollCalls, 1)
+        XCTAssertEqual(model.currentAnalysis?.content, "## 异步报告")
+        XCTAssertFalse(model.analyzing)
+        XCTAssertTrue(repository.saved.isEmpty, "terminal jobs are removed after their report is persisted server-side")
+    }
+
+    @MainActor
     private func makeState(user: String, api: AnalysisAPIStub, cookie: String? = nil) async -> AppState {
         let preferences = UserDefaults(suiteName: UUID().uuidString)!
         let state = AppState(api: api, sessionStore: AnalysisSessionStub(cookie: cookie ?? "session=\(user)"),
@@ -141,9 +185,18 @@ private final class AnalysisDelayedRepository: AnalysisRepositoryProtocol {
         continuation?.resume(returning: snapshot)
         continuation = nil
     }
-    func analyze(termID: Int, force: Bool) async throws -> GradeAIAnalysis {
+    func createAnalysisJob(termID: Int, force: Bool, idempotencyKey: String) async throws -> GradeAIJob {
         throw APIError.invalidConfiguration
     }
+    func analysisJob(id: String) async throws -> GradeAIJob {
+        throw APIError.invalidConfiguration
+    }
+    func cancelAnalysisJob(id: String) async throws -> GradeAIJob {
+        throw APIError.invalidConfiguration
+    }
+    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob] { [] }
+    func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws {}
+    func removePersistedJob(id: String, owner: String, revision: Int) throws {}
     func deleteGrades(termID: Int, owner: String, revision: Int) async throws {
         throw APIError.invalidConfiguration
     }
@@ -157,8 +210,59 @@ private final class AnalysisAPIStub: APIClientProtocol {
                                     preserveSessionOnPasswordError: Bool) async throws -> Value {
         let key = method == "DELETE" ? path + "#DELETE" : path
         paths.append(key)
-        guard let response = responses[key] else { throw APIError.invalidResponse }
+        guard let response = responses[key] ?? responses.first(where: { key.hasPrefix($0.key) })?.value else {
+            throw APIError.invalidResponse
+        }
         return try JSONDecoder().decode(Value.self, from: Data(response.utf8))
+    }
+}
+
+@MainActor
+private final class AnalysisJobRepository: AnalysisRepositoryProtocol {
+    let snapshot: AnalysisSnapshot
+    let terminalStatus: GradeAIJob.Status
+    var saved: [PersistedGradeAIJob] = []
+    var createCalls = 0
+    var pollCalls = 0
+
+    init(snapshot: AnalysisSnapshot, terminalStatus: GradeAIJob.Status) {
+        self.snapshot = snapshot
+        self.terminalStatus = terminalStatus
+    }
+
+    func cached(owner: String, revision: Int) throws -> AnalysisSnapshot? { snapshot }
+    func refresh(owner: String, revision: Int) async throws -> AnalysisSnapshot { snapshot }
+    func createAnalysisJob(termID: Int, force: Bool, idempotencyKey: String) async throws -> GradeAIJob {
+        createCalls += 1
+        return job(status: .queued)
+    }
+    func analysisJob(id: String) async throws -> GradeAIJob {
+        pollCalls += 1
+        return job(status: terminalStatus)
+    }
+    func cancelAnalysisJob(id: String) async throws -> GradeAIJob { job(status: .cancelled) }
+    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob] { saved }
+    func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws {
+        saved.removeAll { $0.id == job.id || $0.idempotencyKey == job.idempotencyKey }
+        saved.append(job)
+    }
+    func removePersistedJob(id: String, owner: String, revision: Int) throws {
+        saved.removeAll { $0.id == id }
+    }
+    func deleteGrades(termID: Int, owner: String, revision: Int) async throws {}
+
+    private func job(status: GradeAIJob.Status) -> GradeAIJob {
+        let analysis = status == .succeeded
+            ? GradeAIAnalysis(id: 1, termID: snapshot.terms[0].id, content: "## 异步报告",
+                              provider: "test", model: "model", createdAt: "2026-11-08T00:00:00", cached: false)
+            : nil
+        return GradeAIJob(jobID: "job-1", termID: snapshot.terms[0].id, inputHash: "hash",
+                          provider: "test", model: "model", status: status, reused: false, cached: false,
+                          attempt: 1, createdAt: "2026-11-08T00:00:00", updatedAt: "2026-11-08T00:00:00",
+                          startedAt: nil, finishedAt: nil,
+                          errorCode: status == .failed ? "UPSTREAM_ERROR" : nil,
+                          errorMessage: status == .failed ? "模型服务失败" : nil,
+                          analysisID: analysis?.id, analysis: analysis)
     }
 }
 

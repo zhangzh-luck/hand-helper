@@ -15,6 +15,7 @@ struct AnalysisView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @ScaledMetric(relativeTo: .body) private var gradeTitleMinimumHeight: CGFloat = 42
     @ScaledMetric(relativeTo: .body) private var gradeRowMinimumHeight: CGFloat = 90
     @ScaledMetric(relativeTo: .title2) private var gradeScoreColumnWidth: CGFloat = 82
@@ -83,8 +84,13 @@ struct AnalysisView: View {
             }
             .task { loadWallpaper(); model.loadIfNeeded() }
             .onChange(of: state.selectedTab) { _, tab in
-                if tab == .analysis { model.loadIfNeeded() }
-                else { gradeDetail.clear() }
+                if tab == .analysis {
+                    model.visibilityDidChange(true)
+                    model.loadIfNeeded()
+                } else {
+                    model.visibilityDidChange(false)
+                    gradeDetail.clear()
+                }
             }
             .onChange(of: state.authenticationRevision) { _, _ in
                 gradeDetail.clear()
@@ -94,6 +100,9 @@ struct AnalysisView: View {
                 if state.selectedTab == .analysis { loadWallpaper() }
             }
             .onChange(of: state.analysisWallpaperVersion) { _, _ in loadWallpaper() }
+            .onChange(of: scenePhase) { _, phase in
+                model.visibilityDidChange(phase == .active && state.selectedTab == .analysis)
+            }
             .onChange(of: model.selectedTermID) { _, _ in
                 gradeDetail.clear()
                 reportRoute = nil
@@ -236,24 +245,57 @@ struct AnalysisView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("AI 成绩分析").font(.title3.weight(.semibold))
             VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    if let result = model.currentAnalysis {
-                        showReport(result)
-                    } else {
-                        model.generateAnalysis { showReport($0) }
+                if model.analyzing || model.analysisJob?.status.isActive == true {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.analysisStatusText ?? "正在分析")
+                                .font(.body.weight(.medium))
+                            Text("任务已保存在服务器，可离开此页面后稍后继续查看。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        if model.canCancelAnalysisJob {
+                            Button("取消", role: .destructive) { model.cancelAnalysis() }
+                                .font(.subheadline.weight(.medium))
+                        }
                     }
-                } label: {
-                    HStack {
-                        Label(model.currentAnalysis == nil ? "生成 AI 成绩分析" : "查看 AI 成绩分析",
-                              systemImage: "sparkles")
-                        Spacer()
-                        if model.analyzing { ProgressView() }
-                        else { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
+                    .frame(minHeight: 54)
+                    .accessibilityElement(children: .combine)
+                } else if model.recoveringAnalysisJob {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("分析任务等待恢复")
+                                .font(.body.weight(.medium))
+                            Text("网络恢复后可使用相同任务标识继续查询，不会重复创建分析。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Button("重试连接") { model.resumeAnalysisJob() }
+                            .font(.subheadline.weight(.medium))
                     }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: 54)
+                } else {
+                    Button {
+                        if let result = model.currentAnalysis {
+                            showReport(result)
+                        } else {
+                            model.generateAnalysis { showReport($0) }
+                        }
+                    } label: {
+                        HStack {
+                            Label(model.currentAnalysis == nil ? "生成 AI 成绩分析" : "查看 AI 成绩分析",
+                                  systemImage: "sparkles")
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .disabled(model.refreshing || model.offline ||
+                              model.selectedData?.grades.isEmpty != false)
                 }
-                .disabled(model.analyzing || model.refreshing || model.offline ||
-                          model.selectedData?.grades.isEmpty != false)
                 Divider()
                 Button {
                     withAnimation(.smooth) { historyOpen.toggle() }

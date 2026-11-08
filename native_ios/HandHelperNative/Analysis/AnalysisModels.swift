@@ -60,6 +60,68 @@ struct GradeAIAnalysis: Codable, Identifiable, Equatable {
     }
 }
 
+/// Durable server-side analysis work. The app stores only this metadata locally;
+/// grades, prompts, credentials, and session cookies never enter the task store.
+struct GradeAIJob: Codable, Identifiable, Equatable {
+    enum Status: String, Codable, CaseIterable {
+        case queued, running, succeeded, failed, cancelled, unknown
+
+        var isActive: Bool { self == .queued || self == .running }
+
+        var displayName: String {
+            switch self {
+            case .queued: "排队中"
+            case .running: "正在分析"
+            case .succeeded: "分析完成"
+            case .failed: "分析失败"
+            case .cancelled: "已取消"
+            case .unknown: "状态未知"
+            }
+        }
+    }
+
+    let jobID: String
+    let termID: Int
+    let inputHash: String
+    let provider: String
+    let model: String
+    let status: Status
+    let reused: Bool
+    let cached: Bool
+    let attempt: Int
+    let createdAt: String
+    let updatedAt: String
+    let startedAt: String?
+    let finishedAt: String?
+    let errorCode: String?
+    let errorMessage: String?
+    let analysisID: Int?
+    let analysis: GradeAIAnalysis?
+
+    var id: String { jobID }
+
+    enum CodingKeys: String, CodingKey {
+        case status, reused, cached, attempt, provider, model, analysis
+        case jobID = "job_id", termID = "term_id", inputHash = "input_hash"
+        case createdAt = "created_at", updatedAt = "updated_at"
+        case startedAt = "started_at", finishedAt = "finished_at"
+        case errorCode = "error_code", errorMessage = "error_message"
+        case analysisID = "analysis_id"
+    }
+}
+
+/// Stored before the create request is sent so a dropped response can be
+/// replayed with the same idempotency key instead of creating another paid job.
+struct PersistedGradeAIJob: Codable, Equatable, Identifiable {
+    let termID: Int
+    let idempotencyKey: String
+    let forceRefresh: Bool
+    var job: GradeAIJob?
+    let createdAt: Date
+
+    var id: String { job?.jobID ?? idempotencyKey }
+}
+
 struct AnalysisTermData: Codable, Equatable {
     var grades: [GradeRecord]
     var summary: GradeSummary
