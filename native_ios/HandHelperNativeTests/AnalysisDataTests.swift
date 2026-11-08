@@ -19,6 +19,15 @@ final class AnalysisDataTests: XCTestCase {
         XCTAssertEqual(value.gpaNote, "服务端估算")
     }
 
+    func testAIProviderSettingsNeverDecodesOrStoresPlaintextKey() throws {
+        let response = #"{"configured":true,"provider":"APIKEY.FAN","base_url":"https://api.apikey.fan/v1","model":"model-a","api_key_hint":"••••abcd","available_models":["model-a","model-b"],"models_synced_at":"2026-11-08T00:00:00","requires_apikey_fan_migration":false}"#
+        let setting = try JSONDecoder().decode(AIProviderSettings.self, from: Data(response.utf8))
+        XCTAssertTrue(setting.configured)
+        XCTAssertEqual(setting.apiKeyHint, "••••abcd")
+        XCTAssertEqual(setting.availableModels, ["model-a", "model-b"])
+        XCTAssertFalse(setting.requiresAPIKeyFanMigration)
+    }
+
     @MainActor
     func testRefreshUsesActualPathsAndCacheIsAccountScoped() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

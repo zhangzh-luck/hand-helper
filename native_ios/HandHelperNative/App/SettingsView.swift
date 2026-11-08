@@ -66,6 +66,16 @@ struct SettingsView: View {
                         AppHaptics.trigger(.settingsNavigation)
                     })
                     .listRowInsets(SettingsNavigationRow.rowInsets)
+                    NavigationLink {
+                        AIModelSettingsView(state: state)
+                    } label: {
+                        SettingsNavigationRow(title: "AI 模型配置", symbol: "sparkles",
+                                              color: Color(uiColor: .systemIndigo))
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AppHaptics.trigger(.settingsNavigation)
+                    })
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                 }
 
                 Section("关于") {
