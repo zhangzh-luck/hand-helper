@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import UIKit
 @testable import HandHelperNative
 
@@ -207,6 +208,28 @@ final class FoundationTests: XCTestCase {
         state.setNavigationDestinationVisible(false, token: token, in: .settings)
         tabs.apply(state: state)
         XCTAssertFalse(tabs.tabBar.isHidden)
+    }
+
+    @MainActor
+    func testSettingsUsesUIKitPushForSecondaryDestinations() throws {
+        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        let tabs = NativeTabController(state: state)
+        let navigation = try XCTUnwrap(
+            tabs.viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController
+        )
+
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+        XCTAssertFalse(navigation.isShowingSecondaryPage)
+
+        navigation.navigator.push(title: "测试页面") { Text("测试页面") }
+
+        XCTAssertEqual(navigation.viewControllers.count, 2)
+        XCTAssertTrue(navigation.isShowingSecondaryPage)
+        XCTAssertTrue(navigation.topViewController?.hidesBottomBarWhenPushed == true)
+
+        navigation.popViewController(animated: false)
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+        XCTAssertFalse(navigation.isShowingSecondaryPage)
     }
 
     func testSessionStoreContract() {

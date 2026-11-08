@@ -58,6 +58,7 @@ struct ProfileView: View {
     let revision: Int
     let presentation: ProfilePresentation
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.settingsNavigator) private var settingsNavigator
     @State private var original: LocalProfile
     @State private var name: String
     @State private var avatar: Data?
@@ -112,7 +113,7 @@ struct ProfileView: View {
                 confirmation = nil
                 activeAlert = nil
                 logoutRequested = false
-                dismiss()
+                dismissProfileEditor()
             }
         }
         .sheet(isPresented: $showPreview) {
@@ -139,7 +140,7 @@ struct ProfileView: View {
                 Button("放弃修改", role: .destructive) {
                     selectionGeneration += 1
                     mayDismiss = true
-                    dismiss()
+                    dismissProfileEditor()
                 }
             case nil:
                 EmptyView()
@@ -262,7 +263,7 @@ struct ProfileView: View {
         else {
             selectionGeneration += 1
             mayDismiss = true
-            dismiss()
+            dismissProfileEditor()
         }
     }
 
@@ -270,6 +271,14 @@ struct ProfileView: View {
         guard confirmation == nil, activeAlert == nil, !logoutRequested,
               !isBusy, !showPhotoPicker, !showPreview, !showCrop else { return }
         confirmation = choice
+    }
+
+    private func dismissProfileEditor() {
+        if presentation == .navigation, settingsNavigator != nil {
+            settingsNavigator?.pop()
+        } else {
+            dismiss()
+        }
     }
 
     private func requestLogoutAlert() {
@@ -292,7 +301,7 @@ struct ProfileView: View {
             try state.saveLocalProfile(candidate, revision: revision)
             selectionGeneration += 1
             mayDismiss = true
-            dismiss()
+            dismissProfileEditor()
         } catch { activeAlert = .profileError(error.localizedDescription) }
     }
 

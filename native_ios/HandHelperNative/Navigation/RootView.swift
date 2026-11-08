@@ -219,23 +219,28 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         super.init(nibName: nil, bundle: nil)
         appState = state
         viewControllers = AppTab.allCases.map { tab in
-            let page: AnyView
+            let controller: UIViewController
             switch tab {
-            case .today: page = AnyView(TodayView(state: state, onAvatarPreview: onAvatarPreview,
-                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
-            case .settings: page = AnyView(SettingsView(state: state))
-            case .analysis: page = AnyView(AnalysisView(state: state,
-                gradeDetail: gradeDetail ?? GradeDetailCoordinator(),
-                timetableDetail: timetableDetail ?? TimetableCourseDetailCoordinator(),
-                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
-            case .timetable: page = AnyView(TimetableView(state: state,
-                detail: timetableDetail ?? TimetableCourseDetailCoordinator(),
-                deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
+            case .today:
+                controller = UIHostingController(rootView: TodayView(state: state, onAvatarPreview: onAvatarPreview,
+                    deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
+            case .settings:
+                let navigation = SettingsNavigationController(state: state)
+                navigation.stackVisibilityDidChange = { [weak self] in self?.updateTabVisibility() }
+                controller = navigation
+            case .analysis:
+                controller = UIHostingController(rootView: AnalysisView(state: state,
+                    gradeDetail: gradeDetail ?? GradeDetailCoordinator(),
+                    timetableDetail: timetableDetail ?? TimetableCourseDetailCoordinator(),
+                    deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
+            case .timetable:
+                controller = UIHostingController(rootView: TimetableView(state: state,
+                    detail: timetableDetail ?? TimetableCourseDetailCoordinator(),
+                    deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             }
-            let host = UIHostingController(rootView: page)
-            host.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
-            host.tabBarItem.accessibilityLabel = tab.title
-            return host
+            controller.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
+            controller.tabBarItem.accessibilityLabel = tab.title
+            return controller
         }
         delegate = self
         selectedIndex = state.selectedTab.rawValue
@@ -281,7 +286,10 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         case .dark: style = .dark
         }
         if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
-        if selectedIndex != state.selectedTab.rawValue { selectedIndex = state.selectedTab.rawValue }
+        if selectedIndex != state.selectedTab.rawValue {
+            selectedIndex = state.selectedTab.rawValue
+            updateTabVisibility()
+        }
         if detailPresented != state.isDetailPresented {
             detailPresented = state.isDetailPresented
             updateTabVisibility()
@@ -305,6 +313,10 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     var selectedTabDidChange: ((AppTab) -> Void)?
 
     private func updateTabVisibility() {
+        // A UIKit-pushed Settings controller owns the bar's transition through
+        // `hidesBottomBarWhenPushed`. Manual visibility changes would interrupt an
+        // interactive pop (including a cancelled edge swipe), so leave it to UIKit.
+        if selectedSettingsNavigationController?.isShowingSecondaryPage == true { return }
         let shouldHide = detailPresented || navigationDestinationPresented || keyboardCoversBottom
         guard tabBar.isHidden != shouldHide else { return }
         // UIKit owns the child safe-area inset. Change that ownership atomically so a
@@ -314,6 +326,11 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             view.setNeedsLayout()
             view.layoutIfNeeded()
         }
+    }
+
+    private var selectedSettingsNavigationController: SettingsNavigationController? {
+        guard selectedIndex == AppTab.settings.rawValue else { return nil }
+        return viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController
     }
 
     @objc private func keyboardChanged(_ notification: Notification) {

@@ -3,12 +3,13 @@ import SwiftUI
 @MainActor
 struct WallpaperManagementView: View {
     @ObservedObject var state: AppState
+    @Environment(\.settingsNavigator) private var navigator
 
     var body: some View {
         Form {
             Section {
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "今日页壁纸") {
                         WallpaperSettingsView(state: state, kind: .today)
                     }
                 } label: {
@@ -16,8 +17,8 @@ struct WallpaperManagementView: View {
                                           color: Color(uiColor: .systemBlue))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "课程表壁纸") {
                         WallpaperSettingsView(state: state, kind: .timetable)
                     }
                 } label: {
@@ -25,8 +26,8 @@ struct WallpaperManagementView: View {
                                           color: Color(uiColor: .systemPurple))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "分析页壁纸") {
                         WallpaperSettingsView(state: state, kind: .analysis)
                     }
                 } label: {

@@ -3,12 +3,13 @@ import SwiftUI
 @MainActor
 struct DataImportView: View {
     @ObservedObject var state: AppState
+    @Environment(\.settingsNavigator) private var navigator
 
     var body: some View {
         List {
             Section {
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "导入课表") {
                         TimetableImportView(state: state)
                     }
                 } label: {
@@ -16,8 +17,8 @@ struct DataImportView: View {
                                           color: Color(uiColor: .systemBlue))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "导入成绩") {
                         GradeImportView(state: state)
                     }
                 } label: {

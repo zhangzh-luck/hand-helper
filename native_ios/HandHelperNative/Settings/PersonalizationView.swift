@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct PersonalizationView: View {
     @ObservedObject var state: AppState
+    @Environment(\.settingsNavigator) private var navigator
 
     var body: some View {
         Form {
@@ -38,8 +39,8 @@ struct PersonalizationView: View {
             }
 
             Section {
-                NavigationLink {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "壁纸") {
                         WallpaperManagementView(state: state)
                     }
                 } label: {
@@ -64,10 +65,12 @@ struct PersonalizationView: View {
                         .foregroundStyle(.secondary)
                 }
                 #if DEBUG
-                NavigationLink("实时活动诊断") {
-                    TabBarHiddenNavigationDestination(state: state, tab: .settings) {
+                SettingsNavigationButton {
+                    navigator?.push(title: "实时活动诊断") {
                         LiveActivityDiagnosticView(state: state)
                     }
+                } label: {
+                    Text("实时活动诊断")
                 }
                 #endif
             } header: {
