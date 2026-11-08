@@ -325,7 +325,10 @@ def test_ai_grade_analysis_is_encrypted_and_cached(monkeypatch):
 
 
 def test_durable_ai_jobs_are_deduplicated_cancelable_and_persist_results(monkeypatch):
+    model_calls: list[tuple[str, str]] = []
+
     async def fake_model_call(_endpoint, _api_key, _model, _messages, **_kwargs):
+        model_calls.append((_endpoint, _model))
         return "## 整体概览\n- 稳定\n## 优势课程\n- 基础\n## 需要关注\n- 复盘\n## 可执行建议\n- 计划"
 
     async def fake_model_list(_endpoint, _api_key):
@@ -359,10 +362,16 @@ def test_durable_ai_jobs_are_deduplicated_cancelable_and_persist_results(monkeyp
         completed_data = completed.json()["data"]
         assert completed_data["status"] == "succeeded"
         assert completed_data["analysis"]["content"].startswith("## 整体概览")
+        # execute_job() releases its read transaction before calling the
+        # provider.  The setting must already be detached into scalar values,
+        # otherwise rollback expires it and a MissingGreenlet failure is stored
+        # instead of this successful result.
+        assert model_calls == [("https://api.apikey.fan/v1/chat/completions", "job-model")]
 
         cached = client.post(f"/api/v1/grades/ai-analysis/jobs?term_id={term_id}", headers=headers)
         assert cached.json()["data"]["status"] == "succeeded"
         assert cached.json()["data"]["cached"] is True
+        assert len(model_calls) == 1
 
         # Reusing a client key for a different provider configuration must not
         # silently return the original completed job.

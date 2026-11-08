@@ -388,7 +388,20 @@ async def execute_job(db: AsyncSession, *, worker_id: str, job_id: str) -> None:
     if setting is None or not setting.is_enabled:
         await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_MISSING", message="模型服务配置已不存在或已关闭")
         return
-    if analysis_configuration_hash(setting.provider, setting.base_url, setting.model) != job_configuration_hash:
+    # ``rollback()`` below intentionally releases the SQLite read transaction
+    # while the upstream request is in flight.  SQLAlchemy expires ORM objects
+    # on rollback, including with ``expire_on_commit=False``; never access this
+    # setting instance after that boundary.
+    setting_provider = setting.provider
+    setting_base_url = setting.base_url
+    setting_model = setting.model
+    try:
+        endpoint = _chat_endpoint(setting_base_url)
+        api_key = _decrypt_saved_api_key(setting)
+    except AiConfigurationError as exc:
+        await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_ERROR", message=str(exc))
+        return
+    if analysis_configuration_hash(setting_provider, setting_base_url, setting_model) != job_configuration_hash:
         await _fail_job(db, job_id=job_id, worker_id=worker_id, lease_token=lease_token, code="CONFIGURATION_CHANGED", message="模型服务配置已变化，未发送旧任务")
         return
     grades = list((await db.scalars(select(Grade).where(Grade.term_id == job_term_id))).all())
@@ -400,8 +413,6 @@ async def execute_job(db: AsyncSession, *, worker_id: str, job_id: str) -> None:
     # model. All writes below are additionally fenced by the lease token.
     await db.rollback()
     try:
-        endpoint = _chat_endpoint(setting.base_url)
-        api_key = _decrypt_saved_api_key(setting)
         content = await _post_openai_compatible(
             endpoint,
             api_key,
