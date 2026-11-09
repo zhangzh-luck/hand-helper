@@ -235,6 +235,14 @@ final class FoundationTests: XCTestCase {
         XCTAssertTrue(tabs.view.subviews.last === overlay.view)
 
         overlay.popToRootViewController(animated: false)
+        // The test controller is not attached to a UIWindow, so UIKit does not
+        // deliver its usual `didShow` callback. Exercise the same completion
+        // path that a completed (not cancelled) pop uses on-device.
+        overlay.navigationController(
+            overlay,
+            didShow: try XCTUnwrap(overlay.viewControllers.first),
+            animated: false
+        )
         XCTAssertFalse(tabs.isSettingsOverlayPresented)
         XCTAssertFalse(tabs.tabBar.isHidden)
     }
