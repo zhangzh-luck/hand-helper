@@ -38,7 +38,7 @@ struct TabSwitchDiagnosticsView: View {
                             Text(report.summary)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                            Text("\(report.frameCount) 帧 · P95 \(report.p95FrameIntervalMilliseconds.map { "\($0)ms" } ?? "—") · 超过 20ms：\(report.intervalsOverTwentyMilliseconds)")
+                            Text(frameSummary(for: report))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -65,5 +65,10 @@ struct TabSwitchDiagnosticsView: View {
         .onChange(of: diagnostics.reports.count) { _, _ in
             copied = false
         }
+    }
+
+    private func frameSummary(for report: TabSwitchDiagnosticReport) -> String {
+        let p95 = report.p95FrameIntervalMilliseconds.map { "\($0)ms" } ?? "—"
+        return "\(report.frameCount) 帧 · P95 \(p95) · 超过 20ms：\(report.intervalsOverTwentyMilliseconds)"
     }
 }

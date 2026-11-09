@@ -46,7 +46,6 @@ struct TabSwitchDiagnosticReport: Identifiable, Equatable {
     }
 }
 
-@MainActor
 final class TabSwitchDiagnostics: NSObject, ObservableObject {
     private static let enabledKey = "tab_switch_performance_diagnostics_enabled"
     private static let sampleDuration: TimeInterval = 0.7
@@ -91,7 +90,7 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
         displayLink.add(to: .main, forMode: .common)
         self.displayLink = displayLink
         let id = active?.id
-        stopTask = Task { [weak self] in
+        stopTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(Self.sampleDuration))
             guard !Task.isCancelled else { return }
             self?.finishActiveSample(id: id)
