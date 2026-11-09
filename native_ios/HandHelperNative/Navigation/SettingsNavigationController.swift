@@ -16,7 +16,7 @@ extension EnvironmentValues {
 /// The tab controller and its root Settings page remain stationary underneath it.
 @MainActor
 final class SettingsNavigator: ObservableObject {
-    fileprivate weak var overlayHost: NativeTabController?
+    weak var overlayHost: NativeTabController?
 
     func push<Content: View>(title: String, @ViewBuilder content: () -> Content) {
         overlayHost?.pushSettingsDestination(
