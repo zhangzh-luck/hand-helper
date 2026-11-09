@@ -211,25 +211,32 @@ final class FoundationTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsUsesUIKitPushForSecondaryDestinations() throws {
+    func testSettingsUsesOverlayPushWithoutMovingTabBar() throws {
         let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        state.selectedTab = .settings
         let tabs = NativeTabController(state: state)
+        tabs.loadViewIfNeeded()
+        tabs.apply(state: state)
         let navigation = try XCTUnwrap(
             tabs.viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController
         )
 
         XCTAssertEqual(navigation.viewControllers.count, 1)
-        XCTAssertFalse(navigation.isShowingSecondaryPage)
+        XCTAssertFalse(tabs.isSettingsOverlayPresented)
+        XCTAssertFalse(tabs.tabBar.isHidden)
 
         navigation.navigator.push(title: "测试页面") { Text("测试页面") }
 
-        XCTAssertEqual(navigation.viewControllers.count, 2)
-        XCTAssertTrue(navigation.isShowingSecondaryPage)
-        XCTAssertTrue(navigation.topViewController?.hidesBottomBarWhenPushed == true)
-
-        navigation.popViewController(animated: false)
+        let overlay = try XCTUnwrap(tabs.settingsOverlayForTesting)
         XCTAssertEqual(navigation.viewControllers.count, 1)
-        XCTAssertFalse(navigation.isShowingSecondaryPage)
+        XCTAssertEqual(overlay.viewControllers.count, 2)
+        XCTAssertFalse(overlay.topViewController?.hidesBottomBarWhenPushed ?? true)
+        XCTAssertFalse(tabs.tabBar.isHidden)
+        XCTAssertTrue(tabs.view.subviews.last === overlay.view)
+
+        overlay.popToRootViewController(animated: false)
+        XCTAssertFalse(tabs.isSettingsOverlayPresented)
+        XCTAssertFalse(tabs.tabBar.isHidden)
     }
 
     func testSessionStoreContract() {
