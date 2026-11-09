@@ -12,30 +12,32 @@ extension EnvironmentValues {
     }
 }
 
-/// Routes Settings destinations through the tab controller's temporary overlay stack.
-/// The tab controller and its root Settings page remain stationary underneath it.
+/// Routes Settings destinations through UIKit so a pushed host can participate in the
+/// tab controller's native `hidesBottomBarWhenPushed` and interactive-pop lifecycle.
 @MainActor
 final class SettingsNavigator: ObservableObject {
-    weak var overlayHost: NativeTabController?
+    fileprivate weak var navigationController: SettingsNavigationController?
 
     func push<Content: View>(title: String, @ViewBuilder content: () -> Content) {
-        overlayHost?.pushSettingsDestination(
-            title: title,
-            content: AnyView(content().environment(\.settingsNavigator, self))
+        guard let navigationController else { return }
+        let host = UIHostingController(
+            rootView: AnyView(content().environment(\.settingsNavigator, self))
         )
+        host.title = title
+        host.navigationItem.largeTitleDisplayMode = .never
+        host.hidesBottomBarWhenPushed = true
+        navigationController.pushViewController(host, animated: true)
     }
 
     func pop() {
-        overlayHost?.popSettingsDestination()
+        navigationController?.popViewController(animated: true)
     }
 }
 
-/// The stationary, first-level Settings navigation controller installed as one tab.
-/// Secondary Settings pages are intentionally not pushed here: they belong to the
-/// overlay navigation controller above the tab bar.
 @MainActor
-final class SettingsNavigationController: UINavigationController {
+final class SettingsNavigationController: UINavigationController, UINavigationControllerDelegate {
     let navigator: SettingsNavigator
+    var stackVisibilityDidChange: (() -> Void)?
 
     init(state: AppState) {
         let navigator = SettingsNavigator()
@@ -46,90 +48,28 @@ final class SettingsNavigationController: UINavigationController {
         root.navigationItem.largeTitleDisplayMode = .always
         self.navigator = navigator
         super.init(rootViewController: root)
+        navigator.navigationController = self
+        delegate = self
         navigationBar.prefersLargeTitles = true
     }
 
     required init?(coder: NSCoder) {
         fatalError("Use init(state:)")
     }
-}
 
-/// A full-screen navigation stack installed above `UITabBarController.tabBar` only
-/// while Settings has a secondary page. Its transparent root keeps the stationary
-/// Settings page and tab bar visible during UIKit's interactive pop transition.
-@MainActor
-final class SettingsOverlayNavigationController: UINavigationController, UINavigationControllerDelegate {
-    private let transparentRoot = TransparentSettingsOverlayRootController()
-    var becameEmpty: (() -> Void)?
-
-    init() {
-        super.init(rootViewController: transparentRoot)
-        delegate = self
-        view.backgroundColor = .clear
-        view.isOpaque = false
-        navigationBar.prefersLargeTitles = false
-        setNavigationBarHidden(true, animated: false)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("Use init()")
-    }
-
-    var isTransitioning: Bool {
-        transitionCoordinator != nil
-    }
-
-    func pushDestination(_ controller: UIViewController) {
-        guard !isTransitioning else { return }
-        setNavigationBarHidden(false, animated: false)
-        pushViewController(controller, animated: true)
-    }
-
-    func popDestination() {
-        guard viewControllers.count > 1, !isTransitioning else { return }
-        popViewController(animated: true)
-    }
-
-    func navigationController(_ navigationController: UINavigationController,
-                              willShow viewController: UIViewController,
-                              animated: Bool) {
-        if viewController === transparentRoot {
-            setNavigationBarHidden(true, animated: animated)
-        } else {
-            setNavigationBarHidden(false, animated: animated)
-        }
+    var isShowingSecondaryPage: Bool {
+        viewControllers.count > 1
     }
 
     func navigationController(_ navigationController: UINavigationController,
                               didShow viewController: UIViewController,
                               animated: Bool) {
-        // `didShow` resolves to the original detail after an interactive-pop
-        // cancellation, so removal here is safe for both completed and cancelled
-        // gestures.
-        if viewController === transparentRoot {
-            becameEmpty?()
-        }
+        stackVisibilityDidChange?()
     }
 }
 
-private final class TransparentSettingsOverlayRootController: UIHostingController<AnyView> {
-    init() {
-        super.init(rootView: AnyView(Color.clear.ignoresSafeArea()))
-    }
-
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
-        fatalError("Use init()")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        view.isOpaque = false
-    }
-}
-
-/// Keeps Settings rows visually equivalent to `NavigationLink` while routing their
-/// destination through the enclosing UIKit overlay navigation controller.
+/// Keeps settings rows visually equivalent to `NavigationLink` while routing their
+/// destination through the enclosing UIKit navigation controller.
 struct SettingsNavigationButton<Label: View>: View {
     let action: () -> Void
     private let label: Label

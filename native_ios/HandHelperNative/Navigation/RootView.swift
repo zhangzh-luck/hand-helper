@@ -211,7 +211,6 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var keyboardCoversBottom = false
     private var detailPresented = false
     private var navigationDestinationPresented = false
-    private var settingsOverlayNavigationController: SettingsOverlayNavigationController?
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
@@ -227,6 +226,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
                     deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .settings:
                 let navigation = SettingsNavigationController(state: state)
+                navigation.stackVisibilityDidChange = { [weak self] in self?.updateTabVisibility() }
                 controller = navigation
             case .analysis:
                 controller = UIHostingController(rootView: AnalysisView(state: state,
@@ -242,8 +242,6 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             controller.tabBarItem.accessibilityLabel = tab.title
             return controller
         }
-        (viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController)?
-            .navigator.overlayHost = self
         delegate = self
         selectedIndex = state.selectedTab.rawValue
         configureAppearance()
@@ -289,7 +287,6 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         }
         if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
         if selectedIndex != state.selectedTab.rawValue {
-            removeSettingsOverlay()
             selectedIndex = state.selectedTab.rawValue
             updateTabVisibility()
         }
@@ -315,58 +312,11 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
 
     var selectedTabDidChange: ((AppTab) -> Void)?
 
-    var isSettingsOverlayPresented: Bool {
-        settingsOverlayNavigationController != nil
-    }
-
-    var settingsOverlayForTesting: SettingsOverlayNavigationController? {
-        settingsOverlayNavigationController
-    }
-
-    func pushSettingsDestination(title: String, content: AnyView) {
-        guard selectedIndex == AppTab.settings.rawValue,
-              appState?.selectedTab == .settings,
-              !detailPresented,
-              !navigationDestinationPresented,
-              !keyboardCoversBottom else { return }
-
-        let overlay: SettingsOverlayNavigationController
-        if let existing = settingsOverlayNavigationController {
-            overlay = existing
-        } else {
-            guard isViewLoaded else { return }
-            let created = SettingsOverlayNavigationController()
-            created.becameEmpty = { [weak self, weak created] in
-                guard let self, let created else { return }
-                self.removeSettingsOverlay(created)
-            }
-            addChild(created)
-            created.view.frame = view.bounds
-            created.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            created.view.accessibilityViewIsModal = true
-            view.insertSubview(created.view, aboveSubview: tabBar)
-            created.didMove(toParent: self)
-            settingsOverlayNavigationController = created
-            overlay = created
-        }
-
-        let host = UIHostingController(rootView: content)
-        host.title = title
-        host.navigationItem.largeTitleDisplayMode = .never
-        // The overlay itself covers the stationary tab bar. Do not ask UIKit to
-        // move or hide the tab bar as part of this navigation transition.
-        host.hidesBottomBarWhenPushed = false
-        overlay.pushDestination(host)
-    }
-
-    func popSettingsDestination() {
-        settingsOverlayNavigationController?.popDestination()
-    }
-
     private func updateTabVisibility() {
-        // The Settings overlay covers the bar without changing its frame or
-        // visibility. Mutating the bar here would break an interactive pop.
-        if settingsOverlayNavigationController != nil { return }
+        // A UIKit-pushed Settings controller owns the bar's transition through
+        // `hidesBottomBarWhenPushed`. Manual visibility changes would interrupt an
+        // interactive pop (including a cancelled edge swipe), so leave it to UIKit.
+        if selectedSettingsNavigationController?.isShowingSecondaryPage == true { return }
         let shouldHide = detailPresented || navigationDestinationPresented || keyboardCoversBottom
         guard tabBar.isHidden != shouldHide else { return }
         // UIKit owns the child safe-area inset. Change that ownership atomically so a
@@ -378,14 +328,9 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         }
     }
 
-    private func removeSettingsOverlay(_ expected: SettingsOverlayNavigationController? = nil) {
-        guard let overlay = settingsOverlayNavigationController else { return }
-        if let expected, overlay !== expected { return }
-        overlay.willMove(toParent: nil)
-        overlay.view.removeFromSuperview()
-        overlay.removeFromParent()
-        settingsOverlayNavigationController = nil
-        updateTabVisibility()
+    private var selectedSettingsNavigationController: SettingsNavigationController? {
+        guard selectedIndex == AppTab.settings.rawValue else { return nil }
+        return viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController
     }
 
     @objc private func keyboardChanged(_ notification: Notification) {

@@ -211,40 +211,25 @@ final class FoundationTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsUsesOverlayPushWithoutMovingTabBar() throws {
+    func testSettingsUsesUIKitPushForSecondaryDestinations() throws {
         let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
-        state.selectedTab = .settings
         let tabs = NativeTabController(state: state)
-        tabs.loadViewIfNeeded()
-        tabs.apply(state: state)
         let navigation = try XCTUnwrap(
             tabs.viewControllers?[AppTab.settings.rawValue] as? SettingsNavigationController
         )
 
         XCTAssertEqual(navigation.viewControllers.count, 1)
-        XCTAssertFalse(tabs.isSettingsOverlayPresented)
-        XCTAssertFalse(tabs.tabBar.isHidden)
+        XCTAssertFalse(navigation.isShowingSecondaryPage)
 
         navigation.navigator.push(title: "测试页面") { Text("测试页面") }
 
-        let overlay = try XCTUnwrap(tabs.settingsOverlayForTesting)
-        XCTAssertEqual(navigation.viewControllers.count, 1)
-        XCTAssertEqual(overlay.viewControllers.count, 2)
-        XCTAssertFalse(overlay.topViewController?.hidesBottomBarWhenPushed ?? true)
-        XCTAssertFalse(tabs.tabBar.isHidden)
-        XCTAssertTrue(tabs.view.subviews.last === overlay.view)
+        XCTAssertEqual(navigation.viewControllers.count, 2)
+        XCTAssertTrue(navigation.isShowingSecondaryPage)
+        XCTAssertTrue(navigation.topViewController?.hidesBottomBarWhenPushed == true)
 
-        overlay.popToRootViewController(animated: false)
-        // The test controller is not attached to a UIWindow, so UIKit does not
-        // deliver its usual `didShow` callback. Exercise the same completion
-        // path that a completed (not cancelled) pop uses on-device.
-        overlay.navigationController(
-            overlay,
-            didShow: try XCTUnwrap(overlay.viewControllers.first),
-            animated: false
-        )
-        XCTAssertFalse(tabs.isSettingsOverlayPresented)
-        XCTAssertFalse(tabs.tabBar.isHidden)
+        navigation.popViewController(animated: false)
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+        XCTAssertFalse(navigation.isShowingSecondaryPage)
     }
 
     func testSessionStoreContract() {

@@ -114,7 +114,8 @@ final class AppState: ObservableObject {
     private static let pendingCredentialRemovalKey = "pending_session_credential_removal"
     private static let liveActivitiesKey = "live_activities_enabled"
 
-    /// SwiftUI destinations outside the Settings UIKit overlay register their own
+    /// `NavigationStack` lives inside each UIKit tab host, so UIKit cannot infer pushed
+    /// destinations through `hidesBottomBarWhenPushed`. Destinations register their own
     /// lifetime here; the selected tab alone determines whether the native bar is hidden.
     var shouldHideTabBarForNavigation: Bool {
         !(activeNavigationDestinationTokens[selectedTab] ?? []).isEmpty
