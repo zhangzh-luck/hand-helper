@@ -178,6 +178,7 @@ struct AIModelSettingsView: View {
                 TextField("服务名称", text: $model.provider).textInputAutocapitalization(.characters)
                 TextField("HTTPS 服务地址", text: $model.baseURL).textInputAutocapitalization(.never).keyboardType(.URL)
                 HStack { Group { if showKey { TextField("API Key", text: $model.apiKey) } else { SecureField("API Key", text: $model.apiKey) } }.textInputAutocapitalization(.never).autocorrectionDisabled(); Button(showKey ? "隐藏" : "显示") { showKey.toggle() } }
+                    .listRowSeparator(.visible, edges: .bottom)
                 LabeledContent("已保存 API Key", value: model.keyStatus)
             }
             Section("模型") {
@@ -188,7 +189,6 @@ struct AIModelSettingsView: View {
             }
             Section { Button(model.saving ? "正在保存…" : "保存配置") { model.save() }.frame(maxWidth: .infinity).disabled(!model.canSave) }
             if model.isConfigured { Section("危险操作") { Button("清除模型服务配置", systemImage: "trash", role: .destructive) { confirmClear = true } } }
-            Section { Text("API Key 仅在保存、读取模型或测试连接时提交给后端；客户端不会持久化或回显明文。 ").font(.footnote).foregroundStyle(.secondary) }
         }
         .navigationTitle("AI 模型配置").navigationBarTitleDisplayMode(.inline)
         .overlay { if model.loading { ProgressView("正在读取配置") } }
