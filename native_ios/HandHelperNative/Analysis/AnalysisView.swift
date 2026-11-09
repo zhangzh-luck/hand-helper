@@ -86,7 +86,9 @@ struct AnalysisView: View {
             .onChange(of: state.selectedTab) { _, tab in
                 if tab == .analysis {
                     model.visibilityDidChange(true)
-                    model.loadIfNeeded()
+                    let cacheAvailable = model.loadIfNeeded()
+                    state.tabSwitchDiagnostics.recordPageReady(for: .analysis,
+                                                               cacheState: cacheAvailable ? .hit : .miss)
                 } else {
                     model.visibilityDidChange(false)
                     gradeDetail.clear()

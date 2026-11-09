@@ -49,16 +49,22 @@ final class TimetableViewModel: ObservableObject {
         isLoading = false
     }
 
-    func loadCached() {
-        guard state.canAccessPrivateData else { clear(); return }
+    @discardableResult
+    func loadCached() -> Bool {
+        guard state.canAccessPrivateData else {
+            clear()
+            return false
+        }
         do {
             let ticket = try access.ticket()
-            guard let cached = try repository.cached() else { return }
+            guard let cached = try repository.cached() else { return false }
             try accept(cached, ticket: ticket)
             if projection != nil { errorMessage = nil }
+            return snapshot != nil
         } catch {
             if !state.canAccessPrivateData { clear() }
             else { errorMessage = "无法读取本机课程：\(error.localizedDescription)" }
+            return false
         }
     }
 
@@ -166,9 +172,10 @@ final class TimetableViewModel: ObservableObject {
         reproject()
     }
 
-    func updateIfNeeded() async {
+    func updateIfNeeded(onCacheRestored: ((Bool) -> Void)? = nil) async {
         guard state.selectedTab == .timetable, state.canAccessPrivateData else { return }
-        loadCached()
+        let cacheAvailable = loadCached()
+        onCacheRestored?(cacheAvailable)
         let marker = state.pendingCourseInvalidation(after: appliedSequence)
         if let marker, state.completedCourseRefresh == marker {
             if snapshot != nil { appliedSequence = marker.sequence }

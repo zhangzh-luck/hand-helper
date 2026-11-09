@@ -211,6 +211,8 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var keyboardCoversBottom = false
     private var detailPresented = false
     private var navigationDestinationPresented = false
+    private var configuredHomeAvatarData: Data?
+    private var hasConfiguredHomeAvatar = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
@@ -298,14 +300,33 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             navigationDestinationPresented = state.shouldHideTabBarForNavigation
             updateTabVisibility()
         }
+        applyHomeTabImageIfNeeded(state: state)
+        state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab)
+    }
+
+    private func applyHomeTabImageIfNeeded(state: AppState) {
+        let avatarData = state.currentProfile.avatarData
+        guard !hasConfiguredHomeAvatar || configuredHomeAvatarData != avatarData else { return }
+        configuredHomeAvatarData = avatarData
+        hasConfiguredHomeAvatar = true
         let image = state.homeAvatar?.withRenderingMode(.alwaysOriginal) ?? UIImage(systemName: AppTab.today.symbol)
         viewControllers?.first?.tabBarItem.image = image
         viewControllers?.first?.tabBarItem.selectedImage = state.homeAvatar?.withRenderingMode(.alwaysOriginal)
     }
 
+    func tabBarController(_ tabBarController: UITabBarController,
+                          shouldSelect viewController: UIViewController) -> Bool {
+        guard let destinationIndex = viewControllers?.firstIndex(where: { $0 === viewController }),
+              let destination = AppTab(rawValue: destinationIndex),
+              let source = AppTab(rawValue: selectedIndex) else { return true }
+        appState?.tabSwitchDiagnostics.beginSwitch(from: source, to: destination, screen: view.window?.screen)
+        return true
+    }
+
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         let tab = AppTab(rawValue: selectedIndex) ?? .today
         guard appState?.selectedTab != tab else { return }
+        appState?.tabSwitchDiagnostics.recordSelectionApplied(for: tab)
         AppHaptics.trigger(.tabChanged)
         selectedTabDidChange?(tab)
     }

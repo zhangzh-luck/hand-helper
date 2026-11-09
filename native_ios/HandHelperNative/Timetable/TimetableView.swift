@@ -210,7 +210,14 @@ struct TimetableView: View {
                     pendingListManualAction = nil
                     clearManualConfirmation()
                 }
-                if tab == .timetable { Task { await model.updateIfNeeded() } }
+                if tab == .timetable {
+                    Task {
+                        await model.updateIfNeeded { cacheAvailable in
+                            state.tabSwitchDiagnostics.recordPageReady(for: .timetable,
+                                                                       cacheState: cacheAvailable ? .hit : .miss)
+                        }
+                    }
+                }
             }
             .onChange(of: state.localManualCourseChange) { _, change in
                 guard let change,

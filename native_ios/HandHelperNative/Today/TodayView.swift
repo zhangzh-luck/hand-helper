@@ -143,7 +143,9 @@ struct TodayView: View {
         }
         .onChange(of: state.selectedTab) { _, tab in
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
-                model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+                let cacheAvailable = model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+                state.tabSwitchDiagnostics.recordPageReady(for: .today,
+                                                           cacheState: cacheAvailable ? .hit : .miss)
             }
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }

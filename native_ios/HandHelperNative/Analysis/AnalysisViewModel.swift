@@ -56,10 +56,11 @@ final class AnalysisViewModel: ObservableObject {
         analysisJob?.status == .unknown && !recoveringAnalysisJob
     }
 
-    func loadIfNeeded() {
-        guard state.selectedTab == .analysis, state.canAccessPrivateData else { return }
+    @discardableResult
+    func loadIfNeeded() -> Bool {
+        guard state.selectedTab == .analysis, state.canAccessPrivateData else { return false }
         let revision = state.authenticationRevision
-        guard let currentOwner = try? state.requireCurrentAccount(revision: revision) else { return }
+        guard let currentOwner = try? state.requireCurrentAccount(revision: revision) else { return false }
         if owner != currentOwner { reset(); owner = currentOwner }
         loadPersistedJobs(owner: currentOwner, revision: revision)
         if snapshot == nil {
@@ -72,6 +73,7 @@ final class AnalysisViewModel: ObservableObject {
         }
         restoreSelectedTermJob(owner: currentOwner, revision: revision)
         if !attemptedOnline && refreshTask == nil { refresh() }
+        return snapshot != nil
     }
 
     func selectTerm(_ id: Int) {

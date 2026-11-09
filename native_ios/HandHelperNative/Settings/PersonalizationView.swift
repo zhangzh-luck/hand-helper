@@ -54,6 +54,20 @@ struct PersonalizationView: View {
                 Text("今日页和课程表壁纸分别保存在此设备。")
             }
 
+            Section("性能诊断") {
+                SettingsNavigationButton {
+                    navigator?.push(title: "Tab 切换性能诊断") {
+                        TabSwitchDiagnosticsView(diagnostics: state.tabSwitchDiagnostics)
+                    }
+                } label: {
+                    SettingsNavigationRow(title: "Tab 切换性能诊断", symbol: "gauge.with.dots.needle.67percent",
+                                          color: Color(uiColor: .systemOrange))
+                }
+                .listRowInsets(SettingsNavigationRow.rowInsets)
+            } footer: {
+                Text("用于排查底部 TabBar 的响应与帧间隔；不会收集业务数据。")
+            }
+
             Section {
                 Toggle("课程与安排实时活动", isOn: Binding(
                     get: { state.liveActivitiesEnabled },

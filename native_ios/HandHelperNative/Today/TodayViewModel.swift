@@ -64,20 +64,23 @@ final class TodayViewModel: ObservableObject {
         catch { errorMessage = "本机安排无法读取：\(error.localizedDescription)" }
     }
 
-    func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true) {
+    @discardableResult
+    func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true) -> Bool {
         errorMessage = nil
         if allowLocalSchedules { reloadSchedules() } else { localSchedules = [] }
         guard allowPrivateCache else {
             snapshot = nil
             wallpaperData = nil
-            return
+            return false
         }
         do {
             snapshot = try repository.cached()
             wallpaperData = try? wallpaperStore.load()
             if errorMessage == nil { errorMessage = snapshot == nil ? "课程数据暂不可用" : nil }
+            return snapshot != nil
         } catch {
             errorMessage = "本机数据无法读取：\(error.localizedDescription)"
+            return false
         }
     }
 

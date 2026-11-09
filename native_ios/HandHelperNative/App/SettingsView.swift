@@ -87,6 +87,11 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
+        .onChange(of: state.selectedTab) { _, tab in
+            if tab == .settings {
+                state.tabSwitchDiagnostics.recordPageReady(for: .settings, cacheState: .retained)
+            }
+        }
     }
 
     private var profileAvatar: some View {

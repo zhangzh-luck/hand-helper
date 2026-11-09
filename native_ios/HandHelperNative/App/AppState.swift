@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     let sessionStore: any SessionStore
     let verifiedAccount = VerifiedAccountContext()
     let liveActivityCoordinator = LiveActivityCoordinator()
+    let tabSwitchDiagnostics: TabSwitchDiagnostics
     private let authentication: any AuthenticationClientProtocol
     private let preferences: UserDefaults
     private let profileDirectory: URL?
@@ -152,6 +153,7 @@ final class AppState: ObservableObject {
         self.sessionStore = sessionStore
         self.preferences = preferences
         self.profileDirectory = profileDirectory
+        tabSwitchDiagnostics = TabSwitchDiagnostics(preferences: preferences)
         appearance = AppearanceMode(rawValue: preferences.string(forKey: Self.appearanceKey) ?? "") ?? .system
         liveActivitiesEnabled = preferences.bool(forKey: Self.liveActivitiesKey)
         authenticationStatus = preferences.bool(forKey: Self.pendingCredentialRemovalKey)
