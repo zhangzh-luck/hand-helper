@@ -54,7 +54,7 @@ struct PersonalizationView: View {
                 Text("今日页和课程表壁纸分别保存在此设备。")
             }
 
-            Section("性能诊断") {
+            Section {
                 SettingsNavigationButton {
                     navigator?.push(title: "Tab 切换性能诊断") {
                         TabSwitchDiagnosticsView(diagnostics: state.tabSwitchDiagnostics)
@@ -64,6 +64,8 @@ struct PersonalizationView: View {
                                           color: Color(uiColor: .systemOrange))
                 }
                 .listRowInsets(SettingsNavigationRow.rowInsets)
+            } header: {
+                Text("性能诊断")
             } footer: {
                 Text("用于排查底部 TabBar 的响应与帧间隔；不会收集业务数据。")
             }
