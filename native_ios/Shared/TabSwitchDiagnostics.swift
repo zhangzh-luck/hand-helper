@@ -54,6 +54,11 @@ enum TabSwitchDiagnosticStage: String, Equatable {
     case timetablePagerIdentityChanged
     case timetablePagerIdentityUnchanged
     case timetablePagerPageCreated
+    case avatarPreviewClearSkipped
+    case avatarPreviewCleared
+    case todayDerivedCacheHit
+    case todayDerivedRebuildBegin
+    case todayDerivedRebuildEnd
 }
 
 struct TabSwitchDiagnosticEvent: Equatable {
@@ -203,6 +208,16 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
             sample.events.append(TabSwitchDiagnosticEvent(stage: stage,
                 offsetMilliseconds: milliseconds(from: sample.startedAt, to: now()) ?? 0))
         }
+    }
+
+    /// Records a privacy-safe milestone for whichever opted-in switch is active.
+    /// This is used by retained source tabs whose work may occur after the destination changed.
+    func recordForActiveSwitch(_ stage: TabSwitchDiagnosticStage) {
+        guard var active else { return }
+        guard active.events.count < Self.maximumEventsPerSample else { return }
+        active.events.append(TabSwitchDiagnosticEvent(stage: stage,
+            offsetMilliseconds: milliseconds(from: active.startedAt, to: now()) ?? 0))
+        self.active = active
     }
 
     func clearReports() {

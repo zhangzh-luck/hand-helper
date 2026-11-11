@@ -13,56 +13,73 @@ final class TodayViewModel: ObservableObject {
     private let repository: any CourseRepository
     private let wallpaperStore: WallpaperStore
     private let clock: any TodayClock
+    private let tabSwitchDiagnostics: TabSwitchDiagnostics?
     private var refreshGeneration = 0
     private var hasReadPrivateCache = false
     private var hasReadLocalSchedules = false
+    private var cachedPresentation: TodayPresentation?
+    private(set) var derivedPresentationBuildCount = 0
 
-    init(repository: any CourseRepository, wallpaperStore: WallpaperStore, clock: any TodayClock = SystemTodayClock()) {
+    init(repository: any CourseRepository, wallpaperStore: WallpaperStore, clock: any TodayClock = SystemTodayClock(),
+         tabSwitchDiagnostics: TabSwitchDiagnostics? = nil) {
         self.repository = repository
         self.wallpaperStore = wallpaperStore
         self.clock = clock
+        self.tabSwitchDiagnostics = tabSwitchDiagnostics
         now = clock.now
     }
 
-    var profile: TodayProfile {
-        snapshot?.profile ?? .init(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil)
-    }
+    var profile: TodayProfile { snapshot?.profile ?? .init(displayName: "航的助手", avatarDataURL: nil, homeWallpaperDataURL: nil) }
+    var courses: [CourseSession] { presentation.courses }
+    var schedules: [CustomSchedule] { presentation.schedules }
+    var active: CourseSession? { presentation.active }
+    var upcoming: CourseSession? { presentation.upcoming }
+    var status: String { presentation.status }
+    var hasCourseData: Bool { presentation.hasCourseData }
 
-    var courses: [CourseSession] {
-        guard let snapshot else { return [] }
-        let local = CourseScheduleCalculator.expandedManualCourses(
-            on: now, rules: snapshot.manualRules, terms: snapshot.terms, periods: snapshot.periods
-        )
-        let remote = CourseScheduleCalculator.sessions(for: now, from: snapshot.calendarSessions)
-        return CourseScheduleCalculator.mergeManualCourses(remote: remote, local: local,
-                                                           rules: snapshot.manualRules)
-    }
-
-    var schedules: [CustomSchedule] {
-        let key = CourseScheduleCalculator.dateKey(now)
-        return localSchedules.filter { $0.date == key }.sorted { ($0.time, $0.id) < ($1.time, $1.id) }
-    }
-
-    var active: CourseSession? { CourseScheduleCalculator.active(in: courses, at: now) }
-    var upcoming: CourseSession? { CourseScheduleCalculator.upcoming(in: courses, at: now) }
-
-    var status: String {
+    private var presentation: TodayPresentation {
+        if let cachedPresentation {
+            tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedCacheHit)
+            return cachedPresentation
+        }
+        tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedRebuildBegin)
+        let courses: [CourseSession]
+        if let snapshot {
+            let local = CourseScheduleCalculator.expandedManualCourses(
+                on: now, rules: snapshot.manualRules, terms: snapshot.terms, periods: snapshot.periods)
+            let remote = CourseScheduleCalculator.sessions(for: now, from: snapshot.calendarSessions)
+            courses = CourseScheduleCalculator.mergeManualCourses(remote: remote, local: local,
+                                                                  rules: snapshot.manualRules)
+        } else {
+            courses = []
+        }
+        let dateKey = CourseScheduleCalculator.dateKey(now)
+        let schedules = localSchedules.filter { $0.date == dateKey }.sorted { ($0.time, $0.id) < ($1.time, $1.id) }
+        let active = CourseScheduleCalculator.active(in: courses, at: now)
+        let upcoming = CourseScheduleCalculator.upcoming(in: courses, at: now)
+        let status: String
         if let active, let end = active.end {
-            return "正在上 \(active.name)，距下课约 \(CourseScheduleCalculator.countdown(until: end, from: now))"
+            status = "正在上 \(active.name)，距下课约 \(CourseScheduleCalculator.countdown(until: end, from: now))"
+        } else if let upcoming, let start = upcoming.start {
+            status = "下一节 \(upcoming.name)，\(CourseScheduleCalculator.countdown(until: start, from: now))后上课"
+        } else if !schedules.isEmpty {
+            status = "今天有 \(schedules.count) 项自定义安排"
+        } else {
+            status = "今天的课程已经结束"
         }
-        if let upcoming, let start = upcoming.start {
-            return "下一节 \(upcoming.name)，\(CourseScheduleCalculator.countdown(until: start, from: now))后上课"
-        }
-        if !schedules.isEmpty { return "今天有 \(schedules.count) 项自定义安排" }
-        return "今天的课程已经结束"
+        let value = TodayPresentation(courses: courses, schedules: schedules, active: active, upcoming: upcoming,
+                                      status: status, hasCourseData: snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false)
+        cachedPresentation = value
+        derivedPresentationBuildCount += 1
+        tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedRebuildEnd)
+        return value
     }
-
-    var hasCourseData: Bool { snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false }
     var canEditSchedules: Bool { repository.canEditSchedules }
 
     private func setSnapshot(_ value: CourseSnapshot?) {
         guard snapshot != value else { return }
         snapshot = value
+        invalidatePresentation()
     }
 
     private func setErrorMessage(_ value: String?) {
@@ -73,6 +90,7 @@ final class TodayViewModel: ObservableObject {
     private func setLocalSchedules(_ value: [CustomSchedule]) {
         guard localSchedules != value else { return }
         localSchedules = value
+        invalidatePresentation()
     }
 
     private func setWallpaperData(_ value: Data?) {
@@ -82,6 +100,14 @@ final class TodayViewModel: ObservableObject {
         // can then reuse this image during tab selection and layout passes.
         wallpaperImage = value.flatMap(UIImage.init(data:))
     }
+
+    private func setNow(_ value: Date) {
+        guard now != value else { return }
+        now = value
+        invalidatePresentation()
+    }
+
+    private func invalidatePresentation() { cachedPresentation = nil }
 
     private func reloadSchedules() {
         guard repository.canEditSchedules else {
@@ -183,7 +209,7 @@ final class TodayViewModel: ObservableObject {
             hasReadPrivateCache = true
             reloadSchedules()
             let currentNow = clock.now
-            if now != currentNow { now = currentNow }
+            setNow(currentNow)
             setErrorMessage(nil)
             return (false, true)
         } catch {
@@ -206,7 +232,7 @@ final class TodayViewModel: ObservableObject {
     func tick(allowLocalSchedules: Bool = true) -> Bool {
         let previous = CourseScheduleCalculator.dateKey(now)
         let currentNow = clock.now
-        if now != currentNow { now = currentNow }
+        setNow(currentNow)
         let changed = previous != CourseScheduleCalculator.dateKey(now)
         if changed && allowLocalSchedules { reloadSchedules() }
         return changed
@@ -238,6 +264,15 @@ final class TodayViewModel: ObservableObject {
     func reloadWallpaper() throws {
         setWallpaperData(try wallpaperStore.load())
     }
+}
+
+private struct TodayPresentation {
+    let courses: [CourseSession]
+    let schedules: [CustomSchedule]
+    let active: CourseSession?
+    let upcoming: CourseSession?
+    let status: String
+    let hasCourseData: Bool
 }
 
 enum TodayInputError: LocalizedError {

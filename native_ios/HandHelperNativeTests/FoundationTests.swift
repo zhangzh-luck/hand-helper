@@ -4,6 +4,12 @@ import UIKit
 @testable import HandHelperNative
 
 final class FoundationTests: XCTestCase {
+    func testAvatarPreviewClearPolicySkipsAnAlreadyIdleRoot() {
+        XCTAssertFalse(AvatarPreviewClearPolicy.needsClear(isVisible: false, hasPreview: false))
+        XCTAssertTrue(AvatarPreviewClearPolicy.needsClear(isVisible: true, hasPreview: false))
+        XCTAssertTrue(AvatarPreviewClearPolicy.needsClear(isVisible: false, hasPreview: true))
+    }
+
     func testSettingsNavigationSymbolsAreAvailable() {
         for symbol in ["clock", "square.and.arrow.down", "paintpalette", "photo",
                        "calendar.badge.plus", "doc.badge.plus", "house", "calendar", "chart.bar"] {

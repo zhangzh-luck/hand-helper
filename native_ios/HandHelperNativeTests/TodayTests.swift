@@ -176,6 +176,56 @@ final class TodayTests: XCTestCase {
         XCTAssertNil(model.wallpaperImage)
     }
 
+    @MainActor
+    func testTodayDerivedPresentationCachesAndInvalidatesForDataAndClockChanges() throws {
+        let clock = MutableTodayClock(now: date("2026-10-23T08:45:00Z"))
+        let repository = TodayDerivedRepository(snapshot: try todaySnapshot(
+            courseDay: "2026-10-23", start: "2026-10-23T08:30:00Z", end: "2026-10-23T09:15:00Z"))
+        let session = TodayTestSessionStore()
+        let account = VerifiedAccountContext()
+        session.save(cookie: "session=derived")
+        try account.confirm(username: "derived", cookie: "session=derived")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let model = TodayViewModel(repository: repository,
+                                   wallpaperStore: WallpaperStore(session: session, account: account, directory: folder),
+                                   clock: clock)
+
+        XCTAssertTrue(model.load())
+        XCTAssertEqual(model.courses.map(\.id), [1])
+        XCTAssertEqual(model.active?.id, 1)
+        XCTAssertNil(model.upcoming)
+        _ = model.status
+        XCTAssertEqual(model.derivedPresentationBuildCount, 1,
+                       "Courses, activity and status must share one derived presentation.")
+
+        _ = model.courses
+        _ = model.active
+        XCTAssertEqual(model.derivedPresentationBuildCount, 1, "A hot-tab render reuses the presentation.")
+
+        clock.now = date("2026-10-23T09:30:00Z")
+        XCTAssertFalse(model.tick())
+        XCTAssertNil(model.active)
+        XCTAssertEqual(model.derivedPresentationBuildCount, 2, "Current-course state invalidates as time moves.")
+
+        repository.snapshot = try todaySnapshot(courseDay: "2026-10-23", start: "2026-10-23T10:00:00Z", end: "2026-10-23T11:00:00Z")
+        XCTAssertTrue(model.load(forceDiskRead: true))
+        XCTAssertEqual(model.upcoming?.id, 1)
+        XCTAssertEqual(model.derivedPresentationBuildCount, 3, "A refreshed snapshot invalidates presentation data.")
+
+        model.authenticationDidChange(allowPrivateCache: false, allowLocalSchedules: false)
+        XCTAssertTrue(model.courses.isEmpty)
+        XCTAssertEqual(model.derivedPresentationBuildCount, 4, "Account clearing cannot reuse the prior account's presentation.")
+    }
+
+    private func todaySnapshot(courseDay: String, start: String, end: String) throws -> CourseSnapshot {
+        let course = try session(id: 1, day: courseDay, start: start, end: end)
+        var snapshot = CourseSnapshot.empty
+        snapshot.calendarSessions = [course]
+        snapshot.lastRefreshDate = courseDay
+        return snapshot
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -463,6 +513,23 @@ private final class TodayTestSessionStore: SessionStore {
     private(set) var cookie: String?
     func save(cookie: String) { self.cookie = cookie }
     @discardableResult func clear() -> Bool { cookie = nil; return true }
+}
+
+@MainActor
+private final class TodayDerivedRepository: CourseRepository {
+    var sessionCookie: String? { "session=derived" }
+    var canEditSchedules: Bool { false }
+    var snapshot: CourseSnapshot
+
+    init(snapshot: CourseSnapshot) { self.snapshot = snapshot }
+    func cached() throws -> CourseSnapshot? { snapshot }
+    func refresh(on date: Date) async throws -> CourseSnapshot { snapshot }
+    func localSchedules(on date: Date) throws -> [CustomSchedule] { [] }
+    func allLocalSchedules() throws -> [CustomSchedule] { [] }
+    func saveSchedule(_ schedule: CustomSchedule) throws {}
+    func deleteSchedule(id: Int) throws {}
+    func saveManualRule(_ rule: ManualCourseRule) throws {}
+    func saveProfile(_ profile: TodayProfile) throws {}
 }
 
 private final class MutableTodayClock: TodayClock {

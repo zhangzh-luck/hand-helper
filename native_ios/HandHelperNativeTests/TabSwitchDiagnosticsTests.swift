@@ -84,6 +84,19 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         XCTAssertTrue(report.exportLine.contains("switch_id="))
     }
 
+    func testActiveSwitchMilestonesCanDescribeRetainedSourceWork() throws {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .settings, screen: nil)
+        diagnostics.recordForActiveSwitch(.avatarPreviewClearSkipped)
+        diagnostics.recordForActiveSwitch(.todayDerivedCacheHit)
+        diagnostics.finishForTesting()
+
+        let report = try XCTUnwrap(diagnostics.reports.first)
+        let stages = report.events.map(\.stage)
+        XCTAssertEqual(stages, [.shouldSelect, .avatarPreviewClearSkipped, .todayDerivedCacheHit])
+    }
+
     func testReplacementSwitchMarksPreviousSampleInterrupted() {
         let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
         diagnostics.setEnabled(true)

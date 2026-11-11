@@ -166,9 +166,18 @@ struct RootView: View {
     }
 
     private func clearAvatarPreview() {
-        avatarPreviewVisible = false
-        avatarPreview = nil
+        let needsClear = AvatarPreviewClearPolicy.needsClear(isVisible: avatarPreviewVisible,
+                                                             hasPreview: avatarPreview != nil)
+        state.tabSwitchDiagnostics.record(needsClear ? .avatarPreviewCleared : .avatarPreviewClearSkipped,
+                                          for: state.selectedTab.diagnosticTab)
+        guard needsClear else { return }
+        if avatarPreviewVisible { avatarPreviewVisible = false }
+        if avatarPreview != nil { avatarPreview = nil }
     }
+}
+
+enum AvatarPreviewClearPolicy {
+    static func needsClear(isVisible: Bool, hasPreview: Bool) -> Bool { isVisible || hasPreview }
 }
 
 private struct AuthenticationStatusView: View {

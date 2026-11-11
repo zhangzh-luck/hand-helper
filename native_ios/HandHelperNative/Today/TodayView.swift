@@ -26,7 +26,8 @@ struct TodayView: View {
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
-        _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
+        _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper,
+                                                           tabSwitchDiagnostics: state.tabSwitchDiagnostics))
     }
 
     private var dark: Bool { colorScheme == .dark }
