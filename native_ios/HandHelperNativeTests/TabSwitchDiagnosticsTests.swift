@@ -24,6 +24,9 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
         diagnostics.beginSwitch(from: .today, to: .timetable, screen: nil)
         diagnostics.recordSelectionApplied(for: .timetable)
+        diagnostics.recordTodayDerivedCacheHit()
+        diagnostics.recordNativeContainerUpdate(for: .timetable)
+        diagnostics.recordNativeApply(changes: [.selectedTab], for: .timetable)
         diagnostics.finishForTesting()
 
         XCTAssertTrue(diagnostics.reports.isEmpty)
@@ -85,16 +88,69 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
     }
 
     func testActiveSwitchMilestonesCanDescribeRetainedSourceWork() throws {
-        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        var uptime: TimeInterval = 100
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, now: { uptime }, samplesFrames: false)
         diagnostics.setEnabled(true)
         diagnostics.beginSwitch(from: .today, to: .settings, screen: nil)
         diagnostics.recordForActiveSwitch(.avatarPreviewClearSkipped)
-        diagnostics.recordForActiveSwitch(.todayDerivedCacheHit)
+        diagnostics.recordTodayDerivedCacheHit()
+        diagnostics.recordTodayDerivedCacheHit()
+        diagnostics.beginTodayDerivedCacheRebuild()
+        uptime += 0.007
+        diagnostics.endTodayDerivedCacheRebuild()
         diagnostics.finishForTesting()
 
         let report = try XCTUnwrap(diagnostics.reports.first)
         let stages = report.events.map(\.stage)
-        XCTAssertEqual(stages, [.shouldSelect, .avatarPreviewClearSkipped, .todayDerivedCacheHit])
+        XCTAssertEqual(stages, [.shouldSelect, .avatarPreviewClearSkipped])
+        XCTAssertEqual(report.todayDerivedCacheHitCount, 2)
+        XCTAssertEqual(report.todayDerivedCacheRebuildCount, 1)
+        XCTAssertEqual(report.todayDerivedCacheRebuildTotalMilliseconds, 7)
+    }
+
+    func testNativeContainerCountersSeparateEffectiveAndNoOpApplyCalls() throws {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .settings, screen: nil)
+
+        diagnostics.recordNativeContainerUpdate(for: .settings)
+        diagnostics.recordNativeApply(changes: [.selectedTab, .appearance], for: .settings)
+        diagnostics.recordNativeContainerUpdate(for: .settings)
+        diagnostics.recordNativeApply(changes: [], for: .settings)
+        diagnostics.recordKnownStateChange(.selectedTab, for: .settings)
+        diagnostics.recordKnownStateChangeForActiveSwitch(.avatarPreview)
+        diagnostics.finishForTesting()
+
+        let report = try XCTUnwrap(diagnostics.reports.first)
+        XCTAssertEqual(report.nativeContainerUpdateCount, 2)
+        XCTAssertEqual(report.nativeApplyCallCount, 2)
+        XCTAssertEqual(report.nativeApplyEffectiveChangeCount, 1)
+        XCTAssertEqual(report.nativeApplyNoOpCount, 1)
+        XCTAssertEqual(Set(report.nativeApplyChanges), Set([.selectedTab, .appearance]))
+        XCTAssertEqual(Set(report.knownStateChanges), Set([.selectedTab, .avatarPreview]))
+        XCTAssertTrue(report.exportLine.contains("native_apply_noop=1"))
+    }
+
+    func testAggregatesRemainBoundToTheActiveSwitchIdentifier() throws {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .timetable, screen: nil)
+        diagnostics.recordTodayDerivedCacheHit()
+        diagnostics.recordNativeContainerUpdate(for: .timetable)
+        diagnostics.beginSwitch(from: .timetable, to: .analysis, screen: nil)
+        diagnostics.recordNativeApply(changes: [.selectedTab], for: .analysis)
+        diagnostics.finishForTesting()
+
+        XCTAssertEqual(diagnostics.reports.count, 2)
+        let current = try XCTUnwrap(diagnostics.reports.first)
+        let interrupted = try XCTUnwrap(diagnostics.reports.last)
+        XCTAssertEqual(current.destination, .analysis)
+        XCTAssertEqual(current.todayDerivedCacheHitCount, 0)
+        XCTAssertEqual(current.nativeApplyEffectiveChangeCount, 1)
+        XCTAssertEqual(interrupted.destination, .timetable)
+        XCTAssertTrue(interrupted.interrupted)
+        XCTAssertEqual(interrupted.todayDerivedCacheHitCount, 1)
+        XCTAssertEqual(interrupted.nativeContainerUpdateCount, 1)
     }
 
     func testReplacementSwitchMarksPreviousSampleInterrupted() {
@@ -130,5 +186,20 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         XCTAssertEqual(diagnostics.reports.count, 1)
         diagnostics.beginSwitch(from: .settings, to: .today, screen: nil)
         XCTAssertEqual(diagnostics.reports.count, 1)
+    }
+
+    func testReportsAndAggregateCountersAreNotPersisted() throws {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .settings, screen: nil)
+        diagnostics.recordTodayDerivedCacheHit()
+        diagnostics.recordNativeApply(changes: [.selectedTab], for: .settings)
+        diagnostics.finishForTesting()
+
+        let report = try XCTUnwrap(diagnostics.reports.first)
+        XCTAssertEqual(report.todayDerivedCacheHitCount, 1)
+        let reloaded = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        XCTAssertTrue(reloaded.reports.isEmpty)
+        XCTAssertTrue(reloaded.isEnabled) // The explicit opt-in is the sole persisted diagnostic value.
     }
 }

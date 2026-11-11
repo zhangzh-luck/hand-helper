@@ -56,9 +56,26 @@ enum TabSwitchDiagnosticStage: String, Equatable {
     case timetablePagerPageCreated
     case avatarPreviewClearSkipped
     case avatarPreviewCleared
-    case todayDerivedCacheHit
-    case todayDerivedRebuildBegin
-    case todayDerivedRebuildEnd
+}
+
+/// Categories only: these never contain account, course, image, or authentication values.
+enum TabSwitchDiagnosticStateChange: String, CaseIterable, Hashable {
+    case selectedTab
+    case avatarPreview
+    case timetableDetail
+    case gradeDetail
+    case destructiveConfirmation
+}
+
+/// UIKit state categories observed by `NativeTabController.apply(state:)`.
+/// A category means that this invocation performed the existing corresponding write;
+/// it does not claim that UIKit subsequently laid out or animated a view.
+enum TabSwitchNativeApplyChange: String, CaseIterable, Hashable {
+    case selectedTab
+    case appearance
+    case detailVisibility
+    case navigationVisibility
+    case avatarVersion
 }
 
 struct TabSwitchDiagnosticEvent: Equatable {
@@ -84,6 +101,15 @@ struct TabSwitchDiagnosticReport: Identifiable, Equatable {
     let intervalsOverTwentyMilliseconds: Int
     let displayMaximumFramesPerSecond: Int
     let interrupted: Bool
+    let todayDerivedCacheHitCount: Int
+    let todayDerivedCacheRebuildCount: Int
+    let todayDerivedCacheRebuildTotalMilliseconds: Int
+    let nativeContainerUpdateCount: Int
+    let nativeApplyCallCount: Int
+    let nativeApplyEffectiveChangeCount: Int
+    let nativeApplyNoOpCount: Int
+    let knownStateChanges: [TabSwitchDiagnosticStateChange]
+    let nativeApplyChanges: [TabSwitchNativeApplyChange]
     let events: [TabSwitchDiagnosticEvent]
 
     enum CacheState: String, Equatable {
@@ -110,7 +136,9 @@ struct TabSwitchDiagnosticReport: Identifiable, Equatable {
         let maximum = maxFrameIntervalMilliseconds.map(String.init) ?? "—"
         let p95 = p95FrameIntervalMilliseconds.map(String.init) ?? "—"
         let eventText = events.map { "\($0.stage.rawValue):\($0.offsetMilliseconds)" }.joined(separator: ",")
-        return "switch_id=\(id.uuidString.prefix(8)) context=\(context) \(source.title)->\(destination.title) selection_ms=\(selection) state_ms=\(state) page_ms=\(ready) first_frame_ms=\(firstFrame) cache=\(cache) sample_ms=\(sampleDurationMilliseconds) frames=\(frameCount) max_frame_ms=\(maximum) p95_frame_ms=\(p95) over_20ms=\(intervalsOverTwentyMilliseconds) interrupted=\(interrupted) display_max_fps=\(displayMaximumFramesPerSecond) events=\(eventText)"
+        let rootChanges = knownStateChanges.map(\.rawValue).sorted().joined(separator: ",")
+        let applyChanges = nativeApplyChanges.map(\.rawValue).sorted().joined(separator: ",")
+        return "switch_id=\(id.uuidString.prefix(8)) context=\(context) \(source.title)->\(destination.title) selection_ms=\(selection) state_ms=\(state) page_ms=\(ready) first_frame_ms=\(firstFrame) cache=\(cache) sample_ms=\(sampleDurationMilliseconds) frames=\(frameCount) max_frame_ms=\(maximum) p95_frame_ms=\(p95) over_20ms=\(intervalsOverTwentyMilliseconds) interrupted=\(interrupted) display_max_fps=\(displayMaximumFramesPerSecond) today_cache_hits=\(todayDerivedCacheHitCount) today_cache_rebuilds=\(todayDerivedCacheRebuildCount) today_cache_rebuild_ms=\(todayDerivedCacheRebuildTotalMilliseconds) native_container_updates=\(nativeContainerUpdateCount) native_apply_calls=\(nativeApplyCallCount) native_apply_effective=\(nativeApplyEffectiveChangeCount) native_apply_noop=\(nativeApplyNoOpCount) root_state_changes=\(rootChanges.isEmpty ? "—" : rootChanges) native_apply_changes=\(applyChanges.isEmpty ? "—" : applyChanges) events=\(eventText)"
     }
 }
 
@@ -220,6 +248,55 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
         self.active = active
     }
 
+    /// Aggregates repeated Today presentation reads without allocating a timeline event per read.
+    func recordTodayDerivedCacheHit() {
+        guard var active else { return }
+        active.todayDerivedCacheHitCount += 1
+        self.active = active
+    }
+
+    func beginTodayDerivedCacheRebuild() {
+        guard var active, active.todayDerivedCacheRebuildStartedAt == nil else { return }
+        active.todayDerivedCacheRebuildCount += 1
+        active.todayDerivedCacheRebuildStartedAt = now()
+        self.active = active
+    }
+
+    func endTodayDerivedCacheRebuild() {
+        guard var active, let startedAt = active.todayDerivedCacheRebuildStartedAt else { return }
+        active.todayDerivedCacheRebuildTotalMilliseconds +=
+            max(0, Int(((now() - startedAt) * 1_000).rounded()))
+        active.todayDerivedCacheRebuildStartedAt = nil
+        self.active = active
+    }
+
+    func recordNativeContainerUpdate(for tab: TabSwitchDiagnosticTab) {
+        updateActive(for: tab) { $0.nativeContainerUpdateCount += 1 }
+    }
+
+    func recordNativeApply(changes: Set<TabSwitchNativeApplyChange>, for tab: TabSwitchDiagnosticTab) {
+        updateActive(for: tab) { sample in
+            sample.nativeApplyCallCount += 1
+            if changes.isEmpty {
+                sample.nativeApplyNoOpCount += 1
+            } else {
+                sample.nativeApplyEffectiveChangeCount += 1
+                sample.nativeApplyChanges.formUnion(changes)
+            }
+        }
+    }
+
+    /// Records known local state mutations, not a causal explanation for a SwiftUI transaction.
+    func recordKnownStateChange(_ change: TabSwitchDiagnosticStateChange, for tab: TabSwitchDiagnosticTab) {
+        updateActive(for: tab) { $0.knownStateChanges.insert(change) }
+    }
+
+    func recordKnownStateChangeForActiveSwitch(_ change: TabSwitchDiagnosticStateChange) {
+        guard var active else { return }
+        active.knownStateChanges.insert(change)
+        self.active = active
+    }
+
     func clearReports() {
         finishActiveSample(interrupted: true)
         reports = []
@@ -292,6 +369,15 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
             intervalsOverTwentyMilliseconds: intervals.filter { $0 > 0.020 }.count,
             displayMaximumFramesPerSecond: active.displayMaximumFramesPerSecond,
             interrupted: interrupted,
+            todayDerivedCacheHitCount: active.todayDerivedCacheHitCount,
+            todayDerivedCacheRebuildCount: active.todayDerivedCacheRebuildCount,
+            todayDerivedCacheRebuildTotalMilliseconds: active.todayDerivedCacheRebuildTotalMilliseconds,
+            nativeContainerUpdateCount: active.nativeContainerUpdateCount,
+            nativeApplyCallCount: active.nativeApplyCallCount,
+            nativeApplyEffectiveChangeCount: active.nativeApplyEffectiveChangeCount,
+            nativeApplyNoOpCount: active.nativeApplyNoOpCount,
+            knownStateChanges: active.knownStateChanges.sorted { $0.rawValue < $1.rawValue },
+            nativeApplyChanges: active.nativeApplyChanges.sorted { $0.rawValue < $1.rawValue },
             events: active.events
         )
         reports.insert(report, at: 0)
@@ -321,6 +407,16 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
         var cacheState: TabSwitchDiagnosticReport.CacheState?
         var lastFrameTimestamp: TimeInterval?
         var frameIntervals: [TimeInterval] = []
+        var todayDerivedCacheHitCount = 0
+        var todayDerivedCacheRebuildCount = 0
+        var todayDerivedCacheRebuildTotalMilliseconds = 0
+        var todayDerivedCacheRebuildStartedAt: TimeInterval?
+        var nativeContainerUpdateCount = 0
+        var nativeApplyCallCount = 0
+        var nativeApplyEffectiveChangeCount = 0
+        var nativeApplyNoOpCount = 0
+        var knownStateChanges = Set<TabSwitchDiagnosticStateChange>()
+        var nativeApplyChanges = Set<TabSwitchNativeApplyChange>()
         var events: [TabSwitchDiagnosticEvent] = []
     }
 }

@@ -39,10 +39,10 @@ final class TodayViewModel: ObservableObject {
 
     private var presentation: TodayPresentation {
         if let cachedPresentation {
-            tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedCacheHit)
+            tabSwitchDiagnostics?.recordTodayDerivedCacheHit()
             return cachedPresentation
         }
-        tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedRebuildBegin)
+        tabSwitchDiagnostics?.beginTodayDerivedCacheRebuild()
         let courses: [CourseSession]
         if let snapshot {
             let local = CourseScheduleCalculator.expandedManualCourses(
@@ -71,7 +71,7 @@ final class TodayViewModel: ObservableObject {
                                       status: status, hasCourseData: snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false)
         cachedPresentation = value
         derivedPresentationBuildCount += 1
-        tabSwitchDiagnostics?.recordForActiveSwitch(.todayDerivedRebuildEnd)
+        tabSwitchDiagnostics?.endTodayDerivedCacheRebuild()
         return value
     }
     var canEditSchedules: Bool { repository.canEditSchedules }

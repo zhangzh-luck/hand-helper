@@ -92,12 +92,19 @@ struct RootView: View {
         }
         .onChange(of: state.selectedTab) { oldTab, tab in
             state.tabSwitchDiagnostics.record(.rootSelectedTabChangeBegin, for: tab.diagnosticTab)
+            state.tabSwitchDiagnostics.recordKnownStateChange(.selectedTab, for: tab.diagnosticTab)
             if tab != .today { clearAvatarPreview() }
-            if tab != .timetable { timetableDetail.clear() }
+            if tab != .timetable, timetableDetail.clear() {
+                state.tabSwitchDiagnostics.recordKnownStateChange(.timetableDetail, for: tab.diagnosticTab)
+            }
             // AnalysisView owns the active-analysis exit cleanup. Avoid publishing the
             // same clear twice during one tab transition.
-            if oldTab != .analysis, tab != .analysis { gradeDetail.clear() }
-            deleteConfirmation.clear()
+            if oldTab != .analysis, tab != .analysis, gradeDetail.clear() {
+                state.tabSwitchDiagnostics.recordKnownStateChange(.gradeDetail, for: tab.diagnosticTab)
+            }
+            if deleteConfirmation.clear() {
+                state.tabSwitchDiagnostics.recordKnownStateChange(.destructiveConfirmation, for: tab.diagnosticTab)
+            }
             state.tabSwitchDiagnostics.record(.rootSelectedTabChangeEnd, for: tab.diagnosticTab)
         }
         .onChange(of: state.entry) { _, entry in
@@ -171,6 +178,7 @@ struct RootView: View {
         state.tabSwitchDiagnostics.record(needsClear ? .avatarPreviewCleared : .avatarPreviewClearSkipped,
                                           for: state.selectedTab.diagnosticTab)
         guard needsClear else { return }
+        state.tabSwitchDiagnostics.recordKnownStateChangeForActiveSwitch(.avatarPreview)
         if avatarPreviewVisible { avatarPreviewVisible = false }
         if avatarPreview != nil { avatarPreview = nil }
     }
@@ -220,6 +228,7 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: NativeTabController, context: Context) {
+        state.tabSwitchDiagnostics.recordNativeContainerUpdate(for: state.selectedTab.diagnosticTab)
         state.tabSwitchDiagnostics.record(.nativeContainerUpdateBegin, for: state.selectedTab.diagnosticTab)
         controller.apply(state: state)
         state.tabSwitchDiagnostics.record(.nativeContainerUpdateEnd, for: state.selectedTab.diagnosticTab)
@@ -308,32 +317,42 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         case .light: style = .light
         case .dark: style = .dark
         }
-        if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
+        var changes = Set<TabSwitchNativeApplyChange>()
+        if overrideUserInterfaceStyle != style {
+            overrideUserInterfaceStyle = style
+            changes.insert(.appearance)
+        }
         if selectedIndex != state.selectedTab.rawValue {
             selectedIndex = state.selectedTab.rawValue
             updateTabVisibility()
+            changes.insert(.selectedTab)
         }
         if detailPresented != state.isDetailPresented {
             detailPresented = state.isDetailPresented
             updateTabVisibility()
+            changes.insert(.detailVisibility)
         }
         if navigationDestinationPresented != state.shouldHideTabBarForNavigation {
             navigationDestinationPresented = state.shouldHideTabBarForNavigation
             updateTabVisibility()
+            changes.insert(.navigationVisibility)
         }
-        applyHomeTabImageIfNeeded(state: state)
+        if applyHomeTabImageIfNeeded(state: state) { changes.insert(.avatarVersion) }
+        state.tabSwitchDiagnostics.recordNativeApply(changes: changes, for: state.selectedTab.diagnosticTab)
         state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab.diagnosticTab)
         state.tabSwitchDiagnostics.record(.nativeApplyEnd, for: state.selectedTab.diagnosticTab)
     }
 
-    private func applyHomeTabImageIfNeeded(state: AppState) {
+    @discardableResult
+    private func applyHomeTabImageIfNeeded(state: AppState) -> Bool {
         let avatarData = state.currentProfile.avatarData
-        guard !hasConfiguredHomeAvatar || configuredHomeAvatarData != avatarData else { return }
+        guard !hasConfiguredHomeAvatar || configuredHomeAvatarData != avatarData else { return false }
         configuredHomeAvatarData = avatarData
         hasConfiguredHomeAvatar = true
         let image = state.homeAvatar?.withRenderingMode(.alwaysOriginal) ?? UIImage(systemName: AppTab.today.symbol)
         viewControllers?.first?.tabBarItem.image = image
         viewControllers?.first?.tabBarItem.selectedImage = state.homeAvatar?.withRenderingMode(.alwaysOriginal)
+        return true
     }
 
     func tabBarController(_ tabBarController: UITabBarController,

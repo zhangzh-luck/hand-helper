@@ -177,9 +177,10 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
         return action
     }
 
-    func clear() {
+    @discardableResult
+    func clear() -> Bool {
         guard closingAction != nil || readyAction != nil || pendingDelete != nil || deletionError != nil ||
-                route != nil || phase != .idle || pagerBusy else { return }
+                route != nil || phase != .idle || pagerBusy else { return false }
         closingAction = nil
         readyAction = nil
         pendingDelete = nil
@@ -187,6 +188,7 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
         route = nil
         phase = .idle
         pagerBusy = false
+        return true
     }
 
     func invalidate(termID: Int?, snapshotRevision: Int, authenticationRevision: Int) {

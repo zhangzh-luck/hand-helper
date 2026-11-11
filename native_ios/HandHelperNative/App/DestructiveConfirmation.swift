@@ -71,8 +71,10 @@ final class DestructiveConfirmationCoordinator: ObservableObject {
         current.cancel()
     }
 
-    func clear() {
-        guard let current = request else { return }
+    @discardableResult
+    func clear() -> Bool {
+        guard let current = request else { return false }
         cancel(id: current.id)
+        return true
     }
 }
