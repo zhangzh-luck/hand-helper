@@ -328,7 +328,8 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         let tab = AppTab(rawValue: selectedIndex) ?? .today
         guard appState?.selectedTab != tab else { return }
         appState?.tabSwitchDiagnostics.recordSelectionApplied(for: tab.diagnosticTab)
-        AppHaptics.trigger(.tabChanged)
+        // Deliberately disabled for the TabBar performance isolation experiment.
+        // Other in-app haptics remain mapped through AppHaptics.
         selectedTabDidChange?(tab)
     }
 
