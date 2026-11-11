@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-                Section("账户") {
+                Section {
                     SettingsNavigationButton {
                         navigator?.push(title: "账户设置") {
                             ProfileView(state: state, revision: state.authenticationRevision,
@@ -31,11 +31,13 @@ struct SettingsView: View {
                         .padding(.vertical, 6)
                         .accessibilityElement(children: .combine)
                     }
+                } header: {
+                    Text("账户")
                 } footer: {
                     Text("头像和显示名称仅保存在此设备。")
                 }
 
-                Section("偏好设置") {
+                Section {
                     SettingsNavigationButton {
                         navigator?.push(title: "时间设置") {
                             AcademicTimeView(state: state)
@@ -54,9 +56,11 @@ struct SettingsView: View {
                                               color: Color(uiColor: .systemPurple))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
+                } header: {
+                    Text("偏好设置")
                 }
 
-                Section("数据与助手") {
+                Section {
                     SettingsNavigationButton {
                         navigator?.push(title: "数据与导入") {
                             DataImportView(state: state)
@@ -84,6 +88,8 @@ struct SettingsView: View {
                             .frame(minHeight: 56)
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
+                } header: {
+                    Text("数据与助手")
                 }
         }
         .listStyle(.insetGrouped)
