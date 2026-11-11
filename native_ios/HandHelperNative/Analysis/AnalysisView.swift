@@ -411,6 +411,7 @@ struct AnalysisView: View {
         .padding(.horizontal, 15)
         .padding(.vertical, 13)
         .frame(minHeight: gradeRowMinimumHeight)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 }
