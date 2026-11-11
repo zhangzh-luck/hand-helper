@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - 'native_ios/HandHelperNative/**'
       - 'native_ios/TabLab/**'
       - 'native_ios/TabLabTests/**'
       - 'native_ios/TabLab/TabSwitchDiagnostics.swift'
@@ -11,6 +12,7 @@ on:
       - '.github/workflows/tab-lab-ios-unsigned.yml'
   pull_request:
     paths:
+      - 'native_ios/HandHelperNative/**'
       - 'native_ios/TabLab/**'
       - 'native_ios/TabLabTests/**'
       - 'native_ios/TabLab/TabSwitchDiagnostics.swift'
