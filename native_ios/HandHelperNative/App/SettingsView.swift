@@ -84,8 +84,7 @@ struct SettingsView: View {
                             AboutHandHelperView()
                         }
                     } label: {
-                        Text("关于航的助手")
-                            .frame(minHeight: 56)
+                        SettingsNavigationRow(title: "关于航的助手", assetName: "BrandMark")
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                 } header: {
@@ -151,6 +150,7 @@ private struct AboutHandHelperView: View {
                                 .stroke(.white.opacity(0.7), lineWidth: 1)
                         }
                         .shadow(color: Color.accentColor.opacity(0.24), radius: 10, y: 5)
+                        .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("航的助手")
@@ -179,8 +179,8 @@ private struct AboutHandHelperView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                AboutInfoRow(title: "使用范围", detail: "仅供本人使用", symbol: "person")
-                AboutInfoRow(title: "数据处理", detail: "主动导入文件，由已登录后端解析并保存", symbol: "externaldrive")
+                AboutInfoRow(title: "使用范围", detail: "仅供本人使用", symbol: "person.crop.circle")
+                AboutInfoRow(title: "数据处理", detail: "主动导入文件，由已登录后端解析并保存", symbol: "arrow.triangle.2.circlepath")
             }
 
             Section("帮助中心") {
@@ -206,8 +206,8 @@ private struct AboutHandHelperView: View {
 
             Section("隐私与安全") {
                 AboutInfoRow(title: "本地资料", detail: "头像、显示名称和壁纸保存在此设备。", symbol: "iphone")
-                AboutInfoRow(title: "导入文件", detail: "原始课表和成绩文件仅用于当次解析，不作为文件持久保存。", symbol: "doc")
-                AboutInfoRow(title: "后端服务", detail: "确认导入后，解析后的课程和成绩保存在已登录后端，用于课表和成绩功能。", symbol: "lock")
+                AboutInfoRow(title: "导入文件", detail: "原始课表和成绩文件仅用于当次解析，不作为文件持久保存。", symbol: "doc.badge.arrow.up")
+                AboutInfoRow(title: "后端服务", detail: "确认导入后，解析后的课程和成绩保存在已登录后端，用于课表和成绩功能。", symbol: "server.rack")
                 AboutInfoRow(title: "第三方 AI", detail: "仅在你主动生成分析时，当前学期必要的课程和成绩信息会发送至已配置的模型服务。", symbol: "sparkles")
                 AboutInfoRow(title: "模型密钥", detail: "API Key 由后端安全保存，客户端不会通过读取配置回显明文。", symbol: "key")
             }
@@ -229,7 +229,14 @@ private struct AboutInfoRow: View {
     let symbol: String
 
     var body: some View {
-        Label {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+                .frame(width: 28, height: 20)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                 Text(detail)
@@ -237,10 +244,8 @@ private struct AboutInfoRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } icon: {
-            Image(systemName: symbol)
-                .foregroundStyle(Color.accentColor)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
