@@ -17,4 +17,20 @@ final class FloatingLabelStateTests: XCTestCase {
     func testClearingAfterFocusLossReturnsLabelInside() {
         XCTAssertFalse(FloatingLabelState.shouldFloat(text: "", isFocused: false))
     }
+
+    func testLoginButtonUsesAvailableWidthWhenIdle() {
+        XCTAssertEqual(
+            LoginButtonPresentation.width(isSubmitting: false, availableWidth: 320),
+            320
+        )
+        XCTAssertEqual(LoginButtonPresentation.cornerRadius(isSubmitting: false), 18)
+    }
+
+    func testLoginButtonShrinksToFixedCircleWhenSubmitting() {
+        XCTAssertEqual(
+            LoginButtonPresentation.width(isSubmitting: true, availableWidth: 320),
+            56
+        )
+        XCTAssertEqual(LoginButtonPresentation.cornerRadius(isSubmitting: true), 28)
+    }
 }

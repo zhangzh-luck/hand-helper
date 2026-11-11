@@ -4,6 +4,7 @@ import SwiftUI
 struct LoginView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject var state: AppState
     @FocusState private var focusedField: Field?
@@ -92,7 +93,8 @@ struct LoginView: View {
     private var credentials: some View {
         VStack(spacing: 0) {
             FloatingLoginField(title: "账号", symbol: "person",
-                               isFocused: focusedField == .username, text: username, trailingInset: 18) {
+                               isFocused: focusedField == .username, text: username, trailingInset: 18,
+                               onTapToFocus: { focusedField = .username }) {
                 TextField("", text: $username)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
@@ -108,7 +110,8 @@ struct LoginView: View {
             Divider().padding(.leading, 56)
 
             FloatingLoginField(title: "密码", symbol: "lock",
-                               isFocused: focusedField == .password, text: password, trailingInset: 6) {
+                               isFocused: focusedField == .password, text: password, trailingInset: 6,
+                               onTapToFocus: { focusedField = .password }) {
                 Group {
                     if showsPassword {
                         TextField("", text: $password)
@@ -162,27 +165,54 @@ struct LoginView: View {
     }
 
     private var loginButton: some View {
+        GeometryReader { proxy in
+            let isSubmitting = state.isLoginSubmitting
+            loginButtonControl(isSubmitting: isSubmitting)
+                .frame(
+                    width: LoginButtonPresentation.width(
+                        isSubmitting: isSubmitting,
+                        availableWidth: proxy.size.width
+                    ),
+                    height: LoginButtonPresentation.height
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: LoginButtonPresentation.morphDuration),
+                    value: isSubmitting
+                )
+        }
+        .frame(height: LoginButtonPresentation.height)
+    }
+
+    @ViewBuilder
+    private func loginButtonControl(isSubmitting: Bool) -> some View {
         let button = Button(action: submit) {
             ZStack {
-                Text("登录")
-                    .opacity(state.isLoginSubmitting ? 0 : 1)
-                ProgressView()
-                    .tint(.white)
-                    .opacity(state.isLoginSubmitting ? 1 : 0)
+                if isSubmitting {
+                    ProgressView()
+                        .tint(.white)
+                        .transition(.opacity)
+                } else {
+                    Text("登录")
+                        .transition(.opacity)
+                }
             }
             .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: LoginButtonPresentation.contentDuration),
+                value: isSubmitting
+            )
         }
-        .disabled(state.isLoginSubmitting || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-        .accessibilityLabel(state.isLoginSubmitting ? "正在登录" : "登录")
+        .disabled(isSubmitting || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+        .accessibilityLabel(isSubmitting ? "正在登录" : "登录")
         .tint(DesignTokens.brand)
+        .buttonBorderShape(.roundedRectangle(radius: LoginButtonPresentation.cornerRadius(isSubmitting: isSubmitting)))
 
-        return Group {
-            if #available(iOS 26.0, *) {
-                button.buttonStyle(.glassProminent)
-            } else {
-                button.buttonStyle(.borderedProminent)
-            }
+        if #available(iOS 26.0, *) {
+            button.buttonStyle(.glassProminent)
+        } else {
+            button.buttonStyle(.borderedProminent)
         }
     }
 
@@ -244,12 +274,27 @@ enum FloatingLabelState {
     }
 }
 
+enum LoginButtonPresentation {
+    static let height: CGFloat = 56
+    static let morphDuration: Double = 0.22
+    static let contentDuration: Double = 0.14
+
+    static func width(isSubmitting: Bool, availableWidth: CGFloat) -> CGFloat {
+        isSubmitting ? height : availableWidth
+    }
+
+    static func cornerRadius(isSubmitting: Bool) -> CGFloat {
+        isSubmitting ? height / 2 : 18
+    }
+}
+
 private struct FloatingLoginField<Content: View, Trailing: View>: View {
     let title: String
     let symbol: String
     let isFocused: Bool
     let text: String
     let trailingInset: CGFloat
+    let onTapToFocus: () -> Void
     let content: Content
     let trailing: Trailing
 
@@ -257,6 +302,7 @@ private struct FloatingLoginField<Content: View, Trailing: View>: View {
     @ScaledMetric(relativeTo: .body) private var labelInset = 13
 
     init(title: String, symbol: String, isFocused: Bool, text: String, trailingInset: CGFloat,
+         onTapToFocus: @escaping () -> Void,
          @ViewBuilder content: () -> Content,
          @ViewBuilder trailing: () -> Trailing) {
         self.title = title
@@ -264,6 +310,7 @@ private struct FloatingLoginField<Content: View, Trailing: View>: View {
         self.isFocused = isFocused
         self.text = text
         self.trailingInset = trailingInset
+        self.onTapToFocus = onTapToFocus
         self.content = content()
         self.trailing = trailing()
     }
@@ -274,26 +321,34 @@ private struct FloatingLoginField<Content: View, Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .frame(width: 24)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            ZStack(alignment: .topLeading) {
-                content
-                    .accessibilityLabel(title)
-                    .padding(.top, labelInset)
-                    .frame(minHeight: 48, alignment: .bottom)
-
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(isFocused ? DesignTokens.brand : .secondary)
-                    .scaleEffect(isFloating ? 0.76 : 1, anchor: .leading)
-                    .offset(y: isFloating ? 1 : labelInset + 2)
-                    .allowsHitTesting(false)
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .frame(width: 24)
+                    .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
+
+                ZStack(alignment: .topLeading) {
+                    content
+                        .accessibilityLabel(title)
+                        .padding(.top, labelInset)
+                        .frame(minHeight: 48, alignment: .bottom)
+
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(isFocused ? DesignTokens.brand : .secondary)
+                        .scaleEffect(isFloating ? 0.76 : 1, anchor: .leading)
+                        .offset(y: isFloating ? 1 : labelInset + 2)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded {
+                guard !isFocused else { return }
+                onTapToFocus()
+            })
 
             trailing
         }
