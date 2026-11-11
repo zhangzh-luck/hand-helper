@@ -55,22 +55,6 @@ struct PersonalizationView: View {
             }
 
             Section {
-                SettingsNavigationButton {
-                    navigator?.push(title: "Tab 切换性能诊断") {
-                        TabSwitchDiagnosticsView(diagnostics: state.tabSwitchDiagnostics)
-                    }
-                } label: {
-                    SettingsNavigationRow(title: "Tab 切换性能诊断", symbol: "gauge.with.dots.needle.67percent",
-                                          color: Color(uiColor: .systemOrange))
-                }
-                .listRowInsets(SettingsNavigationRow.rowInsets)
-            } header: {
-                Text("性能诊断")
-            } footer: {
-                Text("用于排查底部 TabBar 的响应与帧间隔；不会收集业务数据。")
-            }
-
-            Section {
                 Toggle("课程与安排实时活动", isOn: Binding(
                     get: { state.liveActivitiesEnabled },
                     set: { state.setLiveActivitiesEnabled($0) }

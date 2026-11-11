@@ -31,9 +31,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIPageViewController, context: Context) {
-        model.tabSwitchDiagnostics.record(.timetablePagerUpdateBegin, for: .timetable)
         context.coordinator.update(self, in: controller)
-        model.tabSwitchDiagnostics.record(.timetablePagerUpdateEnd, for: .timetable)
     }
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
@@ -60,7 +58,6 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             parent = newParent
             let nextIdentity = currentIdentity
             if nextIdentity != identity {
-                parent.model.tabSwitchDiagnostics.record(.timetablePagerIdentityChanged, for: .timetable)
                 // A changed account or snapshot invalidates every hosted course view.
                 // Defer same-account refresh until an interactive turn has settled.
                 if (interacting || programmatic) &&
@@ -81,7 +78,6 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
                 }
                 return
             }
-            parent.model.tabSwitchDiagnostics.record(.timetablePagerIdentityUnchanged, for: .timetable)
             guard !interacting && !programmatic else { return }
             let desired = parent.model.selectedWeek
             guard desired != visibleWeek, let target = page(for: desired) else { return }
@@ -120,7 +116,6 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             hosted.view.backgroundColor = .clear
             hosted.view.isOpaque = false
             pages[week] = hosted
-            parent.model.tabSwitchDiagnostics.record(.timetablePagerPageCreated, for: .timetable)
             return hosted
         }
 

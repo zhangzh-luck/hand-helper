@@ -13,19 +13,16 @@ final class TodayViewModel: ObservableObject {
     private let repository: any CourseRepository
     private let wallpaperStore: WallpaperStore
     private let clock: any TodayClock
-    private let tabSwitchDiagnostics: TabSwitchDiagnostics?
     private var refreshGeneration = 0
     private var hasReadPrivateCache = false
     private var hasReadLocalSchedules = false
     private var cachedPresentation: TodayPresentation?
     private(set) var derivedPresentationBuildCount = 0
 
-    init(repository: any CourseRepository, wallpaperStore: WallpaperStore, clock: any TodayClock = SystemTodayClock(),
-         tabSwitchDiagnostics: TabSwitchDiagnostics? = nil) {
+    init(repository: any CourseRepository, wallpaperStore: WallpaperStore, clock: any TodayClock = SystemTodayClock()) {
         self.repository = repository
         self.wallpaperStore = wallpaperStore
         self.clock = clock
-        self.tabSwitchDiagnostics = tabSwitchDiagnostics
         now = clock.now
     }
 
@@ -39,10 +36,8 @@ final class TodayViewModel: ObservableObject {
 
     private var presentation: TodayPresentation {
         if let cachedPresentation {
-            tabSwitchDiagnostics?.recordTodayDerivedCacheHit()
             return cachedPresentation
         }
-        tabSwitchDiagnostics?.beginTodayDerivedCacheRebuild()
         let courses: [CourseSession]
         if let snapshot {
             let local = CourseScheduleCalculator.expandedManualCourses(
@@ -71,7 +66,6 @@ final class TodayViewModel: ObservableObject {
                                       status: status, hasCourseData: snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false)
         cachedPresentation = value
         derivedPresentationBuildCount += 1
-        tabSwitchDiagnostics?.endTodayDerivedCacheRebuild()
         return value
     }
     var canEditSchedules: Bool { repository.canEditSchedules }

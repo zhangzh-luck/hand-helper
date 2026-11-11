@@ -26,8 +26,7 @@ struct TodayView: View {
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
-        _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper,
-                                                           tabSwitchDiagnostics: state.tabSwitchDiagnostics))
+        _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
     }
 
     private var dark: Bool { colorScheme == .dark }
@@ -148,18 +147,14 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.selectedTab) { _, tab in
-            state.tabSwitchDiagnostics.record(.todaySelectedTabChangeBegin, for: tab.diagnosticTab)
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
-                let cacheAvailable = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
-                                                                        allowLocalSchedules: mayShowLocalSchedules)
+                _ = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
+                                                      allowLocalSchedules: mayShowLocalSchedules)
                     ?? model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
-                state.tabSwitchDiagnostics.recordPageReady(for: .today,
-                                                           cacheState: cacheAvailable ? .hit : .miss)
             }
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }
             }
-            state.tabSwitchDiagnostics.record(.todaySelectedTabChangeEnd, for: tab.diagnosticTab)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

@@ -202,7 +202,6 @@ struct TimetableView: View {
                 await model.updateIfNeeded()
             }
             .onChange(of: state.selectedTab) { _, tab in
-                state.tabSwitchDiagnostics.record(.timetableSelectedTabChangeBegin, for: tab.diagnosticTab)
                 if tab != .timetable {
                     emptyCellSelection.clear(reason: "tab_changed")
                     emptyCellSelection.dismissRoute(reason: "tab_changed")
@@ -212,16 +211,10 @@ struct TimetableView: View {
                     clearManualConfirmation()
                 }
                 if tab == .timetable {
-                    state.tabSwitchDiagnostics.record(.timetableTaskCreated, for: .timetable)
                     Task {
-                        state.tabSwitchDiagnostics.record(.timetableTaskStarted, for: .timetable)
-                        await model.updateIfNeeded(onCacheRestored: { cacheAvailable in
-                            state.tabSwitchDiagnostics.recordPageReady(for: .timetable,
-                                                                       cacheState: cacheAvailable ? .hit : .miss)
-                        }, diagnostics: state.tabSwitchDiagnostics)
+                        await model.updateIfNeeded()
                     }
                 }
-                state.tabSwitchDiagnostics.record(.timetableSelectedTabChangeEnd, for: tab.diagnosticTab)
             }
             .onChange(of: state.localManualCourseChange) { _, change in
                 guard let change,

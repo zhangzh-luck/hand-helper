@@ -91,21 +91,12 @@ struct RootView: View {
             deleteConfirmation.clear()
         }
         .onChange(of: state.selectedTab) { oldTab, tab in
-            state.tabSwitchDiagnostics.record(.rootSelectedTabChangeBegin, for: tab.diagnosticTab)
-            state.tabSwitchDiagnostics.recordKnownStateChange(.selectedTab, for: tab.diagnosticTab)
             if tab != .today { clearAvatarPreview() }
-            if tab != .timetable, timetableDetail.clear() {
-                state.tabSwitchDiagnostics.recordKnownStateChange(.timetableDetail, for: tab.diagnosticTab)
-            }
+            if tab != .timetable { timetableDetail.clear() }
             // AnalysisView owns the active-analysis exit cleanup. Avoid publishing the
             // same clear twice during one tab transition.
-            if oldTab != .analysis, tab != .analysis, gradeDetail.clear() {
-                state.tabSwitchDiagnostics.recordKnownStateChange(.gradeDetail, for: tab.diagnosticTab)
-            }
-            if deleteConfirmation.clear() {
-                state.tabSwitchDiagnostics.recordKnownStateChange(.destructiveConfirmation, for: tab.diagnosticTab)
-            }
-            state.tabSwitchDiagnostics.record(.rootSelectedTabChangeEnd, for: tab.diagnosticTab)
+            if oldTab != .analysis, tab != .analysis { gradeDetail.clear() }
+            deleteConfirmation.clear()
         }
         .onChange(of: state.entry) { _, entry in
             syncLiveActivities(reason: "entry_changed")
@@ -175,10 +166,7 @@ struct RootView: View {
     private func clearAvatarPreview() {
         let needsClear = AvatarPreviewClearPolicy.needsClear(isVisible: avatarPreviewVisible,
                                                              hasPreview: avatarPreview != nil)
-        state.tabSwitchDiagnostics.record(needsClear ? .avatarPreviewCleared : .avatarPreviewClearSkipped,
-                                          for: state.selectedTab.diagnosticTab)
         guard needsClear else { return }
-        state.tabSwitchDiagnostics.recordKnownStateChangeForActiveSwitch(.avatarPreview)
         if avatarPreviewVisible { avatarPreviewVisible = false }
         if avatarPreview != nil { avatarPreview = nil }
     }
@@ -220,18 +208,13 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
                                              deleteConfirmation: deleteConfirmation)
         controller.selectedTabDidChange = { [weak state] tab in
             guard let state else { return }
-            state.tabSwitchDiagnostics.record(.selectedTabAssignmentBegin, for: tab.diagnosticTab)
             state.selectedTab = tab
-            state.tabSwitchDiagnostics.record(.selectedTabAssignmentEnd, for: tab.diagnosticTab)
         }
         return controller
     }
 
     func updateUIViewController(_ controller: NativeTabController, context: Context) {
-        state.tabSwitchDiagnostics.recordNativeContainerUpdate(for: state.selectedTab.diagnosticTab)
-        state.tabSwitchDiagnostics.record(.nativeContainerUpdateBegin, for: state.selectedTab.diagnosticTab)
         controller.apply(state: state)
-        state.tabSwitchDiagnostics.record(.nativeContainerUpdateEnd, for: state.selectedTab.diagnosticTab)
     }
 }
 
@@ -310,37 +293,28 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     func apply(state: AppState) {
-        state.tabSwitchDiagnostics.record(.nativeApplyBegin, for: state.selectedTab.diagnosticTab)
         let style: UIUserInterfaceStyle
         switch state.appearance {
         case .system: style = .unspecified
         case .light: style = .light
         case .dark: style = .dark
         }
-        var changes = Set<TabSwitchNativeApplyChange>()
         if overrideUserInterfaceStyle != style {
             overrideUserInterfaceStyle = style
-            changes.insert(.appearance)
         }
         if selectedIndex != state.selectedTab.rawValue {
             selectedIndex = state.selectedTab.rawValue
             updateTabVisibility()
-            changes.insert(.selectedTab)
         }
         if detailPresented != state.isDetailPresented {
             detailPresented = state.isDetailPresented
             updateTabVisibility()
-            changes.insert(.detailVisibility)
         }
         if navigationDestinationPresented != state.shouldHideTabBarForNavigation {
             navigationDestinationPresented = state.shouldHideTabBarForNavigation
             updateTabVisibility()
-            changes.insert(.navigationVisibility)
         }
-        if applyHomeTabImageIfNeeded(state: state) { changes.insert(.avatarVersion) }
-        state.tabSwitchDiagnostics.recordNativeApply(changes: changes, for: state.selectedTab.diagnosticTab)
-        state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab.diagnosticTab)
-        state.tabSwitchDiagnostics.record(.nativeApplyEnd, for: state.selectedTab.diagnosticTab)
+        applyHomeTabImageIfNeeded(state: state)
     }
 
     @discardableResult
@@ -357,20 +331,14 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
 
     func tabBarController(_ tabBarController: UITabBarController,
                           shouldSelect viewController: UIViewController) -> Bool {
-        guard let destinationIndex = viewControllers?.firstIndex(where: { $0 === viewController }),
-              let destination = AppTab(rawValue: destinationIndex),
-              let source = AppTab(rawValue: selectedIndex) else { return true }
-        appState?.tabSwitchDiagnostics.beginSwitch(from: source.diagnosticTab, to: destination.diagnosticTab,
-                                                   screen: view.window?.screen)
         return true
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         let tab = AppTab(rawValue: selectedIndex) ?? .today
         guard appState?.selectedTab != tab else { return }
-        appState?.tabSwitchDiagnostics.recordSelectionApplied(for: tab.diagnosticTab)
-        // Deliberately disabled for the TabBar performance isolation experiment.
-        // Other in-app haptics remain mapped through AppHaptics.
+        // Main-tab switches intentionally have no custom haptic; other in-app
+        // interactions remain mapped through AppHaptics.
         selectedTabDidChange?(tab)
     }
 

@@ -31,7 +31,6 @@ final class TimetableViewModel: ObservableObject {
         self.now = now
     }
 
-    var tabSwitchDiagnostics: TabSwitchDiagnostics { state.tabSwitchDiagnostics }
     var terms: [TermInfo] { snapshot?.terms ?? [] }
     var periods: [PeriodInfo] { snapshot?.periods.sorted { $0.periodNumber < $1.periodNumber } ?? [] }
 
@@ -188,19 +187,12 @@ final class TimetableViewModel: ObservableObject {
         reproject()
     }
 
-    func updateIfNeeded(onCacheRestored: ((Bool) -> Void)? = nil,
-                        diagnostics: TabSwitchDiagnostics? = nil) async {
-        diagnostics?.record(.timetableUpdateBegin, for: .timetable)
-        defer { diagnostics?.record(.timetableUpdateEnd, for: .timetable) }
+    func updateIfNeeded() async {
         guard state.selectedTab == .timetable, state.canAccessPrivateData else { return }
         let marker = state.pendingCourseInvalidation(after: appliedSequence)
-        let cacheAvailable: Bool
-        if canReuseInMemorySnapshot(marker: marker) {
-            cacheAvailable = true
-        } else {
-            cacheAvailable = loadCached()
+        if !canReuseInMemorySnapshot(marker: marker) {
+            _ = loadCached()
         }
-        onCacheRestored?(cacheAvailable)
         if let marker, state.completedCourseRefresh == marker {
             if snapshot != nil { appliedSequence = marker.sequence }
             return

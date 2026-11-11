@@ -88,13 +88,6 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
-        .onChange(of: state.selectedTab) { _, tab in
-            state.tabSwitchDiagnostics.record(.settingsSelectedTabChangeBegin, for: tab.diagnosticTab)
-            if tab == .settings {
-                state.tabSwitchDiagnostics.recordPageReady(for: .settings, cacheState: .retained)
-            }
-            state.tabSwitchDiagnostics.record(.settingsSelectedTabChangeEnd, for: tab.diagnosticTab)
-        }
         .task { avatarImageCache.update(data: state.currentProfile.avatarData) }
         .onChange(of: state.currentProfile.avatarData) { _, data in avatarImageCache.update(data: data) }
     }
