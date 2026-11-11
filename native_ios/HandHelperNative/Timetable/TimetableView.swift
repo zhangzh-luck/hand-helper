@@ -129,13 +129,12 @@ struct TimetableView: View {
                             ContentUnavailableView("节次尚未设置", systemImage: "clock.badge.questionmark",
                                                    description: Text("请在时间设置中配置课程节次。"))
                         } else {
-                            TimetableWeekPager<TimetableWeekPage>(model: model,
+                            TimetableWeekPager(model: model,
                                                authenticationRevision: state.authenticationRevision,
                                                renderRevision: state.timetableWallpaperVersion,
                                                wallpaperVisible: showsWallpaper,
                                                layoutScale: gridScale,
                                                reduceMotion: reduceMotion,
-                                               diagnostics: state.tabSwitchDiagnostics,
                                                 onTransitionStateChange: { busy in
                                                     TimetableAddCourseDiagnostics.record(
                                                         busy ? "pager_busy" : "pager_idle",

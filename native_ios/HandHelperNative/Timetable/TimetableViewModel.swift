@@ -31,6 +31,7 @@ final class TimetableViewModel: ObservableObject {
         self.now = now
     }
 
+    var tabSwitchDiagnostics: TabSwitchDiagnostics { state.tabSwitchDiagnostics }
     var terms: [TermInfo] { snapshot?.terms ?? [] }
     var periods: [PeriodInfo] { snapshot?.periods.sorted { $0.periodNumber < $1.periodNumber } ?? [] }
 

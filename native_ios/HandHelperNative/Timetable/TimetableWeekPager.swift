@@ -10,7 +10,6 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
     let wallpaperVisible: Bool
     let layoutScale: CGFloat
     let reduceMotion: Bool
-    let diagnostics: TabSwitchDiagnostics = TabSwitchDiagnostics()
     var onTransitionStateChange: ((Bool) -> Void)? = nil
     let content: (WeeklyTimetableProjection) -> Page
 
@@ -32,9 +31,9 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIPageViewController, context: Context) {
-        diagnostics.record(.timetablePagerUpdateBegin, for: .timetable)
+        model.tabSwitchDiagnostics.record(.timetablePagerUpdateBegin, for: .timetable)
         context.coordinator.update(self, in: controller)
-        diagnostics.record(.timetablePagerUpdateEnd, for: .timetable)
+        model.tabSwitchDiagnostics.record(.timetablePagerUpdateEnd, for: .timetable)
     }
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
@@ -61,7 +60,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             parent = newParent
             let nextIdentity = currentIdentity
             if nextIdentity != identity {
-                parent.diagnostics.record(.timetablePagerIdentityChanged, for: .timetable)
+                parent.model.tabSwitchDiagnostics.record(.timetablePagerIdentityChanged, for: .timetable)
                 // A changed account or snapshot invalidates every hosted course view.
                 // Defer same-account refresh until an interactive turn has settled.
                 if (interacting || programmatic) &&
@@ -82,7 +81,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
                 }
                 return
             }
-            parent.diagnostics.record(.timetablePagerIdentityUnchanged, for: .timetable)
+            parent.model.tabSwitchDiagnostics.record(.timetablePagerIdentityUnchanged, for: .timetable)
             guard !interacting && !programmatic else { return }
             let desired = parent.model.selectedWeek
             guard desired != visibleWeek, let target = page(for: desired) else { return }
@@ -121,7 +120,7 @@ struct TimetableWeekPager<Page: View>: UIViewControllerRepresentable {
             hosted.view.backgroundColor = .clear
             hosted.view.isOpaque = false
             pages[week] = hosted
-            parent.diagnostics.record(.timetablePagerPageCreated, for: .timetable)
+            parent.model.tabSwitchDiagnostics.record(.timetablePagerPageCreated, for: .timetable)
             return hosted
         }
 
