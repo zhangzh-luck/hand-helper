@@ -16,6 +16,11 @@ final class TimetableViewModel: ObservableObject {
     private let calendar: Calendar
     private let now: () -> Date
     private var appliedSequence: Int?
+    /// Identifies the in-memory snapshot that was read for the current verified account.
+    /// This is deliberately invalidated by account changes and course invalidations; it is
+    /// not a permanent "has loaded" switch.
+    private var cachedTicket: WeeklyTimetableAccountTicket?
+    private var appliedLocalManualCourseSequence: Int?
     private var operation = 0
 
     init(state: AppState, repository: any CourseRepository, calendar: Calendar = .current,
@@ -45,6 +50,8 @@ final class TimetableViewModel: ObservableObject {
         selectedTermID = nil
         selectedWeek = 1
         appliedSequence = nil
+        cachedTicket = nil
+        appliedLocalManualCourseSequence = nil
         errorMessage = nil
         isLoading = false
     }
@@ -57,11 +64,16 @@ final class TimetableViewModel: ObservableObject {
         }
         do {
             let ticket = try access.ticket()
-            guard let cached = try repository.cached() else { return false }
+            guard let cached = try repository.cached() else {
+                cachedTicket = nil
+                return false
+            }
             try accept(cached, ticket: ticket)
-            if projection != nil { errorMessage = nil }
+            cachedTicket = ticket
+            if projection != nil, errorMessage != nil { errorMessage = nil }
             return snapshot != nil
         } catch {
+            cachedTicket = nil
             if !state.canAccessPrivateData { clear() }
             else { errorMessage = "无法读取本机课程：\(error.localizedDescription)" }
             return false
@@ -82,6 +94,7 @@ final class TimetableViewModel: ObservableObject {
         loadCached()
         try state.publishLocalManualCourseChange(for: cell.owner,
             authenticationRevision: cell.authenticationRevision)
+        markCurrentLocalManualCourseChangeApplied()
     }
 
     func editableManualCourse(for course: CourseSession,
@@ -126,6 +139,7 @@ final class TimetableViewModel: ObservableObject {
         loadCached()
         try state.publishLocalManualCourseChange(for: request.identity.owner,
             authenticationRevision: request.context.authenticationRevision)
+        markCurrentLocalManualCourseChangeApplied()
     }
 
     func deleteManualCourse(for request: TimetableManualCourseActionRequest) throws {
@@ -137,6 +151,7 @@ final class TimetableViewModel: ObservableObject {
         loadCached()
         try state.publishLocalManualCourseChange(for: request.identity.owner,
             authenticationRevision: request.context.authenticationRevision)
+        markCurrentLocalManualCourseChangeApplied()
     }
 
     func selectTerm(_ id: Int) {
@@ -174,9 +189,14 @@ final class TimetableViewModel: ObservableObject {
 
     func updateIfNeeded(onCacheRestored: ((Bool) -> Void)? = nil) async {
         guard state.selectedTab == .timetable, state.canAccessPrivateData else { return }
-        let cacheAvailable = loadCached()
-        onCacheRestored?(cacheAvailable)
         let marker = state.pendingCourseInvalidation(after: appliedSequence)
+        let cacheAvailable: Bool
+        if canReuseInMemorySnapshot(marker: marker) {
+            cacheAvailable = true
+        } else {
+            cacheAvailable = loadCached()
+        }
+        onCacheRestored?(cacheAvailable)
         if let marker, state.completedCourseRefresh == marker {
             if snapshot != nil { appliedSequence = marker.sequence }
             return
@@ -198,12 +218,43 @@ final class TimetableViewModel: ObservableObject {
         _ = try state.requireCurrentAccount(revision: ticket.authenticationRevision)
         let oldTerm = selectedTermID
         let contentChanged = snapshot != newSnapshot
-        snapshot = newSnapshot
-        if contentChanged { snapshotRevision += 1 }
-        selectedTermID = oldTerm.flatMap { id in newSnapshot.terms.contains(where: { $0.id == id }) ? id : nil }
+        let nextTerm = oldTerm.flatMap { id in newSnapshot.terms.contains(where: { $0.id == id }) ? id : nil }
             ?? newSnapshot.terms.first(where: \.isCurrent)?.id ?? newSnapshot.terms.first?.id
-        if selectedTermID != oldTerm { jumpToCurrentWeek() }
-        else { reproject() }
+        guard contentChanged || nextTerm != oldTerm else { return }
+        if contentChanged {
+            snapshot = newSnapshot
+            snapshotRevision += 1
+        }
+        if nextTerm != oldTerm {
+            selectedTermID = nextTerm
+            jumpToCurrentWeek()
+        } else {
+            reproject()
+        }
+    }
+
+    /// Applies a local edit notification only when it was not produced by this model's
+    /// immediately preceding durable cache reload.
+    func applyLocalManualCourseChange(_ change: LocalManualCourseChange) {
+        guard (try? state.requireCurrentAccount(revision: change.authenticationRevision)) == change.owner else {
+            return
+        }
+        guard appliedLocalManualCourseSequence != change.sequence else { return }
+        _ = loadCached()
+        appliedLocalManualCourseSequence = change.sequence
+    }
+
+    private func markCurrentLocalManualCourseChangeApplied() {
+        appliedLocalManualCourseSequence = state.localManualCourseChange?.sequence
+    }
+
+    private func canReuseInMemorySnapshot(marker: CourseDataInvalidation?) -> Bool {
+        guard marker == nil, snapshot != nil,
+              let cachedTicket,
+              let ticket = try? access.ticket(), ticket == cachedTicket else {
+            return false
+        }
+        return true
     }
 
     private func reproject() {

@@ -178,6 +178,8 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     }
 
     func clear() {
+        guard closingAction != nil || readyAction != nil || pendingDelete != nil || deletionError != nil ||
+                route != nil || phase != .idle || pagerBusy else { return }
         closingAction = nil
         readyAction = nil
         pendingDelete = nil

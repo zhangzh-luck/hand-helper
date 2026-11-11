@@ -1,9 +1,22 @@
 import SwiftUI
 import UIKit
 import XCTest
+import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    @MainActor
+    func testClearDoesNotPublishWhenDetailIsAlreadyIdle() {
+        let detail = TimetableCourseDetailCoordinator()
+        var notifications = 0
+        let observation = detail.objectWillChange.sink { _ in notifications += 1 }
+
+        detail.clear()
+
+        XCTAssertEqual(notifications, 0)
+        withExtendedLifetime(observation) {}
+    }
+
     private let context = TimetableDetailContext(authenticationRevision: 3, termID: 8,
                                                  week: 2, snapshotRevision: 5,
                                                  courseID: 11, placementIndex: 0)

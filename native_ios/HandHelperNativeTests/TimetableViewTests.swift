@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import XCTest
+import Combine
 @testable import HandHelperNative
 
 final class TimetableViewTests: XCTestCase {
@@ -307,6 +308,69 @@ final class TimetableViewTests: XCTestCase {
     }
 
     @MainActor
+    func testWarmTabReturnReusesVerifiedInMemorySnapshotWithoutReadingDisk() async throws {
+        let (_, repository, model) = try await setup()
+        XCTAssertTrue(model.loadCached())
+        let readsAfterInitialLoad = repository.cachedCount
+
+        await model.updateIfNeeded()
+
+        XCTAssertEqual(repository.cachedCount, readsAfterInitialLoad)
+        XCTAssertEqual(model.projection?.placements.map(\.course.id), [1])
+    }
+
+    @MainActor
+    func testEqualDurableSnapshotDoesNotRepublishOrReproject() async throws {
+        let (_, repository, model) = try await setup()
+        XCTAssertTrue(model.loadCached())
+        let snapshotRevision = model.snapshotRevision
+        var notifications = 0
+        let observation = model.objectWillChange.sink { _ in notifications += 1 }
+
+        XCTAssertTrue(model.loadCached())
+
+        XCTAssertEqual(repository.cachedCount, 2)
+        XCTAssertEqual(model.snapshotRevision, snapshotRevision)
+        XCTAssertEqual(notifications, 0)
+        withExtendedLifetime(observation) {}
+    }
+
+    @MainActor
+    func testCourseInvalidationForcesDurableCacheReadBeforeReusingMemory() async throws {
+        let (state, repository, model) = try await setup()
+        XCTAssertTrue(model.loadCached())
+        let readsAfterInitialLoad = repository.cachedCount
+        let owner = try state.requireCurrentAccount(revision: state.authenticationRevision)
+        try state.invalidateCourses(for: owner, authenticationRevision: state.authenticationRevision)
+        let marker = try XCTUnwrap(state.courseDataInvalidation)
+        state.acknowledgeCourseRefresh(marker)
+
+        await model.updateIfNeeded()
+
+        XCTAssertEqual(repository.cachedCount, readsAfterInitialLoad + 1)
+        XCTAssertEqual(model.projection?.placements.map(\.course.id), [1])
+    }
+
+    @MainActor
+    func testOwnManualCourseNotificationDoesNotTriggerSecondCacheRead() async throws {
+        let (state, repository, model) = try await setup()
+        XCTAssertTrue(model.loadCached())
+        let cell = TimetableEmptyCellSelection(owner: try state.requireCurrentAccount(
+            revision: state.authenticationRevision), authenticationRevision: state.authenticationRevision,
+            termID: 1, week: 1, snapshotRevision: model.snapshotRevision, weekday: 3, periodNumber: 2)
+        var draft = ManualCourseDraft(cell: cell)
+        draft.name = "本地课程"
+        try model.addManualCourse(draft, from: cell)
+        let readsAfterSave = repository.cachedCount
+        let change = try XCTUnwrap(state.localManualCourseChange)
+
+        model.applyLocalManualCourseChange(change)
+
+        XCTAssertEqual(repository.cachedCount, readsAfterSave)
+        XCTAssertTrue(model.projection?.placements.contains { $0.course.name == "本地课程" } == true)
+    }
+
+    @MainActor
     func testUnverifiedSessionAndLogoutHideSnapshot() async throws {
         let session = TimetableModelSession()
         session.save(cookie: "session=alice")
@@ -526,12 +590,16 @@ private final class TimetableModelRepository: CourseRepository {
     var fresh: CourseSnapshot?
     var refreshError: Error?
     var refreshCount = 0
+    var cachedCount = 0
     var createCount = 0
     var updateCount = 0
     var deleteManualCount = 0
     var sessionCookie: String? { "session=alice" }
     var canEditSchedules: Bool { false }
-    func cached() throws -> CourseSnapshot? { stored }
+    func cached() throws -> CourseSnapshot? {
+        cachedCount += 1
+        return stored
+    }
     func refresh(on date: Date) async throws -> CourseSnapshot { throw APIError.invalidResponse }
     func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
         refreshCount += 1

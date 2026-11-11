@@ -205,9 +205,9 @@ struct TimetableView: View {
                 if tab != .timetable {
                     emptyCellSelection.clear(reason: "tab_changed")
                     emptyCellSelection.dismissRoute(reason: "tab_changed")
-                    editingManualCourse = nil
-                    deletingManualCourse = nil
-                    pendingListManualAction = nil
+                    if editingManualCourse != nil { editingManualCourse = nil }
+                    if deletingManualCourse != nil { deletingManualCourse = nil }
+                    if pendingListManualAction != nil { pendingListManualAction = nil }
                     clearManualConfirmation()
                 }
                 if tab == .timetable {
@@ -222,7 +222,7 @@ struct TimetableView: View {
             .onChange(of: state.localManualCourseChange) { _, change in
                 guard let change,
                       (try? state.requireCurrentAccount(revision: change.authenticationRevision)) == change.owner else { return }
-                model.loadCached()
+                model.applyLocalManualCourseChange(change)
             }
             .onChange(of: state.courseDataInvalidation) { _, _ in
                 if state.selectedTab == .timetable { Task { await model.updateIfNeeded() } }
