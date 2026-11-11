@@ -256,11 +256,11 @@ private final class TabLabBareTabBar: UITabBar {
 
 private final class TabLabPageController: UIViewController {
     private let titleLabel = UILabel()
-    private var tab: TabSwitchDiagnosticTab
+    private var diagnosticTab: TabSwitchDiagnosticTab
     private weak var diagnostics: TabSwitchDiagnostics?
 
     init(tab: TabSwitchDiagnosticTab, diagnostics: TabSwitchDiagnostics?) {
-        self.tab = tab
+        self.diagnosticTab = tab
         self.diagnostics = diagnostics
         super.init(nibName: nil, bundle: nil)
     }
@@ -277,16 +277,16 @@ private final class TabLabPageController: UIViewController {
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
-        apply(tab: tab)
+        apply(tab: diagnosticTab)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        diagnostics?.recordPageReady(for: tab, cacheState: .retained)
+        diagnostics?.recordPageReady(for: diagnosticTab, cacheState: .retained)
     }
 
     func apply(tab: TabSwitchDiagnosticTab) {
-        self.tab = tab
+        self.diagnosticTab = tab
         titleLabel.text = tab.title
         view.backgroundColor = [.systemBlue, .systemGreen, .systemOrange, .systemPurple][tab.rawValue].withAlphaComponent(0.16)
     }
