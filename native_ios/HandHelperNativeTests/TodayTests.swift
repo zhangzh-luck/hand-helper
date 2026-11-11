@@ -134,6 +134,48 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(try repository.cached()?.profile.homeWallpaperDataURL, "data:image/png;base64,AQID")
     }
 
+    @MainActor
+    func testTodayMemoryRestoreAvoidsRepeatedDiskCacheReadsAndWallpaperDecodeUpdates() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = TodayTestSessionStore()
+        session.save(cookie: "session=fixture")
+        let account = VerifiedAccountContext()
+        try account.confirm(username: "tester", cookie: "session=fixture")
+        let repository = TodayCountingRepository()
+        let wallpaper = WallpaperStore(session: session, account: account, directory: folder)
+        let model = TodayViewModel(repository: repository, wallpaperStore: wallpaper)
+
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        try wallpaper.save(image)
+        XCTAssertTrue(model.load())
+        XCTAssertEqual(repository.cachedReadCount, 1)
+        XCTAssertEqual(repository.localScheduleReadCount, 1)
+        XCTAssertNotNil(model.wallpaperImage)
+
+        // This models returning to Today while the existing account cache is valid.
+        XCTAssertTrue(model.load())
+        XCTAssertEqual(repository.cachedReadCount, 1)
+        XCTAssertEqual(repository.localScheduleReadCount, 1)
+
+        // Explicit invalidation still reloads both persisted sources.
+        XCTAssertTrue(model.load(forceDiskRead: true))
+        XCTAssertEqual(repository.cachedReadCount, 2)
+        XCTAssertEqual(repository.localScheduleReadCount, 2)
+
+        try wallpaper.remove()
+        try model.reloadWallpaper()
+        XCTAssertNil(model.wallpaperData)
+        XCTAssertNil(model.wallpaperImage)
+
+        model.authenticationDidChange(allowPrivateCache: false, allowLocalSchedules: false)
+        XCTAssertNil(model.snapshot)
+        XCTAssertNil(model.wallpaperImage)
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -426,4 +468,31 @@ private final class TodayTestSessionStore: SessionStore {
 private final class MutableTodayClock: TodayClock {
     var now: Date
     init(now: Date) { self.now = now }
+}
+
+@MainActor
+private final class TodayCountingRepository: CourseRepository {
+    var sessionCookie: String? { "session=fixture" }
+    var canEditSchedules: Bool { true }
+    var cachedReadCount = 0
+    var localScheduleReadCount = 0
+
+    func cached() throws -> CourseSnapshot? {
+        cachedReadCount += 1
+        return .empty
+    }
+
+    func refresh(on date: Date) async throws -> CourseSnapshot { .empty }
+
+    func localSchedules(on date: Date) throws -> [CustomSchedule] { [] }
+
+    func allLocalSchedules() throws -> [CustomSchedule] {
+        localScheduleReadCount += 1
+        return []
+    }
+
+    func saveSchedule(_ schedule: CustomSchedule) throws {}
+    func deleteSchedule(id: Int) throws {}
+    func saveManualRule(_ rule: ManualCourseRule) throws {}
+    func saveProfile(_ profile: TodayProfile) throws {}
 }

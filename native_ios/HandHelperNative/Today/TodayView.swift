@@ -15,6 +15,8 @@ struct TodayView: View {
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var localError: String?
     @State private var appliedCourseInvalidationSequence: Int?
+    @State private var avatarSourceData: Data?
+    @State private var avatarImage: UIImage?
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          deleteConfirmation: DestructiveConfirmationCoordinator) {
@@ -34,9 +36,8 @@ struct TodayView: View {
     private var displayName: String { state.currentProfile.resolvedDisplayName }
     private var avatarData: Data? { state.currentProfile.avatarData }
     private var avatarPreviewRoute: TodayAvatarPreviewRoute? {
-        TodayAvatarPreviewRoute.make(avatarData: avatarData,
-                                     canAccessPrivateData: state.canAccessPrivateData,
-                                     revision: state.authenticationRevision)
+        guard state.canAccessPrivateData, let avatarImage else { return nil }
+        return TodayAvatarPreviewRoute(image: avatarImage, revision: state.authenticationRevision)
     }
     private var entries: [TodayEntry] {
         ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
@@ -48,7 +49,7 @@ struct TodayView: View {
         ZStack {
             TodayStyle.background.ignoresSafeArea()
             if !reduceTransparency, state.canAccessPrivateData,
-               let data = model.wallpaperData, let image = UIImage(data: data) {
+               let image = model.wallpaperImage {
                 GeometryReader { geometry in
                     Image(uiImage: image)
                         .resizable()
@@ -103,6 +104,7 @@ struct TodayView: View {
             .padding(.top, 26)
         }
         .task {
+            reloadAvatarImageIfNeeded()
             model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData && state.selectedTab == .today { await refreshCourses() }
             while !Task.isCancelled {
@@ -121,6 +123,9 @@ struct TodayView: View {
                                           allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData { Task { await refreshCourses() } }
         }
+        .onChange(of: avatarData) { _, _ in
+            reloadAvatarImageIfNeeded()
+        }
         .onChange(of: state.wallpaperVersion) { _, _ in
             guard state.canAccessPrivateData else { return }
             do { try model.reloadWallpaper() }
@@ -134,7 +139,7 @@ struct TodayView: View {
         .onChange(of: state.localManualCourseChange) { _, change in
             guard let change,
                   (try? state.requireCurrentAccount(revision: change.authenticationRevision)) == change.owner else { return }
-            model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+            model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules, forceDiskRead: true)
         }
         .onChange(of: state.completedCourseRefresh) { _, marker in
             if state.selectedTab == .today && marker == pendingCourseInvalidation {
@@ -143,7 +148,9 @@ struct TodayView: View {
         }
         .onChange(of: state.selectedTab) { _, tab in
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
-                let cacheAvailable = model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+                let cacheAvailable = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
+                                                                        allowLocalSchedules: mayShowLocalSchedules)
+                    ?? model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
                 state.tabSwitchDiagnostics.recordPageReady(for: .today,
                                                            cacheState: cacheAvailable ? .hit : .miss)
             }
@@ -294,7 +301,7 @@ struct TodayView: View {
             }
         } label: {
             Group {
-                if let avatarData, let image = UIImage(data: avatarData) {
+                if let avatarImage {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Text(displayName == "航的助手" ? "航" : String(displayName.suffix(1)))
@@ -330,7 +337,8 @@ struct TodayView: View {
         if let marker = pendingCourseInvalidation {
             if state.completedCourseRefresh == marker {
                 model.load(allowPrivateCache: state.canAccessPrivateData,
-                           allowLocalSchedules: mayShowLocalSchedules)
+                           allowLocalSchedules: mayShowLocalSchedules,
+                           forceDiskRead: true)
                 if model.snapshot != nil { appliedCourseInvalidationSequence = marker.sequence }
                 return
             }
@@ -365,6 +373,15 @@ struct TodayView: View {
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: model.now)
         return hour < 10 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好"
+    }
+
+    private func reloadAvatarImageIfNeeded() {
+        let data = avatarData
+        guard avatarSourceData != data else { return }
+        avatarSourceData = data
+        // Avatar bytes are decoded only when the profile changes, never during
+        // repeated SwiftUI body evaluations while the tab bar is animating.
+        avatarImage = data.flatMap(UIImage.init(data:))
     }
 
     private var dateLabel: String {

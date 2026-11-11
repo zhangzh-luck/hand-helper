@@ -6,6 +6,7 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var now: Date
     @Published private(set) var errorMessage: String?
     @Published private(set) var wallpaperData: Data?
+    @Published private(set) var wallpaperImage: UIImage?
     @Published private(set) var isLoading = false
     @Published private(set) var localSchedules: [CustomSchedule] = []
 
@@ -13,6 +14,8 @@ final class TodayViewModel: ObservableObject {
     private let wallpaperStore: WallpaperStore
     private let clock: any TodayClock
     private var refreshGeneration = 0
+    private var hasReadPrivateCache = false
+    private var hasReadLocalSchedules = false
 
     init(repository: any CourseRepository, wallpaperStore: WallpaperStore, clock: any TodayClock = SystemTodayClock()) {
         self.repository = repository
@@ -57,39 +60,98 @@ final class TodayViewModel: ObservableObject {
     var hasCourseData: Bool { snapshot?.lastRefreshDate != nil || snapshot?.manualRules.isEmpty == false }
     var canEditSchedules: Bool { repository.canEditSchedules }
 
+    private func setSnapshot(_ value: CourseSnapshot?) {
+        guard snapshot != value else { return }
+        snapshot = value
+    }
+
+    private func setErrorMessage(_ value: String?) {
+        guard errorMessage != value else { return }
+        errorMessage = value
+    }
+
+    private func setLocalSchedules(_ value: [CustomSchedule]) {
+        guard localSchedules != value else { return }
+        localSchedules = value
+    }
+
+    private func setWallpaperData(_ value: Data?) {
+        guard wallpaperData != value else { return }
+        wallpaperData = value
+        // Decode once when the stored wallpaper changes. SwiftUI body evaluation
+        // can then reuse this image during tab selection and layout passes.
+        wallpaperImage = value.flatMap(UIImage.init(data:))
+    }
+
     private func reloadSchedules() {
-        localSchedules = []
-        guard repository.canEditSchedules else { return }
-        do { localSchedules = try repository.allLocalSchedules() }
-        catch { errorMessage = "本机安排无法读取：\(error.localizedDescription)" }
+        guard repository.canEditSchedules else {
+            hasReadLocalSchedules = false
+            setLocalSchedules([])
+            return
+        }
+        do {
+            setLocalSchedules(try repository.allLocalSchedules())
+            hasReadLocalSchedules = true
+        } catch {
+            hasReadLocalSchedules = false
+            setErrorMessage("本机安排无法读取：\(error.localizedDescription)")
+        }
     }
 
     @discardableResult
-    func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true) -> Bool {
-        errorMessage = nil
-        if allowLocalSchedules { reloadSchedules() } else { localSchedules = [] }
+    func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true,
+              forceDiskRead: Bool = false) -> Bool {
+        if !forceDiskRead,
+           let cacheAvailable = restoreInMemoryIfAvailable(allowPrivateCache: allowPrivateCache,
+                                                            allowLocalSchedules: allowLocalSchedules) {
+            return cacheAvailable
+        }
+        setErrorMessage(nil)
+        if allowLocalSchedules {
+            reloadSchedules()
+        } else {
+            hasReadLocalSchedules = false
+            setLocalSchedules([])
+        }
         guard allowPrivateCache else {
-            snapshot = nil
-            wallpaperData = nil
+            hasReadPrivateCache = false
+            hasReadLocalSchedules = false
+            setSnapshot(nil)
+            setWallpaperData(nil)
             return false
         }
         do {
-            snapshot = try repository.cached()
-            wallpaperData = try? wallpaperStore.load()
-            if errorMessage == nil { errorMessage = snapshot == nil ? "课程数据暂不可用" : nil }
+            setSnapshot(try repository.cached())
+            hasReadPrivateCache = true
+            setWallpaperData(try? wallpaperStore.load())
+            if errorMessage == nil { setErrorMessage(snapshot == nil ? "课程数据暂不可用" : nil) }
             return snapshot != nil
         } catch {
-            errorMessage = "本机数据无法读取：\(error.localizedDescription)"
+            hasReadPrivateCache = false
+            setErrorMessage("本机数据无法读取：\(error.localizedDescription)")
             return false
         }
+    }
+
+    /// Returns nil only when a disk read is still required. This is intentionally
+    /// invalidated by authentication and explicit local-data changes, rather than
+    /// acting as a permanent `hasLoaded` flag.
+    @discardableResult
+    func restoreInMemoryIfAvailable(allowPrivateCache: Bool, allowLocalSchedules: Bool) -> Bool? {
+        guard allowPrivateCache, hasReadPrivateCache,
+              (!allowLocalSchedules || hasReadLocalSchedules) else { return nil }
+        return snapshot != nil
     }
 
     func authenticationDidChange(allowPrivateCache: Bool, allowLocalSchedules: Bool = true) {
         refreshGeneration += 1
         isLoading = false
-        snapshot = nil
-        wallpaperData = nil
-        load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules)
+        hasReadPrivateCache = false
+        hasReadLocalSchedules = false
+        setSnapshot(nil)
+        setWallpaperData(nil)
+        _ = load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules,
+                 forceDiskRead: true)
     }
 
     @discardableResult
@@ -117,11 +179,12 @@ final class TodayViewModel: ObservableObject {
             }
             guard generation == refreshGeneration, repository.sessionCookie == requestCookie,
                   isCurrent() else { return (false, false) }
-            snapshot = fresh
+            setSnapshot(fresh)
+            hasReadPrivateCache = true
             reloadSchedules()
-            now = clock.now
-            wallpaperData = try? wallpaperStore.load()
-            errorMessage = nil
+            let currentNow = clock.now
+            if now != currentNow { now = currentNow }
+            setErrorMessage(nil)
             return (false, true)
         } catch {
             guard generation == refreshGeneration, isCurrent() else { return (false, false) }
@@ -130,18 +193,20 @@ final class TodayViewModel: ObservableObject {
             }
             reloadSchedules()
             if let apiError = error as? APIError, case .unauthorized = apiError {
-                snapshot = nil
-                wallpaperData = nil
-                errorMessage = apiError.localizedDescription
+                hasReadPrivateCache = false
+                setSnapshot(nil)
+                setWallpaperData(nil)
+                setErrorMessage(apiError.localizedDescription)
                 return (true, false)
             }
-            errorMessage = error.localizedDescription
+            setErrorMessage(error.localizedDescription)
             return (false, false)
         }
     }
     func tick(allowLocalSchedules: Bool = true) -> Bool {
         let previous = CourseScheduleCalculator.dateKey(now)
-        now = clock.now
+        let currentNow = clock.now
+        if now != currentNow { now = currentNow }
         let changed = previous != CourseScheduleCalculator.dateKey(now)
         if changed && allowLocalSchedules { reloadSchedules() }
         return changed
@@ -171,7 +236,7 @@ final class TodayViewModel: ObservableObject {
     }
 
     func reloadWallpaper() throws {
-        wallpaperData = try wallpaperStore.load()
+        setWallpaperData(try wallpaperStore.load())
     }
 }
 
