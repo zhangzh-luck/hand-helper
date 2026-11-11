@@ -16,7 +16,6 @@ targets:
     platform: iOS
     sources:
       - path: HandHelperNative
-      - path: Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.native.dev
@@ -75,7 +74,6 @@ targets:
     platform: iOS
     sources:
       - path: TabLab
-      - path: Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.tablab.dev
