@@ -117,9 +117,9 @@ struct AnalysisView: View {
                 }
             }
             .sheet(item: $reportRoute) { route in
-                GradeAIReportView(analysis: route.analysis) {
+                GradeAIReportView(analysis: route.analysis, origin: route.origin) {
                     reportRoute = nil
-                    model.generateAnalysis(force: true) { showReport($0) }
+                    model.generateAnalysis(force: true) { showReport($0, origin: .freshGeneration) }
                 }
             }
         }
@@ -156,10 +156,17 @@ struct AnalysisView: View {
                                termID: model.selectedTermID, grade: grade)
     }
 
-    private func showReport(_ analysis: GradeAIAnalysis) {
+    private var currentAnalysisOrigin: AnalysisReportRoute.Origin {
+        model.analysisJob?.cached == true ? .snapshotCache : .freshGeneration
+    }
+
+    private func showReport(
+        _ analysis: GradeAIAnalysis,
+        origin: AnalysisReportRoute.Origin
+    ) {
         guard !gradeDetail.isPresenting, deleteTermID == nil,
               state.selectedTab == .analysis, state.canAccessPrivateData else { return }
-        reportRoute = AnalysisReportRoute(analysis: analysis)
+        reportRoute = AnalysisReportRoute(analysis: analysis, origin: origin)
     }
 
     private func confirmGradeDeletion() {
@@ -294,9 +301,9 @@ struct AnalysisView: View {
                 } else {
                     Button {
                         if let result = model.currentAnalysis {
-                            showReport(result)
+                            showReport(result, origin: currentAnalysisOrigin)
                         } else {
-                            model.generateAnalysis { showReport($0) }
+                            model.generateAnalysis { showReport($0, origin: currentAnalysisOrigin) }
                         }
                     } label: {
                         HStack {
@@ -328,7 +335,7 @@ struct AnalysisView: View {
                     ForEach(model.selectedData?.history ?? []) { result in
                         Divider()
                         Button {
-                            showReport(result)
+                            showReport(result, origin: .history)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(result.model).font(.body.weight(.medium))

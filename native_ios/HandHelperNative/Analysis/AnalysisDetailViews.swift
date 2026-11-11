@@ -103,43 +103,233 @@ struct GradeDetailView: View {
 }
 
 struct AnalysisReportRoute: Identifiable {
+    enum Origin: Equatable {
+        case freshGeneration
+        case snapshotCache
+        case history
+
+        var displayName: String {
+            switch self {
+            case .freshGeneration: "实时生成"
+            case .snapshotCache: "成绩快照缓存"
+            case .history: "历史记录"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .freshGeneration: "sparkles"
+            case .snapshotCache: "tray.full"
+            case .history: "clock.arrow.circlepath"
+            }
+        }
+    }
+
     let id = UUID()
     let analysis: GradeAIAnalysis
+    let origin: Origin
+}
+
+struct AnalysisReportBlock: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case heading
+        case paragraph
+        case bullet
+        case spacer
+    }
+
+    let id: Int
+    let kind: Kind
+    let text: String
+}
+
+struct AnalysisReportRenderedBlock: Identifiable {
+    let id: Int
+    let kind: AnalysisReportBlock.Kind
+    let text: AttributedString
+}
+
+enum AnalysisReportPresentation {
+    static func blocks(from content: String) -> [AnalysisReportBlock] {
+        var blocks: [AnalysisReportBlock] = []
+        var paragraphLines: [String] = []
+
+        func append(_ kind: AnalysisReportBlock.Kind, _ text: String = "") {
+            blocks.append(AnalysisReportBlock(id: blocks.count, kind: kind, text: text))
+        }
+
+        func finishParagraph() {
+            guard !paragraphLines.isEmpty else { return }
+            append(.paragraph, paragraphLines.joined(separator: "\n"))
+            paragraphLines.removeAll(keepingCapacity: true)
+        }
+
+        for rawLine in content.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                finishParagraph()
+                if !blocks.isEmpty, blocks.last?.kind != .spacer { append(.spacer) }
+            } else if trimmed.hasPrefix("## ") {
+                finishParagraph()
+                append(.heading, String(trimmed.dropFirst(3)))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                finishParagraph()
+                append(.bullet, String(trimmed.dropFirst(2)))
+            } else {
+                paragraphLines.append(line)
+            }
+        }
+        finishParagraph()
+        if blocks.last?.kind == .spacer { blocks.removeLast() }
+        return blocks
+    }
+
+    static func attributedText(_ text: String) -> AttributedString {
+        attributedText(text) { value in
+            try AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        }
+    }
+
+    static func attributedText(
+        _ text: String,
+        parser: (String) throws -> AttributedString
+    ) -> AttributedString {
+        (try? parser(text)) ?? AttributedString(text)
+    }
+
+    static func renderedBlocks(from content: String) -> [AnalysisReportRenderedBlock] {
+        blocks(from: content).map { block in
+            AnalysisReportRenderedBlock(
+                id: block.id,
+                kind: block.kind,
+                text: block.kind == .spacer ? AttributedString("") : attributedText(block.text)
+            )
+        }
+    }
+
+    static func displayTime(_ rawValue: String) -> String {
+        let normalized = rawValue.replacingOccurrences(of: "T", with: " ")
+        guard let fractionalStart = normalized.firstIndex(of: ".") else { return normalized }
+        var fractionalEnd = normalized.index(after: fractionalStart)
+        while fractionalEnd < normalized.endIndex, normalized[fractionalEnd].isNumber {
+            fractionalEnd = normalized.index(after: fractionalEnd)
+        }
+        return String(normalized[..<fractionalStart]) + String(normalized[fractionalEnd...])
+    }
 }
 
 @MainActor
 struct GradeAIReportView: View {
     let analysis: GradeAIAnalysis
+    let origin: AnalysisReportRoute.Origin
     let onRegenerate: () -> Void
+    private let reportBlocks: [AnalysisReportRenderedBlock]
+    private let displayTime: String
+
+    init(
+        analysis: GradeAIAnalysis,
+        origin: AnalysisReportRoute.Origin,
+        onRegenerate: @escaping () -> Void
+    ) {
+        self.analysis = analysis
+        self.origin = origin
+        self.onRegenerate = onRegenerate
+        reportBlocks = AnalysisReportPresentation.renderedBlocks(from: analysis.content)
+        displayTime = AnalysisReportPresentation.displayTime(analysis.createdAt)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    LabeledContent("分析模型", value: analysis.model)
-                    LabeledContent("服务提供方", value: analysis.provider)
-                    LabeledContent("结果来源", value: analysis.cached == true ? "当前成绩快照的缓存" : "实时生成或历史记录")
-                    LabeledContent("生成时间", value: analysis.createdAt.replacingOccurrences(of: "T", with: " "))
-                    Button("重新生成") { onRegenerate() }
-                    Divider()
-                    ForEach(Array(analysis.content.split(separator: "\n", omittingEmptySubsequences: true).enumerated()), id: \.offset) { entry in
-                        let line = String(entry.element).trimmingCharacters(in: .whitespaces)
-                        if line.hasPrefix("## ") {
-                            Text(String(line.dropFirst(3))).font(.headline)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                            Label(String(line.dropFirst(2)), systemImage: "circle.fill")
-                                .labelStyle(.titleAndIcon).font(.body)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text(line).frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                VStack(alignment: .leading, spacing: 20) {
+                    metadataCard
+                    Button(action: onRegenerate) {
+                        Label("重新生成", systemImage: "arrow.clockwise")
                     }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityHint("基于当前成绩重新发起 AI 分析")
+                    Divider()
+                    reportContent
                 }
                 .padding(20)
             }
             .navigationTitle("分析结果")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var metadataCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("AI 成绩分析", systemImage: "sparkles")
+                .font(.headline)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 20) {
+                    metadataItem("模型", value: analysis.model)
+                    metadataItem("服务提供方", value: analysis.provider)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    metadataItem("模型", value: analysis.model)
+                    metadataItem("服务提供方", value: analysis.provider)
+                }
+            }
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Label(origin.displayName, systemImage: origin.systemImage)
+                    Spacer(minLength: 8)
+                    Text(displayTime).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(origin.displayName, systemImage: origin.systemImage)
+                    Label(displayTime, systemImage: "calendar")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.footnote)
+        }
+        .padding(16)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func metadataItem(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.footnote).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var reportContent: some View {
+        ForEach(reportBlocks) { block in
+            switch block.kind {
+            case .heading:
+                Text(block.text)
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            case .paragraph:
+                Text(block.text)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .bullet:
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 5))
+                        .foregroundStyle(.secondary)
+                    Text(block.text)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            case .spacer:
+                Color.clear.frame(height: 4).accessibilityHidden(true)
+            }
         }
     }
 }
