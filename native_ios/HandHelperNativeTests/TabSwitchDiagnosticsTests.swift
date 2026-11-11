@@ -41,6 +41,8 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         diagnostics.recordStateApplied(for: .analysis)
         uptime += 0.010
         diagnostics.recordPageReady(for: .analysis, cacheState: .hit)
+        uptime += 0.003
+        diagnostics.recordFirstFrameForTesting()
         diagnostics.recordFrameIntervalForTesting(0.008)
         diagnostics.recordFrameIntervalForTesting(0.024)
         uptime += 0.680
@@ -55,10 +57,33 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         XCTAssertEqual(report.cacheState, .hit)
         XCTAssertEqual(report.frameCount, 2)
         XCTAssertEqual(report.maxFrameIntervalMilliseconds, 24)
-        XCTAssertEqual(report.p95FrameIntervalMilliseconds, 24)
+        XCTAssertEqual(report.tapToFirstFrameCallbackMilliseconds, 23)
+        XCTAssertNil(report.p95FrameIntervalMilliseconds)
         XCTAssertEqual(report.intervalsOverTwentyMilliseconds, 1)
         XCTAssertFalse(diagnostics.exportText.localizedCaseInsensitiveContains("cookie"))
         XCTAssertFalse(diagnostics.exportText.localizedCaseInsensitiveContains("account"))
+    }
+
+    func testReplacementSwitchMarksPreviousSampleInterrupted() {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .timetable, screen: nil)
+        diagnostics.beginSwitch(from: .timetable, to: .analysis, screen: nil)
+
+        XCTAssertEqual(diagnostics.reports.count, 1)
+        XCTAssertTrue(diagnostics.reports[0].interrupted)
+        XCTAssertEqual(diagnostics.reports[0].destination, .timetable)
+    }
+
+    func testP95RequiresTenIntervals() {
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .analysis, screen: nil)
+        for _ in 0..<10 { diagnostics.recordFrameIntervalForTesting(0.008) }
+        diagnostics.recordFrameIntervalForTesting(0.024)
+        diagnostics.finishForTesting()
+
+        XCTAssertEqual(diagnostics.reports.first?.p95FrameIntervalMilliseconds, 24)
     }
 
     func testDisablingFinishesActiveSampleAndStopsFutureRecording() {

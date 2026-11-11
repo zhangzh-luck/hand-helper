@@ -22,6 +22,17 @@ enum AppTab: Int, CaseIterable, Hashable {
     }
 }
 
+extension AppTab {
+    var diagnosticTab: TabSwitchDiagnosticTab {
+        switch self {
+        case .today: .today
+        case .timetable: .timetable
+        case .analysis: .analysis
+        case .settings: .settings
+        }
+    }
+}
+
 enum AppearanceMode: String, CaseIterable, Hashable {
     case system, light, dark
 

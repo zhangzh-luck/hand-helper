@@ -23,7 +23,7 @@ struct TabSwitchDiagnosticsView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("默认关闭。开启后仅在你切换底部 Tab 时采样约 0.7 秒；不会记录账号、课程、成绩、网络地址或登录凭据。")
+                Text("默认关闭。开启后仅在你切换底部 Tab 时采样约 0.7 秒；连续切换会标记前一次采样为中断。不会记录账号、课程、成绩、网络地址或登录凭据。")
             }
 
             Section("最近记录") {
@@ -68,7 +68,9 @@ struct TabSwitchDiagnosticsView: View {
     }
 
     private func frameSummary(for report: TabSwitchDiagnosticReport) -> String {
-        let p95 = report.p95FrameIntervalMilliseconds.map { "\($0)ms" } ?? "—"
-        return "\(report.frameCount) 帧 · P95 \(p95) · 超过 20ms：\(report.intervalsOverTwentyMilliseconds)"
+        let firstFrame = report.tapToFirstFrameCallbackMilliseconds.map { "首帧 \($0)ms" } ?? "首帧未记录"
+        let p95 = report.p95FrameIntervalMilliseconds.map { "P95 \($0)ms" } ?? "P95 样本不足"
+        let interruption = report.interrupted ? " · 已中断" : ""
+        return "\(firstFrame) · \(report.frameCount) 帧 · \(p95) · 超过 20ms：\(report.intervalsOverTwentyMilliseconds)\(interruption)"
     }
 }

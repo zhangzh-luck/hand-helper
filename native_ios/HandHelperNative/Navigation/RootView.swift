@@ -301,7 +301,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             updateTabVisibility()
         }
         applyHomeTabImageIfNeeded(state: state)
-        state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab)
+        state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab.diagnosticTab)
     }
 
     private func applyHomeTabImageIfNeeded(state: AppState) {
@@ -319,14 +319,15 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         guard let destinationIndex = viewControllers?.firstIndex(where: { $0 === viewController }),
               let destination = AppTab(rawValue: destinationIndex),
               let source = AppTab(rawValue: selectedIndex) else { return true }
-        appState?.tabSwitchDiagnostics.beginSwitch(from: source, to: destination, screen: view.window?.screen)
+        appState?.tabSwitchDiagnostics.beginSwitch(from: source.diagnosticTab, to: destination.diagnosticTab,
+                                                   screen: view.window?.screen)
         return true
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         let tab = AppTab(rawValue: selectedIndex) ?? .today
         guard appState?.selectedTab != tab else { return }
-        appState?.tabSwitchDiagnostics.recordSelectionApplied(for: tab)
+        appState?.tabSwitchDiagnostics.recordSelectionApplied(for: tab.diagnosticTab)
         AppHaptics.trigger(.tabChanged)
         selectedTabDidChange?(tab)
     }

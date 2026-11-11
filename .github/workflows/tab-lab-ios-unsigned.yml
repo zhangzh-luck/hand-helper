@@ -1,0 +1,101 @@
+name: Hand Helper Tab Lab iOS (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native_ios/TabLab/**'
+      - 'native_ios/TabLabTests/**'
+      - 'native_ios/Shared/TabSwitchDiagnostics.swift'
+      - 'native_ios/project.yml'
+      - '.github/workflows/tab-lab-ios-unsigned.yml'
+  pull_request:
+    paths:
+      - 'native_ios/TabLab/**'
+      - 'native_ios/TabLabTests/**'
+      - 'native_ios/Shared/TabSwitchDiagnostics.swift'
+      - 'native_ios/project.yml'
+      - '.github/workflows/tab-lab-ios-unsigned.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test-tab-lab:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: native_ios
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Select and inspect Xcode
+        run: |
+          test -d /Applications/Xcode_26.1.1.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun simctl list devices available
+
+      - name: Install pinned XcodeGen
+        run: |
+          readonly XCODEGEN_VERSION='2.44.1'
+          readonly XCODEGEN_REVISION='21ac9944b0ab546a07422dbed86f33dd2ebd76f8'
+          readonly XCODEGEN_SOURCE='https://github.com/yonaskolb/XcodeGen.git'
+          rm -rf .tools/XcodeGen
+          git init --quiet .tools/XcodeGen
+          git -C .tools/XcodeGen remote add origin "$XCODEGEN_SOURCE"
+          git -C .tools/XcodeGen fetch --quiet --depth 1 origin "refs/tags/$XCODEGEN_VERSION:refs/tags/$XCODEGEN_VERSION"
+          git -C .tools/XcodeGen checkout --quiet --detach "refs/tags/$XCODEGEN_VERSION"
+          test "$(git -C .tools/XcodeGen rev-parse HEAD)" = "$XCODEGEN_REVISION"
+          swift build --package-path .tools/XcodeGen --configuration release
+          binary="$PWD/.tools/XcodeGen/.build/release/xcodegen"
+          test -x "$binary"
+          "$binary" --version | grep -F "$XCODEGEN_VERSION"
+          echo "XCODEGEN=$binary" >> "$GITHUB_ENV"
+
+      - name: Generate Xcode project
+        run: |
+          "$XCODEGEN" generate --spec project.yml
+          xcodebuild -list -project HandHelperNative.xcodeproj
+
+      - name: Verify production diagnostics compile
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Build and test Tab Lab simulator
+        run: |
+          xcodebuild test -project HandHelperNative.xcodeproj -scheme HandHelperTabLab \
+            -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Build Tab Lab Device Release
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperTabLab \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+
+      - name: Package and verify Tab Lab unsigned IPA
+        run: |
+          app=build/DerivedData/Build/Products/Release-iphoneos/HandHelperTabLab.app
+          test -x "$app/HandHelperTabLab"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = 'com.zhangzh.hangassistant.tablab.dev'
+          mkdir -p build/ipa/Payload
+          /usr/bin/ditto "$app" build/ipa/Payload/HandHelperTabLab.app
+          (cd build/ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperTabLab-unsigned.ipa)
+          /usr/bin/unzip -tqq build/HandHelperTabLab-unsigned.ipa
+
+      - name: Upload Tab Lab unsigned IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: HandHelperTabLab-unsigned-ipa
+          path: native_ios/build/HandHelperTabLab-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
