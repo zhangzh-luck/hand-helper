@@ -147,6 +147,7 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.selectedTab) { _, tab in
+            state.tabSwitchDiagnostics.record(.todaySelectedTabChangeBegin, for: tab.diagnosticTab)
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
                 let cacheAvailable = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
                                                                         allowLocalSchedules: mayShowLocalSchedules)
@@ -157,6 +158,7 @@ struct TodayView: View {
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }
             }
+            state.tabSwitchDiagnostics.record(.todaySelectedTabChangeEnd, for: tab.diagnosticTab)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

@@ -91,9 +91,12 @@ final class GradeDetailCoordinator: ObservableObject {
         }
     }
 
-    func clear() {
+    @discardableResult
+    func clear() -> Bool {
+        guard route != nil || phase != .idle else { return false }
         route = nil
         phase = .idle
+        return true
     }
 }
 

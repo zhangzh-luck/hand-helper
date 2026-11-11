@@ -142,10 +142,14 @@ final class AnalysisViewModel: ObservableObject {
     }
 
     /// Hiding the view only stops local polling. The durable server task stays active.
-    func visibilityDidChange(_ isVisible: Bool) {
+    @discardableResult
+    func visibilityDidChange(_ isVisible: Bool) -> Bool {
         visible = isVisible
-        if !isVisible { stopPolling(); return }
-        loadIfNeeded()
+        if !isVisible {
+            stopPolling()
+            return false
+        }
+        return loadIfNeeded()
     }
 
     func cancelAnalysis() {

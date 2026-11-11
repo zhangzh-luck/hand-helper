@@ -84,15 +84,16 @@ struct AnalysisView: View {
             }
             .task { loadWallpaper(); model.loadIfNeeded() }
             .onChange(of: state.selectedTab) { _, tab in
+                state.tabSwitchDiagnostics.record(.analysisSelectedTabChangeBegin, for: tab.diagnosticTab)
                 if tab == .analysis {
-                    model.visibilityDidChange(true)
-                    let cacheAvailable = model.loadIfNeeded()
+                    let cacheAvailable = model.visibilityDidChange(true)
                     state.tabSwitchDiagnostics.recordPageReady(for: .analysis,
                                                                cacheState: cacheAvailable ? .hit : .miss)
                 } else {
                     model.visibilityDidChange(false)
                     gradeDetail.clear()
                 }
+                state.tabSwitchDiagnostics.record(.analysisSelectedTabChangeEnd, for: tab.diagnosticTab)
             }
             .onChange(of: state.authenticationRevision) { _, _ in
                 gradeDetail.clear()

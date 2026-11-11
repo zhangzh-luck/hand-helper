@@ -199,6 +199,23 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
+    func testVisibilityRestoreReadsPersistedJobsOncePerAnalysisEntry() async throws {
+        let term = try XCTUnwrap(JSONDecoder().decode([TermInfo].self, from: Data(terms.utf8)).first)
+        let summary = try JSONDecoder().decode(GradeSummary.self, from: Data(summary.utf8))
+        let snapshot = AnalysisSnapshot(terms: [term], byTerm: [
+            term.id: AnalysisTermData(grades: [], summary: summary, history: [])
+        ], savedAt: Date())
+        let repository = AnalysisJobRepository(snapshot: snapshot, terminalStatus: .succeeded)
+        let state = await makeState(user: "alice", api: AnalysisAPIStub(responses: [:]))
+        state.selectedTab = .analysis
+        let model = AnalysisViewModel(state: state, repository: repository)
+
+        XCTAssertTrue(model.visibilityDidChange(true))
+        XCTAssertEqual(repository.persistedReads, 1,
+                       "The tab-entry path must restore durable jobs once, not once per wrapper call.")
+    }
+
+    @MainActor
     private func makeState(user: String, api: AnalysisAPIStub, cookie: String? = nil) async -> AppState {
         let preferences = UserDefaults(suiteName: UUID().uuidString)!
         let state = AppState(api: api, sessionStore: AnalysisSessionStub(cookie: cookie ?? "session=\(user)"),
@@ -267,6 +284,7 @@ private final class AnalysisJobRepository: AnalysisRepositoryProtocol {
     var saved: [PersistedGradeAIJob] = []
     var createCalls = 0
     var pollCalls = 0
+    var persistedReads = 0
 
     init(snapshot: AnalysisSnapshot, terminalStatus: GradeAIJob.Status) {
         self.snapshot = snapshot
@@ -284,7 +302,10 @@ private final class AnalysisJobRepository: AnalysisRepositoryProtocol {
         return job(status: terminalStatus)
     }
     func cancelAnalysisJob(id: String) async throws -> GradeAIJob { job(status: .cancelled) }
-    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob] { saved }
+    func persistedJobs(owner: String, revision: Int) throws -> [PersistedGradeAIJob] {
+        persistedReads += 1
+        return saved
+    }
     func savePersistedJob(_ job: PersistedGradeAIJob, owner: String, revision: Int) throws {
         saved.removeAll { $0.id == job.id || $0.idempotencyKey == job.idempotencyKey }
         saved.append(job)

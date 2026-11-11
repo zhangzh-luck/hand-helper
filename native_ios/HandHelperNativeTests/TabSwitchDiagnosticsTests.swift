@@ -64,6 +64,26 @@ final class TabSwitchDiagnosticsTests: XCTestCase {
         XCTAssertFalse(diagnostics.exportText.localizedCaseInsensitiveContains("account"))
     }
 
+    func testTimelineUsesOneSwitchIdentifierAndMonotonicOffsets() throws {
+        var uptime: TimeInterval = 100
+        let diagnostics = TabSwitchDiagnostics(preferences: defaults, now: { uptime }, samplesFrames: false)
+        diagnostics.setEnabled(true)
+        diagnostics.beginSwitch(from: .today, to: .timetable, screen: nil)
+        uptime += 0.003
+        diagnostics.record(.didSelect, for: .timetable)
+        uptime += 0.004
+        diagnostics.record(.timetableTaskCreated, for: .timetable)
+        uptime += 0.006
+        diagnostics.record(.timetableTaskStarted, for: .timetable)
+        diagnostics.finishForTesting()
+
+        let report = try XCTUnwrap(diagnostics.reports.first)
+        XCTAssertEqual(report.events.map(\.stage), [.shouldSelect, .didSelect,
+                                                     .timetableTaskCreated, .timetableTaskStarted])
+        XCTAssertEqual(report.events.map(\.offsetMilliseconds), [0, 3, 7, 13])
+        XCTAssertTrue(report.exportLine.contains("switch_id="))
+    }
+
     func testReplacementSwitchMarksPreviousSampleInterrupted() {
         let diagnostics = TabSwitchDiagnostics(preferences: defaults, samplesFrames: false)
         diagnostics.setEnabled(true)

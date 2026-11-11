@@ -90,11 +90,15 @@ struct RootView: View {
             gradeDetail.clear()
             deleteConfirmation.clear()
         }
-        .onChange(of: state.selectedTab) { _, tab in
+        .onChange(of: state.selectedTab) { oldTab, tab in
+            state.tabSwitchDiagnostics.record(.rootSelectedTabChangeBegin, for: tab.diagnosticTab)
             if tab != .today { clearAvatarPreview() }
             if tab != .timetable { timetableDetail.clear() }
-            if tab != .analysis { gradeDetail.clear() }
+            // AnalysisView owns the active-analysis exit cleanup. Avoid publishing the
+            // same clear twice during one tab transition.
+            if oldTab != .analysis, tab != .analysis { gradeDetail.clear() }
             deleteConfirmation.clear()
+            state.tabSwitchDiagnostics.record(.rootSelectedTabChangeEnd, for: tab.diagnosticTab)
         }
         .onChange(of: state.entry) { _, entry in
             syncLiveActivities(reason: "entry_changed")
@@ -197,12 +201,19 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
                                              timetableDetail: timetableDetail, gradeDetail: gradeDetail,
                                              deleteConfirmation: deleteConfirmation)
-        controller.selectedTabDidChange = { [weak state] tab in state?.selectedTab = tab }
+        controller.selectedTabDidChange = { [weak state] tab in
+            guard let state else { return }
+            state.tabSwitchDiagnostics.record(.selectedTabAssignmentBegin, for: tab.diagnosticTab)
+            state.selectedTab = tab
+            state.tabSwitchDiagnostics.record(.selectedTabAssignmentEnd, for: tab.diagnosticTab)
+        }
         return controller
     }
 
     func updateUIViewController(_ controller: NativeTabController, context: Context) {
+        state.tabSwitchDiagnostics.record(.nativeContainerUpdateBegin, for: state.selectedTab.diagnosticTab)
         controller.apply(state: state)
+        state.tabSwitchDiagnostics.record(.nativeContainerUpdateEnd, for: state.selectedTab.diagnosticTab)
     }
 }
 
@@ -281,6 +292,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     func apply(state: AppState) {
+        state.tabSwitchDiagnostics.record(.nativeApplyBegin, for: state.selectedTab.diagnosticTab)
         let style: UIUserInterfaceStyle
         switch state.appearance {
         case .system: style = .unspecified
@@ -302,6 +314,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         }
         applyHomeTabImageIfNeeded(state: state)
         state.tabSwitchDiagnostics.recordStateApplied(for: state.selectedTab.diagnosticTab)
+        state.tabSwitchDiagnostics.record(.nativeApplyEnd, for: state.selectedTab.diagnosticTab)
     }
 
     private func applyHomeTabImageIfNeeded(state: AppState) {

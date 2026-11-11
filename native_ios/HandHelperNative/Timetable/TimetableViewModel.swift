@@ -187,7 +187,10 @@ final class TimetableViewModel: ObservableObject {
         reproject()
     }
 
-    func updateIfNeeded(onCacheRestored: ((Bool) -> Void)? = nil) async {
+    func updateIfNeeded(onCacheRestored: ((Bool) -> Void)? = nil,
+                        diagnostics: TabSwitchDiagnostics? = nil) async {
+        diagnostics?.record(.timetableUpdateBegin, for: .timetable)
+        defer { diagnostics?.record(.timetableUpdateEnd, for: .timetable) }
         guard state.selectedTab == .timetable, state.canAccessPrivateData else { return }
         let marker = state.pendingCourseInvalidation(after: appliedSequence)
         let cacheAvailable: Bool

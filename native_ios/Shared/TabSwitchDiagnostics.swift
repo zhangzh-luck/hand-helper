@@ -25,6 +25,42 @@ enum TabSwitchDiagnosticTab: Int, CaseIterable, Equatable {
     }
 }
 
+/// Anonymous milestones recorded only for an opted-in native tab transition.
+enum TabSwitchDiagnosticStage: String, Equatable {
+    case shouldSelect
+    case didSelect
+    case selectedTabAssignmentBegin
+    case selectedTabAssignmentEnd
+    case nativeContainerUpdateBegin
+    case nativeContainerUpdateEnd
+    case nativeApplyBegin
+    case nativeApplyEnd
+    case rootSelectedTabChangeBegin
+    case rootSelectedTabChangeEnd
+    case todaySelectedTabChangeBegin
+    case todaySelectedTabChangeEnd
+    case timetableSelectedTabChangeBegin
+    case timetableSelectedTabChangeEnd
+    case analysisSelectedTabChangeBegin
+    case analysisSelectedTabChangeEnd
+    case settingsSelectedTabChangeBegin
+    case settingsSelectedTabChangeEnd
+    case timetableTaskCreated
+    case timetableTaskStarted
+    case timetableUpdateBegin
+    case timetableUpdateEnd
+    case timetablePagerUpdateBegin
+    case timetablePagerUpdateEnd
+    case timetablePagerIdentityChanged
+    case timetablePagerIdentityUnchanged
+    case timetablePagerPageCreated
+}
+
+struct TabSwitchDiagnosticEvent: Equatable {
+    let stage: TabSwitchDiagnosticStage
+    let offsetMilliseconds: Int
+}
+
 /// A privacy-preserving, opt-in measurement of one native tab transition.
 struct TabSwitchDiagnosticReport: Identifiable, Equatable {
     let id: UUID
@@ -43,6 +79,7 @@ struct TabSwitchDiagnosticReport: Identifiable, Equatable {
     let intervalsOverTwentyMilliseconds: Int
     let displayMaximumFramesPerSecond: Int
     let interrupted: Bool
+    let events: [TabSwitchDiagnosticEvent]
 
     enum CacheState: String, Equatable {
         case hit = "命中"
@@ -67,7 +104,8 @@ struct TabSwitchDiagnosticReport: Identifiable, Equatable {
         let cache = cacheState?.rawValue ?? "—"
         let maximum = maxFrameIntervalMilliseconds.map(String.init) ?? "—"
         let p95 = p95FrameIntervalMilliseconds.map(String.init) ?? "—"
-        return "context=\(context) \(source.title)->\(destination.title) selection_ms=\(selection) state_ms=\(state) page_ms=\(ready) first_frame_ms=\(firstFrame) cache=\(cache) sample_ms=\(sampleDurationMilliseconds) frames=\(frameCount) max_frame_ms=\(maximum) p95_frame_ms=\(p95) over_20ms=\(intervalsOverTwentyMilliseconds) interrupted=\(interrupted) display_max_fps=\(displayMaximumFramesPerSecond)"
+        let eventText = events.map { "\($0.stage.rawValue):\($0.offsetMilliseconds)" }.joined(separator: ",")
+        return "switch_id=\(id.uuidString.prefix(8)) context=\(context) \(source.title)->\(destination.title) selection_ms=\(selection) state_ms=\(state) page_ms=\(ready) first_frame_ms=\(firstFrame) cache=\(cache) sample_ms=\(sampleDurationMilliseconds) frames=\(frameCount) max_frame_ms=\(maximum) p95_frame_ms=\(p95) over_20ms=\(intervalsOverTwentyMilliseconds) interrupted=\(interrupted) display_max_fps=\(displayMaximumFramesPerSecond) events=\(eventText)"
     }
 }
 
@@ -76,6 +114,7 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
     private static let sampleDuration: TimeInterval = 0.7
     private static let maximumHistoryCount = 20
     private static let minimumFramesForP95 = 10
+    private static let maximumEventsPerSample = 48
 
     @Published private(set) var isEnabled: Bool
     @Published private(set) var isSampling = false
@@ -116,8 +155,10 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
                      screen: UIScreen?) {
         guard isEnabled, source != destination else { return }
         finishActiveSample(interrupted: active != nil)
-        active = ActiveSample(id: UUID(), context: reportContext, source: source, destination: destination, startedAt: now(),
+        let startedAt = now()
+        active = ActiveSample(id: UUID(), context: reportContext, source: source, destination: destination, startedAt: startedAt,
                               displayMaximumFramesPerSecond: screen?.maximumFramesPerSecond ?? 0)
+        record(.shouldSelect, for: destination)
         isSampling = true
         guard samplesFrames else { return }
 
@@ -136,6 +177,7 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
         updateActive(for: tab) { sample in
             if sample.selectionAppliedAt == nil { sample.selectionAppliedAt = now() }
         }
+        record(.didSelect, for: tab)
     }
 
     func recordStateApplied(for tab: TabSwitchDiagnosticTab) {
@@ -151,6 +193,15 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
                 sample.pageReadyAt = now()
                 sample.cacheState = cacheState
             }
+        }
+    }
+
+    /// Stores only an enum milestone and its offset from `shouldSelect`.
+    func record(_ stage: TabSwitchDiagnosticStage, for tab: TabSwitchDiagnosticTab) {
+        updateActive(for: tab) { sample in
+            guard sample.events.count < Self.maximumEventsPerSample else { return }
+            sample.events.append(TabSwitchDiagnosticEvent(stage: stage,
+                offsetMilliseconds: milliseconds(from: sample.startedAt, to: now()) ?? 0))
         }
     }
 
@@ -225,7 +276,8 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
             p95FrameIntervalMilliseconds: p95Index.map { milliseconds(intervals[$0]) },
             intervalsOverTwentyMilliseconds: intervals.filter { $0 > 0.020 }.count,
             displayMaximumFramesPerSecond: active.displayMaximumFramesPerSecond,
-            interrupted: interrupted
+            interrupted: interrupted,
+            events: active.events
         )
         reports.insert(report, at: 0)
         if reports.count > Self.maximumHistoryCount { reports.removeLast(reports.count - Self.maximumHistoryCount) }
@@ -254,5 +306,6 @@ final class TabSwitchDiagnostics: NSObject, ObservableObject {
         var cacheState: TabSwitchDiagnosticReport.CacheState?
         var lastFrameTimestamp: TimeInterval?
         var frameIntervals: [TimeInterval] = []
+        var events: [TabSwitchDiagnosticEvent] = []
     }
 }

@@ -5,6 +5,7 @@ import UIKit
 struct SettingsView: View {
     @ObservedObject var state: AppState
     @Environment(\.settingsNavigator) private var navigator
+    @StateObject private var avatarImageCache = SettingsAvatarImageCache()
 
     var body: some View {
         List {
@@ -88,15 +89,19 @@ struct SettingsView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
         .onChange(of: state.selectedTab) { _, tab in
+            state.tabSwitchDiagnostics.record(.settingsSelectedTabChangeBegin, for: tab.diagnosticTab)
             if tab == .settings {
                 state.tabSwitchDiagnostics.recordPageReady(for: .settings, cacheState: .retained)
             }
+            state.tabSwitchDiagnostics.record(.settingsSelectedTabChangeEnd, for: tab.diagnosticTab)
         }
+        .task { avatarImageCache.update(data: state.currentProfile.avatarData) }
+        .onChange(of: state.currentProfile.avatarData) { _, data in avatarImageCache.update(data: data) }
     }
 
     private var profileAvatar: some View {
         Group {
-            if let data = state.currentProfile.avatarData, let image = UIImage(data: data) {
+            if let image = avatarImageCache.image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Text(state.currentProfile.resolvedDisplayName == "航的助手"
@@ -109,6 +114,19 @@ struct SettingsView: View {
         .background(Color.accentColor.opacity(0.12))
         .clipShape(Circle())
         .accessibilityHidden(true)
+    }
+}
+
+/// Decodes only when avatar bytes change; rendering the Settings row never decodes image data.
+@MainActor
+final class SettingsAvatarImageCache: ObservableObject {
+    @Published private(set) var image: UIImage?
+    private var sourceData: Data?
+
+    func update(data: Data?) {
+        guard data != sourceData else { return }
+        sourceData = data
+        image = data.flatMap { UIImage(data: $0) }
     }
 }
 

@@ -54,6 +54,17 @@ final class GradeDetailPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testClearingAnIdleCoordinatorDoesNotPublishAnotherStateChange() throws {
+        let detail = GradeDetailCoordinator()
+        XCTAssertFalse(detail.clear())
+        XCTAssertTrue(detail.open(grade: grade(), context: context()))
+        XCTAssertTrue(detail.clear())
+        XCTAssertFalse(detail.clear())
+        XCTAssertNil(detail.route)
+        XCTAssertEqual(detail.phase, .idle)
+    }
+
+    @MainActor
     func testAuthenticationTermAndRefreshedGradeInvalidateRoute() throws {
         for (owner, revision, termID, record) in [
             ("user:bob", 3, 8, grade()),
