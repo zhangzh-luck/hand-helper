@@ -301,7 +301,7 @@ struct TodayView: View {
             }
         } label: {
             Group {
-                if let avatarImage {
+                if let image = avatarImage {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Text(displayName == "航的助手" ? "航" : String(displayName.suffix(1)))
