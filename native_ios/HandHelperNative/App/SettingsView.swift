@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-                Section {
+                Section("账户") {
                     SettingsNavigationButton {
                         navigator?.push(title: "账户设置") {
                             ProfileView(state: state, revision: state.authenticationRevision,
@@ -35,7 +35,7 @@ struct SettingsView: View {
                     Text("头像和显示名称仅保存在此设备。")
                 }
 
-                Section {
+                Section("偏好设置") {
                     SettingsNavigationButton {
                         navigator?.push(title: "时间设置") {
                             AcademicTimeView(state: state)
@@ -43,15 +43,6 @@ struct SettingsView: View {
                     } label: {
                         SettingsNavigationRow(title: "时间设置", symbol: "clock",
                                               color: Color(uiColor: .systemBlue))
-                    }
-                    .listRowInsets(SettingsNavigationRow.rowInsets)
-                    SettingsNavigationButton {
-                        navigator?.push(title: "数据与导入") {
-                            DataImportView(state: state)
-                        }
-                    } label: {
-                        SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
-                                              color: Color(uiColor: .systemTeal))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
                     SettingsNavigationButton {
@@ -63,6 +54,18 @@ struct SettingsView: View {
                                               color: Color(uiColor: .systemPurple))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
+                }
+
+                Section("数据与助手") {
+                    SettingsNavigationButton {
+                        navigator?.push(title: "数据与导入") {
+                            DataImportView(state: state)
+                        }
+                    } label: {
+                        SettingsNavigationRow(title: "数据与导入", symbol: "square.and.arrow.down",
+                                              color: Color(uiColor: .systemTeal))
+                    }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                     SettingsNavigationButton {
                         navigator?.push(title: "AI 模型配置") {
                             AIModelSettingsView(state: state)
@@ -72,9 +75,6 @@ struct SettingsView: View {
                                               color: Color(uiColor: .systemIndigo))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
-                }
-
-                Section("关于") {
                     SettingsNavigationButton {
                         navigator?.push(title: "关于航的助手") {
                             AboutHandHelperView()
