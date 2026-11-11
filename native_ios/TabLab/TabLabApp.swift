@@ -288,7 +288,8 @@ private final class TabLabPageController: UIViewController {
     func apply(tab: TabSwitchDiagnosticTab) {
         self.diagnosticTab = tab
         titleLabel.text = tab.title
-        view.backgroundColor = [.systemBlue, .systemGreen, .systemOrange, .systemPurple][tab.rawValue].withAlphaComponent(0.16)
+        let colors: [UIColor] = [.systemBlue, .systemGreen, .systemOrange, .systemPurple]
+        view.backgroundColor = colors[tab.rawValue].withAlphaComponent(0.16)
     }
 }
 
