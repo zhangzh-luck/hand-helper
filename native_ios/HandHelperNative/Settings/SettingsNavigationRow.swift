@@ -34,20 +34,22 @@ struct SettingsNavigationRow: View {
 
     @ViewBuilder
     private var iconView: some View {
-        switch icon {
-        case let .system(name, color):
-            Image(systemName: name)
-                .font(.system(size: 18, weight: .semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        case let .asset(name):
-            Image(name)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 32, height: 32)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        Group {
+            switch icon {
+            case let .system(name, color):
+                Image(systemName: name)
+                    .font(.system(size: 18, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            case let .asset(name):
+                Image(name)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 32, height: 32)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
         }
         .accessibilityHidden(true)
     }
