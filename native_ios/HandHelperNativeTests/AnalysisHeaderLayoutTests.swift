@@ -26,6 +26,24 @@ final class AnalysisHeaderLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testGradeRowContentFillsItsAssignedTapRow() {
+        let row = GradeRowContent(
+            grade: GradeRecord(id: 1, termID: 1, courseCode: "C001", courseName: "移动应用开发",
+                               courseType: "必修", credits: 2, score: "90", finalExamScore: nil,
+                               usualScore: nil, gradePoint: 4, weightedGradePoint: 8,
+                               examType: nil, makeupFlag: false, retakeFlag: false),
+            titleMinimumHeight: 42,
+            scoreColumnWidth: 82,
+            minimumHeight: 90
+        )
+        .frame(width: 343)
+
+        let size = measured(row)
+        XCTAssertEqual(size.width, 343, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(size.height, 90)
+    }
+
+    @MainActor
     private func measured<V: View>(_ view: V) -> CGSize {
         let host = UIHostingController(rootView: view)
         host.loadViewIfNeeded()

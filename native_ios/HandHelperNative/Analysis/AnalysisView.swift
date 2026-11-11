@@ -382,12 +382,26 @@ struct AnalysisView: View {
     }
 
     private func gradeRow(_ grade: GradeRecord) -> some View {
+        GradeRowContent(grade: grade,
+                        titleMinimumHeight: gradeTitleMinimumHeight,
+                        scoreColumnWidth: gradeScoreColumnWidth,
+                        minimumHeight: gradeRowMinimumHeight)
+    }
+}
+
+struct GradeRowContent: View {
+    let grade: GradeRecord
+    let titleMinimumHeight: CGFloat
+    let scoreColumnWidth: CGFloat
+    let minimumHeight: CGFloat
+
+    var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(grade.courseName)
                     .font(.body.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: gradeTitleMinimumHeight, alignment: .topLeading)
+                    .frame(minHeight: titleMinimumHeight, alignment: .topLeading)
                 Text("\(grade.courseType ?? "课程性质未提供") · \(grade.credits.map { String($0) } ?? "—") 学分 · GPA \(grade.gradePoint.map { String($0) } ?? "—")")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -406,11 +420,11 @@ struct AnalysisView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
-            .frame(width: gradeScoreColumnWidth, alignment: .trailing)
+            .frame(width: scoreColumnWidth, alignment: .trailing)
         }
         .padding(.horizontal, 15)
         .padding(.vertical, 13)
-        .frame(minHeight: gradeRowMinimumHeight)
+        .frame(minHeight: minimumHeight)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
