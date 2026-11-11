@@ -157,7 +157,7 @@ final class TodayTests: XCTestCase {
         XCTAssertNotNil(model.wallpaperImage)
 
         // This models returning to Today while the existing account cache is valid.
-        XCTAssertTrue(model.load())
+        XCTAssertEqual(model.restoreInMemoryIfAvailable(allowPrivateCache: true, allowLocalSchedules: true), true)
         XCTAssertEqual(repository.cachedReadCount, 1)
         XCTAssertEqual(repository.localScheduleReadCount, 1)
 

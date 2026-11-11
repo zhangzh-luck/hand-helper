@@ -100,7 +100,7 @@ final class TodayViewModel: ObservableObject {
 
     @discardableResult
     func load(allowPrivateCache: Bool = true, allowLocalSchedules: Bool = true,
-              forceDiskRead: Bool = false) -> Bool {
+              forceDiskRead: Bool = true) -> Bool {
         if !forceDiskRead,
            let cacheAvailable = restoreInMemoryIfAvailable(allowPrivateCache: allowPrivateCache,
                                                             allowLocalSchedules: allowLocalSchedules) {
