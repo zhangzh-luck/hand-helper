@@ -28,7 +28,8 @@ final class TabLabDiagnosticsTests: XCTestCase {
         XCTAssertEqual(diagnostics.reports.count, 1)
         XCTAssertEqual(diagnostics.reports.first?.source, .today)
         XCTAssertEqual(diagnostics.reports.first?.destination, .analysis)
-        XCTAssertEqual(diagnostics.reports.first?.tapToSelectionMilliseconds, 0)
+        XCTAssertNotNil(diagnostics.reports.first?.tapToSelectionMilliseconds,
+                        "Mode B records selection timing from its didSelect sampling boundary")
 
         host.tabBar(UITabBar(), didSelect: analysis)
         XCTAssertEqual(diagnostics.reports.count, 1, "Re-selecting the active tab must not create a diagnostic sample")
