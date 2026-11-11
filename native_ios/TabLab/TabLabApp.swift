@@ -39,6 +39,24 @@ private enum TabLabMode: Int {
         case .standaloneTabBar: "模式 B：独立 UITabBar"
         }
     }
+
+    var diagnosticContext: String {
+        switch self {
+        case .tabBarController:
+            "模式 A：UITabBarController（shouldSelect 前）"
+        case .standaloneTabBar:
+            "模式 B：独立 UITabBar（didSelect 后）"
+        }
+    }
+
+    var measurementNote: String {
+        switch self {
+        case .tabBarController:
+            "仅使用静态 UIKit 页面，不读取业务数据。"
+        case .standaloneTabBar:
+            "仅使用静态 UIKit 页面，不读取业务数据。模式 B 从 UIKit didSelect 回调开始计时，selection_ms 不应与模式 A 直接比较。"
+        }
+    }
 }
 
 private final class TabLabRootController: UIViewController {
@@ -101,8 +119,8 @@ private final class TabLabRootController: UIViewController {
     }
 
     private func installMode(_ mode: TabLabMode) {
-        modeDescription.text = mode.title + "。仅使用静态 UIKit 页面，不读取业务数据。"
-        diagnostics.setReportContext(mode.title)
+        modeDescription.text = mode.title + "。" + mode.measurementNote
+        diagnostics.setReportContext(mode.diagnosticContext)
         activeController?.willMove(toParent: nil)
         activeController?.view.removeFromSuperview()
         activeController?.removeFromParent()
@@ -172,9 +190,9 @@ private final class TabLabTabBarController: UITabBarController, UITabBarControll
     }
 }
 
-private final class TabLabStandaloneHostController: UIViewController, UITabBarDelegate {
+final class TabLabStandaloneHostController: UIViewController, UITabBarDelegate {
     private let diagnostics: TabSwitchDiagnostics
-    private let tabBar = TabLabBareTabBar()
+    private let tabBar = UITabBar()
     private let content = TabLabPageController(tab: .today, diagnostics: nil)
     private var selected = TabSwitchDiagnosticTab.today
 
@@ -210,7 +228,6 @@ private final class TabLabStandaloneHostController: UIViewController, UITabBarDe
         tabBar.standardAppearance = appearance
         tabBar.scrollEdgeAppearance = appearance
         tabBar.tintColor = .systemBlue
-        tabBar.willSelect = { [weak self] index in self?.beginTouchSelection(index: index) }
         view.addSubview(tabBar)
         NSLayoutConstraint.activate([
             content.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -223,34 +240,16 @@ private final class TabLabStandaloneHostController: UIViewController, UITabBarDe
         ])
     }
 
-    private func beginTouchSelection(index: Int) {
-        guard let destination = TabSwitchDiagnosticTab(rawValue: index) else { return }
-        diagnostics.beginSwitch(from: selected, to: destination, screen: view.window?.screen)
-    }
-
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
-        guard let destination = TabSwitchDiagnosticTab(rawValue: item.tag) else { return }
-        if destination != selected {
-            selected = destination
-            content.apply(tab: destination)
-        }
+        guard let destination = TabSwitchDiagnosticTab(rawValue: item.tag), destination != selected else { return }
+        // A bare UITabBar's internal controls consume touches before UITabBar.touchesBegan.
+        // didSelect is the first reliable public callback, so mode B's timer begins after UIKit commits selection.
+        diagnostics.beginSwitch(from: selected, to: destination, screen: view.window?.screen)
+        selected = destination
+        content.apply(tab: destination)
         diagnostics.recordSelectionApplied(for: destination)
         diagnostics.recordStateApplied(for: destination)
         diagnostics.recordPageReady(for: destination, cacheState: .retained)
-    }
-}
-
-/// A public UIKit touch override lets mode B start its timer before the tab bar commits selection.
-private final class TabLabBareTabBar: UITabBar {
-    var willSelect: ((Int) -> Void)?
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let point = touches.first?.location(in: self), bounds.width > 0 {
-            let index = min(TabSwitchDiagnosticTab.allCases.count - 1,
-                            max(0, Int(point.x / (bounds.width / CGFloat(TabSwitchDiagnosticTab.allCases.count)))))
-            willSelect?(index)
-        }
-        super.touchesBegan(touches, with: event)
     }
 }
 
