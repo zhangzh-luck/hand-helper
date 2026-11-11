@@ -58,6 +58,7 @@ struct LoginView: View {
                     .padding(.bottom, 32)
                     .frame(maxWidth: .infinity)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: focusedField) { _, field in
                     guard let field else { return }
@@ -90,12 +91,9 @@ struct LoginView: View {
 
     private var credentials: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "person")
-                    .frame(width: 24)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                TextField("账号", text: $username)
+            FloatingLoginField(title: "账号", symbol: "person",
+                               isFocused: focusedField == .username, text: username, trailingInset: 18) {
+                TextField("", text: $username)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -103,20 +101,17 @@ struct LoginView: View {
                     .focused($focusedField, equals: .username)
                     .onSubmit { focusedField = .password }
                     .id(Field.username)
+            } trailing: {
+                EmptyView()
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
 
             Divider().padding(.leading, 56)
 
-            HStack(spacing: 14) {
-                Image(systemName: "lock")
-                    .frame(width: 24)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+            FloatingLoginField(title: "密码", symbol: "lock",
+                               isFocused: focusedField == .password, text: password, trailingInset: 6) {
                 Group {
                     if showsPassword {
-                        TextField("密码", text: $password)
+                        TextField("", text: $password)
                             .textContentType(.password)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -124,7 +119,7 @@ struct LoginView: View {
                             .focused($focusedField, equals: .password)
                             .onSubmit(submit)
                     } else {
-                        SecureField("密码", text: $password)
+                        SecureField("", text: $password)
                             .textContentType(.password)
                             .submitLabel(.go)
                             .focused($focusedField, equals: .password)
@@ -132,7 +127,7 @@ struct LoginView: View {
                     }
                 }
                 .id(Field.password)
-
+            } trailing: {
                 Button {
                     let wasFocused = focusedField == .password
                     showsPassword.toggle()
@@ -150,13 +145,20 @@ struct LoginView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
             }
-            .padding(.leading, 18)
-            .padding(.trailing, 6)
-            .padding(.vertical, 6)
         }
         .font(.body)
-        .background(Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 20))
+        .background(credentialsBackground)
+    }
+
+    @ViewBuilder
+    private var credentialsBackground: some View {
+        if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+            Color.clear
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        } else {
+            Color(uiColor: .secondarySystemGroupedBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
     }
 
     private var loginButton: some View {
@@ -233,5 +235,71 @@ struct LoginView: View {
         let enteredUsername = username
         let enteredPassword = password
         Task { await state.login(username: enteredUsername, password: enteredPassword) }
+    }
+}
+
+enum FloatingLabelState {
+    static func shouldFloat(text: String, isFocused: Bool) -> Bool {
+        isFocused || !text.isEmpty
+    }
+}
+
+private struct FloatingLoginField<Content: View, Trailing: View>: View {
+    let title: String
+    let symbol: String
+    let isFocused: Bool
+    let text: String
+    let trailingInset: CGFloat
+    let content: Content
+    let trailing: Trailing
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var labelInset = 13
+
+    init(title: String, symbol: String, isFocused: Bool, text: String, trailingInset: CGFloat,
+         @ViewBuilder content: () -> Content,
+         @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.symbol = symbol
+        self.isFocused = isFocused
+        self.text = text
+        self.trailingInset = trailingInset
+        self.content = content()
+        self.trailing = trailing()
+    }
+
+    private var isFloating: Bool {
+        FloatingLabelState.shouldFloat(text: text, isFocused: isFocused)
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .frame(width: 24)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            ZStack(alignment: .topLeading) {
+                content
+                    .accessibilityLabel(title)
+                    .padding(.top, labelInset)
+                    .frame(minHeight: 48, alignment: .bottom)
+
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(isFocused ? DesignTokens.brand : .secondary)
+                    .scaleEffect(isFloating ? 0.76 : 1, anchor: .leading)
+                    .offset(y: isFloating ? 1 : labelInset + 2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            trailing
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, trailingInset)
+        .padding(.vertical, 6)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFloating)
     }
 }
