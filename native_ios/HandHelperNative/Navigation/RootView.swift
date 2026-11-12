@@ -197,7 +197,6 @@ enum AvatarPreviewClearPolicy {
     static func needsClear(isVisible: Bool, hasPreview: Bool) -> Bool { isVisible || hasPreview }
 }
 
-@MainActor
 final class AvatarPreviewCoordinator: ObservableObject {
     @Published private(set) var isSourceAvatarHidden = false
     private var activeRouteID: UUID?
