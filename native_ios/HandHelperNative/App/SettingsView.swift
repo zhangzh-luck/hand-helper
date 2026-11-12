@@ -129,7 +129,7 @@ final class SettingsAvatarImageCache: ObservableObject {
 }
 
 private struct AboutHandHelperView: View {
-    @Environment(\.accessibilityContrast) private var accessibilityContrast
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var version: String {
@@ -222,7 +222,7 @@ private struct AboutHandHelperView: View {
             }
         }
         .modifier(AboutScrollEdgeEffect(
-            useAutomaticStyle: reduceTransparency || accessibilityContrast == .high
+            useAutomaticStyle: reduceTransparency || colorSchemeContrast == .increased
         ))
         .navigationTitle("关于航的助手")
         .navigationBarTitleDisplayMode(.inline)
