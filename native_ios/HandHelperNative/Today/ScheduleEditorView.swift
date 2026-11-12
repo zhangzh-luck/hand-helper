@@ -113,6 +113,8 @@ struct ScheduleEditorView: View {
     let onClose: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @AccessibilityFocusState private var titleIsFocused: Bool
     @State private var title: String
     @State private var date: Date
@@ -151,11 +153,9 @@ struct ScheduleEditorView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ViewThatFits(in: .vertical) {
-                formContent.fixedSize(horizontal: false, vertical: true)
-                ScrollView { formContent }
-                    .scrollDismissesKeyboard(.interactively)
-            }
+            ScrollView { formContent }
+                .scrollDismissesKeyboard(.interactively)
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             Divider()
             saveAction
         }
@@ -175,14 +175,9 @@ struct ScheduleEditorView: View {
                 .font(.headline)
                 .accessibilityFocused($titleIsFocused)
             Spacer(minLength: 0)
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭")
+            GlassCloseButton(accessibilityLabel: "关闭", diameter: 36, onDarkBackground: false,
+                             action: close)
+                .frame(width: 44, height: 44)
         }
         .padding(.leading, 20)
         .padding(.trailing, 8)
@@ -191,10 +186,7 @@ struct ScheduleEditorView: View {
 
     private var formContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            formFields
-                .padding(.horizontal, 15)
-                .background(Color(uiColor: .secondarySystemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            formSurface
             Text("只能添加今天及以后的安排；结束时间须晚于同一天的开始时间。未设置结束时间的安排仍按开始时间排序。")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
@@ -238,12 +230,29 @@ struct ScheduleEditorView: View {
         Divider()
         Toggle("设置结束时间", isOn: $hasEndTime)
             .frame(minHeight: 57)
-            .animation(.easeInOut(duration: 0.18), value: hasEndTime)
-        if hasEndTime {
-            Divider()
-            DatePicker("结束时间", selection: $endTime, displayedComponents: .hourAndMinute)
-                .frame(minHeight: 57)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+        Divider()
+        DatePicker("结束时间", selection: $endTime, displayedComponents: .hourAndMinute)
+            .frame(minHeight: 57)
+            .disabled(!hasEndTime)
+            .opacity(hasEndTime ? 1 : 0.42)
+            .accessibilityHint(hasEndTime ? "" : "请先开启设置结束时间")
+    }
+
+    @ViewBuilder
+    private var formSurface: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+            formFields
+                .padding(.horizontal, 15)
+                .glassEffect(.regular, in: shape)
+        } else if reduceTransparency || colorSchemeContrast == .increased {
+            formFields
+                .padding(.horizontal, 15)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
+        } else {
+            formFields
+                .padding(.horizontal, 15)
+                .background(.regularMaterial, in: shape)
         }
     }
 
@@ -257,15 +266,23 @@ struct ScheduleEditorView: View {
     }
 
     private var saveAction: some View {
-        Button(schedule == nil ? "保存安排" : "保存更改") { save() }
+        let button = Button(schedule == nil ? "保存安排" : "保存更改") { save() }
             .font(.system(size: 15, weight: .bold))
             .frame(maxWidth: .infinity, minHeight: 46)
-            .foregroundStyle(.white)
-            .background(TodayStyle.color(0x2563eb), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .tint(TodayStyle.color(0x2563eb))
+            .buttonBorderShape(.roundedRectangle(radius: 14))
             .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
             .accessibilityIdentifier("scheduleEditorSave")
+
+        return Group {
+            if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+                button.buttonStyle(.glassProminent)
+            } else {
+                button.buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     private var hasUnsavedChanges: Bool {

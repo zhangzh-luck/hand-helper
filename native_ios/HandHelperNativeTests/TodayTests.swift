@@ -379,6 +379,9 @@ final class TodayTests: XCTestCase {
         XCTAssertTrue(coordinator.prepareDismissal(id: firstID))
         XCTAssertFalse(coordinator.prepareDismissal(id: firstID))
         coordinator.hide(id: firstID)
+        XCTAssertTrue(coordinator.isPresenting)
+        coordinator.present(schedule: nil, now: day, revision: 9) { _, _, _, _, _ in }
+        XCTAssertEqual(coordinator.route?.id, firstID)
         coordinator.finishDismissal(id: firstID)
         XCTAssertNil(coordinator.route)
         XCTAssertFalse(coordinator.isPresenting)
