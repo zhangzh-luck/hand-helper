@@ -4,6 +4,7 @@ import SwiftUI
 struct TodayView: View {
     @ObservedObject private var state: AppState
     private let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
+    @ObservedObject private var avatarPreviewCoordinator: AvatarPreviewCoordinator
     private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TodayViewModel
     @Environment(\.colorScheme) private var colorScheme
@@ -19,9 +20,11 @@ struct TodayView: View {
     @State private var avatarImage: UIImage?
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
+         avatarPreviewCoordinator: AvatarPreviewCoordinator,
          deleteConfirmation: DestructiveConfirmationCoordinator) {
         self.state = state
         self.onAvatarPreview = onAvatarPreview
+        self.avatarPreviewCoordinator = avatarPreviewCoordinator
         self.deleteConfirmation = deleteConfirmation
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
@@ -319,6 +322,9 @@ struct TodayView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
+            // Preserve the button's layout and global GeometryReader frame while the
+            // overlay owns the visible hero image.
+            .opacity(avatarPreviewCoordinator.isSourceAvatarHidden ? 0 : 1)
             .disabled(!canPreviewAvatar)
             .accessibilityLabel(canPreviewAvatar ? "查看头像大图" : "尚未设置头像")
         }

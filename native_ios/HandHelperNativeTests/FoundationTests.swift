@@ -10,6 +10,33 @@ final class FoundationTests: XCTestCase {
         XCTAssertTrue(AvatarPreviewClearPolicy.needsClear(isVisible: false, hasPreview: true))
     }
 
+    @MainActor
+    func testAvatarPreviewCoordinatorRestoresSourceForMatchingAndExternalCleanup() {
+        let coordinator = AvatarPreviewCoordinator()
+        let first = UUID()
+        let second = UUID()
+
+        coordinator.begin(routeID: first)
+        XCTAssertTrue(coordinator.isSourceAvatarHidden)
+        coordinator.finish(routeID: second)
+        XCTAssertTrue(coordinator.isSourceAvatarHidden)
+        coordinator.finish(routeID: first)
+        XCTAssertFalse(coordinator.isSourceAvatarHidden)
+
+        coordinator.begin(routeID: second)
+        coordinator.begin(routeID: first)
+        coordinator.finish(routeID: second)
+        XCTAssertTrue(coordinator.isSourceAvatarHidden)
+        coordinator.finish(routeID: first)
+        XCTAssertFalse(coordinator.isSourceAvatarHidden)
+
+        coordinator.begin(routeID: second)
+        coordinator.clear()
+        XCTAssertFalse(coordinator.isSourceAvatarHidden)
+        coordinator.finish(routeID: second)
+        XCTAssertFalse(coordinator.isSourceAvatarHidden)
+    }
+
     func testSettingsNavigationSymbolsAreAvailable() {
         for symbol in ["clock", "square.and.arrow.down", "paintpalette", "photo",
                        "calendar.badge.plus", "doc.badge.plus", "house", "calendar", "chart.bar"] {

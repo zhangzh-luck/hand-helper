@@ -40,6 +40,12 @@ enum TodayAvatarLightboxLayout {
         return isVisible ? targetFrame : sourceFrame
     }
 
+    /// A hero overlay replaces the source image immediately at its source frame.
+    /// Non-hero presentations retain the existing fade-in behavior.
+    static func imageOpacity(isVisible: Bool, usesHero: Bool) -> Double {
+        usesHero || isVisible ? 1 : 0
+    }
+
     static func interpolatedFrame(from source: CGRect, to target: CGRect, progress: CGFloat) -> CGRect {
         let amount = min(max(progress, 0), 1)
         return CGRect(x: source.minX + (target.minX - source.minX) * amount,
@@ -91,7 +97,8 @@ struct TodayAvatarLightboxView: View {
                             .strokeBorder(.white, lineWidth: 2.5)
                             .opacity(isVisible ? 1 : 0)
                     }
-                    .opacity(isVisible ? 1 : 0)
+                    .opacity(TodayAvatarLightboxLayout.imageOpacity(isVisible: isVisible,
+                                                                     usesHero: usesHero))
                     .position(x: imageFrame.midX, y: imageFrame.midY)
                     .accessibilityLabel("头像大图")
 

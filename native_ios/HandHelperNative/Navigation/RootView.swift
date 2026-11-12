@@ -9,6 +9,7 @@ struct RootView: View {
     @StateObject private var timetableDetail = TimetableCourseDetailCoordinator()
     @StateObject private var gradeDetail = GradeDetailCoordinator()
     @StateObject private var deleteConfirmation = DestructiveConfirmationCoordinator()
+    @StateObject private var avatarPreviewCoordinator = AvatarPreviewCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
 
@@ -29,6 +30,7 @@ struct RootView: View {
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
+                                   avatarPreviewCoordinator: avatarPreviewCoordinator,
                                    timetableDetail: timetableDetail, gradeDetail: gradeDetail,
                                    deleteConfirmation: deleteConfirmation)
                     .ignoresSafeArea()
@@ -158,6 +160,7 @@ struct RootView: View {
               avatarPreview == nil, !timetableDetail.isPresenting,
               !gradeDetail.isPresenting, !deleteConfirmation.isPresenting else { return }
         avatarPreviewVisible = false
+        avatarPreviewCoordinator.begin(routeID: route.id)
         avatarPreview = route
     }
 
@@ -167,7 +170,12 @@ struct RootView: View {
             avatarPreviewVisible = false
         } completion: {
             guard avatarPreview?.id == preview.id, !avatarPreviewVisible else { return }
-            avatarPreview = nil
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                avatarPreview = nil
+                avatarPreviewCoordinator.finish(routeID: preview.id)
+            }
         }
     }
 
@@ -178,14 +186,38 @@ struct RootView: View {
     private func clearAvatarPreview() {
         let needsClear = AvatarPreviewClearPolicy.needsClear(isVisible: avatarPreviewVisible,
                                                              hasPreview: avatarPreview != nil)
-        guard needsClear else { return }
+        guard needsClear || avatarPreviewCoordinator.isSourceAvatarHidden else { return }
         if avatarPreviewVisible { avatarPreviewVisible = false }
         if avatarPreview != nil { avatarPreview = nil }
+        avatarPreviewCoordinator.clear()
     }
 }
 
 enum AvatarPreviewClearPolicy {
     static func needsClear(isVisible: Bool, hasPreview: Bool) -> Bool { isVisible || hasPreview }
+}
+
+@MainActor
+final class AvatarPreviewCoordinator: ObservableObject {
+    @Published private(set) var isSourceAvatarHidden = false
+    private var activeRouteID: UUID?
+
+    func begin(routeID: UUID) {
+        activeRouteID = routeID
+        isSourceAvatarHidden = true
+    }
+
+    func finish(routeID: UUID) {
+        guard activeRouteID == routeID else { return }
+        activeRouteID = nil
+        isSourceAvatarHidden = false
+    }
+
+    func clear() {
+        guard activeRouteID != nil || isSourceAvatarHidden else { return }
+        activeRouteID = nil
+        isSourceAvatarHidden = false
+    }
 }
 
 private struct AuthenticationStatusView: View {
@@ -210,12 +242,14 @@ private struct AuthenticationStatusView: View {
 private struct NativeTabContainer: UIViewControllerRepresentable {
     @ObservedObject var state: AppState
     let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
+    let avatarPreviewCoordinator: AvatarPreviewCoordinator
     let timetableDetail: TimetableCourseDetailCoordinator
     let gradeDetail: GradeDetailCoordinator
     let deleteConfirmation: DestructiveConfirmationCoordinator
 
     func makeUIViewController(context: Context) -> NativeTabController {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
+                                             avatarPreviewCoordinator: avatarPreviewCoordinator,
                                              timetableDetail: timetableDetail, gradeDetail: gradeDetail,
                                              deleteConfirmation: deleteConfirmation)
         controller.selectedTabDidChange = { [weak state] tab in
@@ -239,6 +273,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     private var hasConfiguredHomeAvatar = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void = { _ in },
+         avatarPreviewCoordinator: AvatarPreviewCoordinator = AvatarPreviewCoordinator(),
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
          gradeDetail: GradeDetailCoordinator? = nil,
          deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
@@ -249,6 +284,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             switch tab {
             case .today:
                 controller = UIHostingController(rootView: TodayView(state: state, onAvatarPreview: onAvatarPreview,
+                    avatarPreviewCoordinator: avatarPreviewCoordinator,
                     deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .settings:
                 let navigation = SettingsNavigationController(state: state)

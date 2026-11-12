@@ -73,6 +73,12 @@ final class TodayTests: XCTestCase {
                                                                 currentViewport: CGSize(width: 844, height: 390)))
     }
 
+    func testTodayAvatarHeroIsOpaqueAtTheSourceWhileFallbackFadesIn() {
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageOpacity(isVisible: false, usesHero: true), 1)
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageOpacity(isVisible: false, usesHero: false), 0)
+        XCTAssertEqual(TodayAvatarLightboxLayout.imageOpacity(isVisible: true, usesHero: false), 1)
+    }
+
     @MainActor
     func testSharedGlassCloseButtonKeepsBothTapTargets() {
         for diameter in [CGFloat(44), 54] {
