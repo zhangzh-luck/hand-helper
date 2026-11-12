@@ -129,6 +129,9 @@ final class SettingsAvatarImageCache: ObservableObject {
 }
 
 private struct AboutHandHelperView: View {
+    @Environment(\.accessibilityContrast) private var accessibilityContrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
     }
@@ -218,8 +221,26 @@ private struct AboutHandHelperView: View {
                 LabeledContent("Build", value: build)
             }
         }
+        .modifier(AboutScrollEdgeEffect(
+            useAutomaticStyle: reduceTransparency || accessibilityContrast == .high
+        ))
         .navigationTitle("关于航的助手")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Uses the system scroll-edge treatment on iOS 26 while leaving older systems unchanged.
+/// Accessibility display preferences retain the system's automatic style for contrast and legibility.
+private struct AboutScrollEdgeEffect: ViewModifier {
+    let useAutomaticStyle: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectStyle(useAutomaticStyle ? .automatic : .soft, for: .top)
+        } else {
+            content
+        }
     }
 }
 
