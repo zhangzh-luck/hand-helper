@@ -363,6 +363,45 @@ final class TodayTests: XCTestCase {
     }
 
     @MainActor
+    func testScheduleEditorCoordinatorKeepsOneRouteAndCompletesMatchingDismissal() {
+        let coordinator = ScheduleEditorCoordinator()
+        let day = localDate(2026, 10, 23, 12, 0)
+        coordinator.present(schedule: nil, now: day, revision: 7) { _, _, _, _, _ in }
+        guard let firstID = coordinator.route?.id else {
+            XCTFail("Expected a schedule editor route")
+            return
+        }
+        coordinator.present(schedule: nil, now: day, revision: 8) { _, _, _, _, _ in }
+        XCTAssertEqual(coordinator.route?.id, firstID)
+
+        coordinator.show(id: firstID)
+        XCTAssertTrue(coordinator.isVisible)
+        XCTAssertTrue(coordinator.prepareDismissal(id: firstID))
+        XCTAssertFalse(coordinator.prepareDismissal(id: firstID))
+        coordinator.hide(id: firstID)
+        coordinator.finishDismissal(id: firstID)
+        XCTAssertNil(coordinator.route)
+        XCTAssertFalse(coordinator.isPresenting)
+    }
+
+    @MainActor
+    func testScheduleEditorCoordinatorIgnoresStaleDismissalAfterContextClear() throws {
+        let coordinator = ScheduleEditorCoordinator()
+        let day = localDate(2026, 10, 23, 12, 0)
+        coordinator.present(schedule: nil, now: day, revision: 7) { _, _, _, _, _ in }
+        let staleID = try XCTUnwrap(coordinator.route?.id)
+        coordinator.show(id: staleID)
+        XCTAssertTrue(coordinator.prepareDismissal(id: staleID))
+        coordinator.clear()
+
+        coordinator.present(schedule: nil, now: day, revision: 8) { _, _, _, _, _ in }
+        let currentID = try XCTUnwrap(coordinator.route?.id)
+        coordinator.finishDismissal(id: staleID)
+        XCTAssertEqual(coordinator.route?.id, currentID)
+        XCTAssertEqual(coordinator.route?.revision, 8)
+    }
+
+    @MainActor
     func testScheduleEndTimePersistenceValidationAndRemoval() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }

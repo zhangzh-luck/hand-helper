@@ -5,6 +5,7 @@ struct TodayView: View {
     @ObservedObject private var state: AppState
     private let onAvatarPreview: @MainActor (TodayAvatarPreviewRoute) -> Void
     @ObservedObject private var avatarPreviewCoordinator: AvatarPreviewCoordinator
+    @ObservedObject private var scheduleEditor: ScheduleEditorCoordinator
     private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TodayViewModel
     @Environment(\.colorScheme) private var colorScheme
@@ -12,7 +13,6 @@ struct TodayView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ScaledMetric(relativeTo: .title) private var avatarDimension: CGFloat = 60
-    @State private var editor: ScheduleEditorRoute?
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var localError: String?
     @State private var appliedCourseInvalidationSequence: Int?
@@ -21,10 +21,12 @@ struct TodayView: View {
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
+         scheduleEditor: ScheduleEditorCoordinator,
          deleteConfirmation: DestructiveConfirmationCoordinator) {
         self.state = state
         self.onAvatarPreview = onAvatarPreview
         self.avatarPreviewCoordinator = avatarPreviewCoordinator
+        self.scheduleEditor = scheduleEditor
         self.deleteConfirmation = deleteConfirmation
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
@@ -126,7 +128,6 @@ struct TodayView: View {
         }
         .onChange(of: state.authenticationRevision) { _, _ in
             appliedCourseInvalidationSequence = nil
-            editor = nil
             pendingDelete = nil
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
                                           allowLocalSchedules: mayShowLocalSchedules)
@@ -173,14 +174,6 @@ struct TodayView: View {
                 }
             }
         }
-        .sheet(item: $editor) { route in
-            ScheduleEditorView(schedule: route.schedule, now: model.now) { id, title, date, time, endTime in
-                _ = try state.requireCurrentAccount(revision: route.revision)
-                try model.saveSchedule(id: id, title: title, date: date, time: time, endTime: endTime)
-                try? state.localScheduleDidChange(revision: route.revision)
-            }
-            .presentationDetents([.medium, .large])
-        }
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
@@ -190,7 +183,7 @@ struct TodayView: View {
         ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
                          onEdit: {
                              guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
-                             editor = ScheduleEditorRoute(schedule: schedule, revision: revision)
+                             presentScheduleEditor(schedule: schedule, revision: revision)
                          },
                          onDelete: {
                              guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
@@ -248,7 +241,7 @@ struct TodayView: View {
 
     private var addScheduleButton: some View {
         let button = Button {
-            editor = ScheduleEditorRoute(schedule: nil, revision: state.authenticationRevision)
+            presentScheduleEditor(schedule: nil, revision: state.authenticationRevision)
         } label: {
             Label("添加安排", systemImage: "plus")
                 .font(.subheadline.weight(.semibold))
@@ -262,6 +255,15 @@ struct TodayView: View {
             } else {
                 button.buttonStyle(.borderedProminent)
             }
+        }
+    }
+
+    private func presentScheduleEditor(schedule: CustomSchedule?, revision: Int) {
+        guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
+        scheduleEditor.present(schedule: schedule, now: model.now, revision: revision) { id, title, date, time, endTime in
+            _ = try state.requireCurrentAccount(revision: revision)
+            try model.saveSchedule(id: id, title: title, date: date, time: time, endTime: endTime)
+            try? state.localScheduleDidChange(revision: revision)
         }
     }
 
@@ -435,11 +437,6 @@ private enum TodayEntry: Identifiable {
     }
 }
 
-private struct ScheduleEditorRoute: Identifiable {
-    let schedule: CustomSchedule?
-    let revision: Int
-    var id: String { "\(revision)-\(schedule?.id ?? 0)" }
-}
 
 private struct PendingScheduleDelete {
     let schedule: CustomSchedule

@@ -10,6 +10,7 @@ struct RootView: View {
     @StateObject private var gradeDetail = GradeDetailCoordinator()
     @StateObject private var deleteConfirmation = DestructiveConfirmationCoordinator()
     @StateObject private var avatarPreviewCoordinator = AvatarPreviewCoordinator()
+    @StateObject private var scheduleEditor = ScheduleEditorCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
 
@@ -32,12 +33,15 @@ struct RootView: View {
                 NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
                                    avatarPreviewCoordinator: avatarPreviewCoordinator,
                                    timetableDetail: timetableDetail, gradeDetail: gradeDetail,
-                                   deleteConfirmation: deleteConfirmation)
+                                   deleteConfirmation: deleteConfirmation,
+                                   scheduleEditor: scheduleEditor)
                     .ignoresSafeArea()
                     .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
-                                      !gradeDetail.isPresenting && !deleteConfirmation.isPresenting)
+                                      !gradeDetail.isPresenting && !deleteConfirmation.isPresenting &&
+                                      !scheduleEditor.isPresenting)
                     .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
-                                         gradeDetail.isPresenting || deleteConfirmation.isPresenting)
+                                         gradeDetail.isPresenting || deleteConfirmation.isPresenting ||
+                                         scheduleEditor.isPresenting)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -68,6 +72,10 @@ struct RootView: View {
                     .zIndex(3)
                     .allowsHitTesting(!deleteConfirmation.isPresenting)
                     .accessibilityHidden(deleteConfirmation.isPresenting)
+                ScheduleEditorOverlay(coordinator: scheduleEditor, reduceMotion: reduceMotion)
+                    .zIndex(4)
+                    .allowsHitTesting(!deleteConfirmation.isPresenting)
+                    .accessibilityHidden(deleteConfirmation.isPresenting)
             }
         }
         .alert(deleteConfirmation.request?.kind.title ?? "",
@@ -92,6 +100,7 @@ struct RootView: View {
             clearAvatarPreview()
             timetableDetail.clear()
             gradeDetail.clear()
+            scheduleEditor.clear()
             deleteConfirmation.clear()
         }
         .onChange(of: state.currentProfile.avatarData) { _, _ in
@@ -101,6 +110,7 @@ struct RootView: View {
         }
         .onChange(of: state.selectedTab) { oldTab, tab in
             if tab != .today { clearAvatarPreview() }
+            if tab != .today { scheduleEditor.clear() }
             if tab != .timetable { timetableDetail.clear() }
             // AnalysisView owns the active-analysis exit cleanup. Avoid publishing the
             // same clear twice during one tab transition.
@@ -113,16 +123,29 @@ struct RootView: View {
                 clearAvatarPreview()
                 timetableDetail.clear()
                 gradeDetail.clear()
+                scheduleEditor.clear()
                 deleteConfirmation.clear()
             }
         }
         .onChange(of: timetableDetail.isPresenting) { _, presenting in
-            if presenting { clearAvatarPreview() }
+            if presenting {
+                clearAvatarPreview()
+                scheduleEditor.clear()
+            }
         }
         .onChange(of: gradeDetail.isPresenting) { _, presenting in
             if presenting {
                 clearAvatarPreview()
                 timetableDetail.clear()
+                scheduleEditor.clear()
+            }
+        }
+        .onChange(of: scheduleEditor.isPresenting) { _, presenting in
+            if presenting {
+                clearAvatarPreview()
+                timetableDetail.clear()
+                gradeDetail.clear()
+                deleteConfirmation.clear()
             }
         }
     }
@@ -158,7 +181,8 @@ struct RootView: View {
               state.canAccessPrivateData,
               route.revision == state.authenticationRevision,
               avatarPreview == nil, !timetableDetail.isPresenting,
-              !gradeDetail.isPresenting, !deleteConfirmation.isPresenting else { return }
+              !gradeDetail.isPresenting, !deleteConfirmation.isPresenting,
+              !scheduleEditor.isPresenting else { return }
         avatarPreviewVisible = false
         avatarPreviewCoordinator.begin(routeID: route.id)
         avatarPreview = route
@@ -245,12 +269,14 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
     let timetableDetail: TimetableCourseDetailCoordinator
     let gradeDetail: GradeDetailCoordinator
     let deleteConfirmation: DestructiveConfirmationCoordinator
+    let scheduleEditor: ScheduleEditorCoordinator
 
     func makeUIViewController(context: Context) -> NativeTabController {
         let controller = NativeTabController(state: state, onAvatarPreview: onAvatarPreview,
                                              avatarPreviewCoordinator: avatarPreviewCoordinator,
                                              timetableDetail: timetableDetail, gradeDetail: gradeDetail,
-                                             deleteConfirmation: deleteConfirmation)
+                                             deleteConfirmation: deleteConfirmation,
+                                             scheduleEditor: scheduleEditor)
         controller.selectedTabDidChange = { [weak state] tab in
             guard let state else { return }
             state.selectedTab = tab
@@ -275,7 +301,8 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
          avatarPreviewCoordinator: AvatarPreviewCoordinator = AvatarPreviewCoordinator(),
          timetableDetail: TimetableCourseDetailCoordinator? = nil,
          gradeDetail: GradeDetailCoordinator? = nil,
-         deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
+         deleteConfirmation: DestructiveConfirmationCoordinator? = nil,
+         scheduleEditor: ScheduleEditorCoordinator? = nil) {
         super.init(nibName: nil, bundle: nil)
         appState = state
         viewControllers = AppTab.allCases.map { tab in
@@ -284,6 +311,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             case .today:
                 controller = UIHostingController(rootView: TodayView(state: state, onAvatarPreview: onAvatarPreview,
                     avatarPreviewCoordinator: avatarPreviewCoordinator,
+                    scheduleEditor: scheduleEditor ?? ScheduleEditorCoordinator(),
                     deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .settings:
                 let navigation = SettingsNavigationController(state: state)
