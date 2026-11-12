@@ -42,13 +42,15 @@ struct RootView: View {
                state.canAccessPrivateData,
                avatarPreview.revision == state.authenticationRevision {
                 TodayAvatarLightboxView(image: avatarPreview.image,
+                                        sourceFrameInGlobal: avatarPreview.sourceFrameInGlobal,
                                         isVisible: avatarPreviewVisible,
+                                        reduceMotion: reduceMotion,
                                         onClose: closeAvatarPreview)
                     .zIndex(1)
                     .allowsHitTesting(!deleteConfirmation.isPresenting)
                     .accessibilityHidden(deleteConfirmation.isPresenting)
                     .onAppear {
-                        withAnimation(.easeOut(duration: 0.22)) {
+                        withAnimation(avatarPreviewAnimation) {
                             avatarPreviewVisible = true
                         }
                     }
@@ -89,6 +91,11 @@ struct RootView: View {
             timetableDetail.clear()
             gradeDetail.clear()
             deleteConfirmation.clear()
+        }
+        .onChange(of: state.currentProfile.avatarData) { _, _ in
+            // The route owns a snapshot UIImage. Close it instead of allowing an
+            // already-open preview to present an avatar that has since changed.
+            clearAvatarPreview()
         }
         .onChange(of: state.selectedTab) { oldTab, tab in
             if tab != .today { clearAvatarPreview() }
@@ -148,19 +155,24 @@ struct RootView: View {
         guard state.entry == .main, state.selectedTab == .today,
               state.canAccessPrivateData,
               route.revision == state.authenticationRevision,
-               !timetableDetail.isPresenting, !gradeDetail.isPresenting else { return }
+              avatarPreview == nil, !timetableDetail.isPresenting,
+              !gradeDetail.isPresenting, !deleteConfirmation.isPresenting else { return }
         avatarPreviewVisible = false
         avatarPreview = route
     }
 
     private func closeAvatarPreview() {
-        guard let preview = avatarPreview else { return }
-        withAnimation(.easeInOut(duration: 0.2)) { avatarPreviewVisible = false }
-        Task {
-            try? await Task.sleep(nanoseconds: 220_000_000)
+        guard let preview = avatarPreview, avatarPreviewVisible else { return }
+        withAnimation(avatarPreviewAnimation, completionCriteria: .logicallyComplete) {
+            avatarPreviewVisible = false
+        } completion: {
             guard avatarPreview?.id == preview.id, !avatarPreviewVisible else { return }
             avatarPreview = nil
         }
+    }
+
+    private var avatarPreviewAnimation: Animation {
+        reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.28)
     }
 
     private func clearAvatarPreview() {

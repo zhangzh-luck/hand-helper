@@ -35,9 +35,15 @@ struct TodayView: View {
     }
     private var displayName: String { state.currentProfile.resolvedDisplayName }
     private var avatarData: Data? { state.currentProfile.avatarData }
-    private var avatarPreviewRoute: TodayAvatarPreviewRoute? {
-        guard state.canAccessPrivateData, let avatarImage else { return nil }
-        return TodayAvatarPreviewRoute(image: avatarImage, revision: state.authenticationRevision)
+    private var canPreviewAvatar: Bool {
+        state.canAccessPrivateData && avatarImage != nil
+    }
+
+    private func avatarPreviewRoute(sourceFrameInGlobal: CGRect) -> TodayAvatarPreviewRoute? {
+        guard state.canAccessPrivateData, let avatarImage,
+              sourceFrameInGlobal.width > 0, sourceFrameInGlobal.height > 0 else { return nil }
+        return TodayAvatarPreviewRoute(image: avatarImage, revision: state.authenticationRevision,
+                                       sourceFrameInGlobal: sourceFrameInGlobal)
     }
     private var entries: [TodayEntry] {
         ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
@@ -292,28 +298,31 @@ struct TodayView: View {
     }
 
     private var avatarButton: some View {
-        Button {
-            if let route = avatarPreviewRoute {
-                AppHaptics.trigger(.detailOpened)
-                onAvatarPreview(route)
-            }
-        } label: {
-            Group {
-                if let image = avatarImage {
-                    Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    Text(displayName == "航的助手" ? "航" : String(displayName.suffix(1)))
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(Color.accentColor)
+        GeometryReader { geometry in
+            Button {
+                if let route = avatarPreviewRoute(sourceFrameInGlobal: geometry.frame(in: .global)) {
+                    AppHaptics.trigger(.detailOpened)
+                    onAvatarPreview(route)
                 }
+            } label: {
+                Group {
+                    if let image = avatarImage {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Text(displayName == "航的助手" ? "航" : String(displayName.suffix(1)))
+                            .font(.title.weight(.bold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            .frame(width: min(avatarDimension, 88), height: min(avatarDimension, 88))
-            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .buttonStyle(.plain)
+            .disabled(!canPreviewAvatar)
+            .accessibilityLabel(canPreviewAvatar ? "查看头像大图" : "尚未设置头像")
         }
-        .buttonStyle(.plain)
-        .disabled(avatarPreviewRoute == nil)
-        .accessibilityLabel(avatarPreviewRoute == nil ? "尚未设置头像" : "查看头像大图")
+        .frame(width: min(avatarDimension, 88), height: min(avatarDimension, 88))
     }
 
     private var courseMessage: String {
@@ -435,11 +444,13 @@ struct TodayAvatarPreviewRoute: Identifiable {
     let id = UUID()
     let image: UIImage
     let revision: Int
+    let sourceFrameInGlobal: CGRect
 
     static func make(avatarData: Data?, canAccessPrivateData: Bool,
-                     revision: Int) -> TodayAvatarPreviewRoute? {
+                     revision: Int, sourceFrameInGlobal: CGRect = .zero) -> TodayAvatarPreviewRoute? {
         guard canAccessPrivateData, let avatarData,
               let image = UIImage(data: avatarData) else { return nil }
-        return TodayAvatarPreviewRoute(image: image, revision: revision)
+        return TodayAvatarPreviewRoute(image: image, revision: revision,
+                                       sourceFrameInGlobal: sourceFrameInGlobal)
     }
 }

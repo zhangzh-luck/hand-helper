@@ -21,9 +21,11 @@ final class TodayTests: XCTestCase {
         XCTAssertNil(TodayAvatarPreviewRoute.make(avatarData: Data([1, 2, 3]),
             canAccessPrivateData: true, revision: 7))
         let route = try XCTUnwrap(TodayAvatarPreviewRoute.make(avatarData: avatar,
-            canAccessPrivateData: true, revision: 7))
+            canAccessPrivateData: true, revision: 7,
+            sourceFrameInGlobal: CGRect(x: 260, y: 90, width: 60, height: 60)))
         XCTAssertEqual(route.revision, 7)
         XCTAssertEqual(route.image.size, CGSize(width: 2, height: 2))
+        XCTAssertEqual(route.sourceFrameInGlobal, CGRect(x: 260, y: 90, width: 60, height: 60))
     }
 
     func testTodayAvatarLightboxKeepsImageSquareAndWithinViewport() {
@@ -33,6 +35,42 @@ final class TodayTests: XCTestCase {
             in: CGSize(width: 1024, height: 1366)), 520)
         XCTAssertEqual(TodayAvatarLightboxLayout.imageSide(
             in: CGSize(width: 320, height: 400)), 250)
+    }
+
+    func testTodayAvatarHeroGeometryUsesSourceFrameAndFallsBackSafely() throws {
+        let container = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let source = try XCTUnwrap(TodayAvatarLightboxLayout.localSourceFrame(
+            sourceFrameInGlobal: CGRect(x: 300, y: 80, width: 60, height: 60),
+            containerFrameInGlobal: container
+        ))
+        let target = TodayAvatarLightboxLayout.targetImageFrame(in: container.size)
+        XCTAssertEqual(source, CGRect(x: 300, y: 80, width: 60, height: 60))
+        XCTAssertEqual(TodayAvatarLightboxLayout.displayedImageFrame(sourceFrame: source, targetFrame: target,
+                                                                       isVisible: false, usesHero: true), source)
+        XCTAssertEqual(TodayAvatarLightboxLayout.displayedImageFrame(sourceFrame: source, targetFrame: target,
+                                                                       isVisible: true, usesHero: true), target)
+        XCTAssertNil(TodayAvatarLightboxLayout.localSourceFrame(
+            sourceFrameInGlobal: CGRect(x: -200, y: 80, width: 60, height: 60),
+            containerFrameInGlobal: container
+        ))
+    }
+
+    func testTodayAvatarHeroInterpolationAndViewportChangePolicy() {
+        let source = CGRect(x: 20, y: 100, width: 60, height: 60)
+        let target = CGRect(x: 100, y: 200, width: 300, height: 300)
+        XCTAssertEqual(TodayAvatarLightboxLayout.interpolatedFrame(from: source, to: target, progress: 0), source)
+        XCTAssertEqual(TodayAvatarLightboxLayout.interpolatedFrame(from: source, to: target, progress: 1), target)
+        XCTAssertEqual(TodayAvatarLightboxLayout.interpolatedFrame(from: source, to: target, progress: 0.5),
+                       CGRect(x: 60, y: 150, width: 180, height: 180))
+        XCTAssertTrue(TodayAvatarLightboxLayout.shouldUseHero(reduceMotion: false, sourceFrame: source,
+                                                               openingViewport: CGSize(width: 390, height: 844),
+                                                               currentViewport: CGSize(width: 390, height: 844)))
+        XCTAssertFalse(TodayAvatarLightboxLayout.shouldUseHero(reduceMotion: true, sourceFrame: source,
+                                                                openingViewport: CGSize(width: 390, height: 844),
+                                                                currentViewport: CGSize(width: 390, height: 844)))
+        XCTAssertFalse(TodayAvatarLightboxLayout.shouldUseHero(reduceMotion: false, sourceFrame: source,
+                                                                openingViewport: CGSize(width: 390, height: 844),
+                                                                currentViewport: CGSize(width: 844, height: 390)))
     }
 
     @MainActor
