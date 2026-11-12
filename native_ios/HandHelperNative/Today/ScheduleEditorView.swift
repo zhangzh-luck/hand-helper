@@ -73,9 +73,10 @@ struct ScheduleEditorOverlay: View {
                         .opacity(coordinator.isVisible ? 1 : 0)
 
                     ScheduleEditorView(schedule: route.schedule, now: route.now,
+                                       maximumFormHeight: ScheduleEditorLayout.maximumFormHeight(
+                                        in: geometry.size.height - 48),
                                        onSave: route.onSave, onClose: { dismiss(routeID: route.id) })
                         .frame(maxWidth: 520)
-                        .frame(maxHeight: max(0, geometry.size.height - 48))
                         .padding(.horizontal, 20)
                         .padding(.vertical, 24)
                         .opacity(coordinator.isVisible ? 1 : 0)
@@ -109,6 +110,7 @@ struct ScheduleEditorOverlay: View {
 struct ScheduleEditorView: View {
     let schedule: CustomSchedule?
     let now: Date
+    let maximumFormHeight: CGFloat
     let onSave: ScheduleEditorSaveAction
     let onClose: () -> Void
 
@@ -123,11 +125,14 @@ struct ScheduleEditorView: View {
     @State private var endTime: Date
     @State private var error: String?
     @State private var showDiscardConfirmation = false
+    @State private var measuredFormHeight: CGFloat?
 
     init(schedule: CustomSchedule?, now: Date,
+         maximumFormHeight: CGFloat,
          onSave: @escaping ScheduleEditorSaveAction, onClose: @escaping () -> Void) {
         self.schedule = schedule
         self.now = now
+        self.maximumFormHeight = maximumFormHeight
         self.onSave = onSave
         self.onClose = onClose
         _title = State(initialValue: schedule?.title ?? "")
@@ -153,9 +158,19 @@ struct ScheduleEditorView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView { formContent }
+            ScrollView {
+                formContent
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ScheduleEditorFormHeightKey.self,
+                                                   value: proxy.size.height)
+                        }
+                    }
+            }
                 .scrollDismissesKeyboard(.interactively)
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                .frame(height: ScheduleEditorLayout.formViewportHeight(
+                    contentHeight: measuredFormHeight, maximum: maximumFormHeight), alignment: .top)
             Divider()
             saveAction
         }
@@ -166,6 +181,11 @@ struct ScheduleEditorView: View {
             Button("放弃更改", role: .destructive) { onClose() }
             Button("继续编辑", role: .cancel) {}
         } message: { Text("当前填写的安排尚未保存。") }
+        .onPreferenceChange(ScheduleEditorFormHeightKey.self) { height in
+            guard height > 0,
+                  measuredFormHeight.map({ abs($0 - height) > 0.5 }) ?? true else { return }
+            measuredFormHeight = height
+        }
         .onAppear { titleIsFocused = true }
     }
 
@@ -205,37 +225,38 @@ struct ScheduleEditorView: View {
         .padding(.vertical, 14)
     }
 
-    @ViewBuilder
     private var formFields: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("安排事项").font(.system(size: 16))
-                titleField
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("安排事项").font(.system(size: 16))
+                    titleField
+                }
+                .padding(.vertical, 12)
+            } else {
+                HStack {
+                    Text("安排事项").font(.system(size: 16))
+                    titleField
+                }
+                .frame(minHeight: 57)
             }
-            .padding(.vertical, 12)
-        } else {
-            HStack {
-                Text("安排事项").font(.system(size: 16))
-                titleField
-            }
-            .frame(minHeight: 57)
+            Divider()
+            DatePicker("日期", selection: $date, in: Calendar.current.startOfDay(for: now)...,
+                       displayedComponents: .date)
+                .frame(minHeight: 57)
+            Divider()
+            DatePicker("时间", selection: $time, displayedComponents: .hourAndMinute)
+                .frame(minHeight: 57)
+            Divider()
+            Toggle("设置结束时间", isOn: $hasEndTime)
+                .frame(minHeight: 57)
+            Divider()
+            DatePicker("结束时间", selection: $endTime, displayedComponents: .hourAndMinute)
+                .frame(minHeight: 57)
+                .disabled(!hasEndTime)
+                .opacity(hasEndTime ? 1 : 0.42)
+                .accessibilityHint(hasEndTime ? "" : "请先开启设置结束时间")
         }
-        Divider()
-        DatePicker("日期", selection: $date, in: Calendar.current.startOfDay(for: now)...,
-                   displayedComponents: .date)
-            .frame(minHeight: 57)
-        Divider()
-        DatePicker("时间", selection: $time, displayedComponents: .hourAndMinute)
-            .frame(minHeight: 57)
-        Divider()
-        Toggle("设置结束时间", isOn: $hasEndTime)
-            .frame(minHeight: 57)
-        Divider()
-        DatePicker("结束时间", selection: $endTime, displayedComponents: .hourAndMinute)
-            .frame(minHeight: 57)
-            .disabled(!hasEndTime)
-            .opacity(hasEndTime ? 1 : 0.42)
-            .accessibilityHint(hasEndTime ? "" : "请先开启设置结束时间")
     }
 
     @ViewBuilder
@@ -268,12 +289,10 @@ struct ScheduleEditorView: View {
     private var saveAction: some View {
         let button = Button(schedule == nil ? "保存安排" : "保存更改") { save() }
             .font(.system(size: 15, weight: .bold))
-            .frame(maxWidth: .infinity, minHeight: 46)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .tint(TodayStyle.color(0x2563eb))
             .buttonBorderShape(.roundedRectangle(radius: 14))
             .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
             .accessibilityIdentifier("scheduleEditorSave")
 
         return Group {
@@ -283,6 +302,9 @@ struct ScheduleEditorView: View {
                 button.buttonStyle(.borderedProminent)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private var hasUnsavedChanges: Bool {
@@ -322,5 +344,25 @@ enum ScheduleEditorState {
             (schedule?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ||
             CourseScheduleCalculator.dateKey(date) != originalDate || time != originalTime ||
             endTime != schedule?.endTime
+    }
+}
+
+private enum ScheduleEditorFormHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+enum ScheduleEditorLayout {
+    private static let fixedChromeHeight: CGFloat = 132
+
+    static func maximumFormHeight(in availableCardHeight: CGFloat) -> CGFloat {
+        max(120, availableCardHeight - fixedChromeHeight)
+    }
+
+    static func formViewportHeight(contentHeight: CGFloat?, maximum: CGFloat) -> CGFloat {
+        min(contentHeight ?? maximum, maximum)
     }
 }

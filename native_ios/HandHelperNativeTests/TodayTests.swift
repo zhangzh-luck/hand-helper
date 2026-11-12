@@ -404,6 +404,14 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(coordinator.route?.revision, 8)
     }
 
+    func testScheduleEditorLayoutKeepsCompactContentAndCapsOnlyWhenNeeded() {
+        let maximum = ScheduleEditorLayout.maximumFormHeight(in: 560)
+        XCTAssertEqual(maximum, 428)
+        XCTAssertEqual(ScheduleEditorLayout.formViewportHeight(contentHeight: 340, maximum: maximum), 340)
+        XCTAssertEqual(ScheduleEditorLayout.formViewportHeight(contentHeight: 620, maximum: maximum), maximum)
+        XCTAssertEqual(ScheduleEditorLayout.formViewportHeight(contentHeight: nil, maximum: maximum), maximum)
+    }
+
     @MainActor
     func testScheduleEndTimePersistenceValidationAndRemoval() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
