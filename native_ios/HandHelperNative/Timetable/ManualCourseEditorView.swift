@@ -497,8 +497,7 @@ private struct ManualCourseWeekPickerShortcutLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let availableWidth = proposal.width ?? ManualCourseWeekPickerControlLayout.compactControlMinimumWidth * 4 +
             ManualCourseWeekPickerControlLayout.controlSpacing * 3
-        let columns = ManualCourseWeekPickerControlLayout.shortcutColumnCount(
-            availableWidth: availableWidth, isAccessibilitySize: isAccessibilitySize)
+        let columns = columnCount(for: subviews, availableWidth: availableWidth)
         let cellWidth = cellWidth(availableWidth: availableWidth, columns: columns)
         let rowHeights = rowHeights(for: subviews, cellWidth: cellWidth, columns: columns)
         return CGSize(width: availableWidth,
@@ -507,8 +506,7 @@ private struct ManualCourseWeekPickerShortcutLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let columns = ManualCourseWeekPickerControlLayout.shortcutColumnCount(
-            availableWidth: bounds.width, isAccessibilitySize: isAccessibilitySize)
+        let columns = columnCount(for: subviews, availableWidth: bounds.width)
         let cellWidth = cellWidth(availableWidth: bounds.width, columns: columns)
         let rowHeights = rowHeights(for: subviews, cellWidth: cellWidth, columns: columns)
         var y = bounds.minY
@@ -528,6 +526,13 @@ private struct ManualCourseWeekPickerShortcutLayout: Layout {
 
     private func cellWidth(availableWidth: CGFloat, columns: Int) -> CGFloat {
         (availableWidth - ManualCourseWeekPickerControlLayout.controlSpacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
+
+    private func columnCount(for subviews: Subviews, availableWidth: CGFloat) -> Int {
+        guard !isAccessibilitySize else { return 2 }
+        let required = subviews.map { $0.sizeThatFits(.unspecified).width }.reduce(0, +)
+            + ManualCourseWeekPickerControlLayout.controlSpacing * CGFloat(max(0, subviews.count - 1))
+        return availableWidth >= required ? 4 : 2
     }
 
     private func rowHeights(for subviews: Subviews, cellWidth: CGFloat, columns: Int) -> [CGFloat] {
@@ -641,15 +646,15 @@ private struct ManualCourseWeekPicker: View {
 
     private func bulkButton(_ title: String, selection newSelection: Set<Int>) -> some View {
         Button { updateSelection(newSelection) } label: {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(.subheadline)
                 .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(Color.accentColor)
                 .padding(.horizontal, 10)
                 .frame(minHeight: 36)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(minWidth: 44, minHeight: 44)
     }
 
     @ViewBuilder
