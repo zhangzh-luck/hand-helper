@@ -24,7 +24,7 @@ struct PersonalizationView: View {
                         ForEach(AppearanceMode.allCases, id: \.self) { mode in
                             Label(mode.settingsTitle, systemImage: mode.settingsSymbol)
                                 .labelStyle(.iconOnly)
-                                .font(.body)
+                                .font(.system(size: 20, weight: .semibold))
                                 .symbolRenderingMode(.monochrome)
                                 .tag(mode)
                         }
@@ -50,8 +50,6 @@ struct PersonalizationView: View {
                 .listRowInsets(SettingsNavigationRow.rowInsets)
             } header: {
                 Text("壁纸")
-            } footer: {
-                Text("今日页和课程表壁纸分别保存在此设备。")
             }
 
             Section {
@@ -76,7 +74,7 @@ struct PersonalizationView: View {
             } header: {
                 Text("实时活动")
             } footer: {
-                Text("默认关闭。开启后，正在进行的课程或设有结束时间的安排可显示在锁屏和支持的灵动岛；名称与地点可能在锁屏可见。")
+                Text("开启后，正在进行的课程或安排可显示在锁屏和灵动岛，相关名称与地点可能被他人看到。")
             }
         }
         .navigationTitle("个性化")
