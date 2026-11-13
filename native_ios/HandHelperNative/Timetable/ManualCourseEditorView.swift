@@ -402,16 +402,29 @@ struct ManualCourseEditorView: View {
     @ViewBuilder
     private var weekPickerOverlay: some View {
         if showingWeekPicker {
-            ZStack {
-                Color.black.opacity(reduceTransparency ? 0.48 : 0.28)
-                    .contentShape(Rectangle())
-                    .onTapGesture {}
-                ManualCourseWeekPicker(weeks: $draft.weeks,
-                                       onCancel: { showingWeekPicker = false },
-                                       onComplete: { showingWeekPicker = false })
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
-                    .accessibilityAddTraits(.isModal)
+            GeometryReader { geometry in
+                ZStack {
+                    Color.black.opacity(reduceTransparency ? 0.48 : 0.28)
+                        .contentShape(Rectangle())
+                        .onTapGesture {}
+                    ManualCourseWeekPicker(weeks: $draft.weeks,
+                                           maximumGridHeight: ManualCourseWeekPickerLayout.maximumGridHeight(
+                                            in: geometry.size.height - 32),
+                                           onCancel: dismissWeekPicker,
+                                           onComplete: dismissWeekPicker)
+                        .frame(maxWidth: 460)
+                        .padding(16)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
+                        .accessibilityAddTraits(.isModal)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+    }
+
+    private func dismissWeekPicker() {
+        withAnimation(reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.18)) {
+            showingWeekPicker = false
         }
     }
 
@@ -457,18 +470,43 @@ struct ManualCourseWeekDraft {
     var completedSelection: Set<Int>? { selection.isEmpty ? nil : selection }
 }
 
+private enum ManualCourseWeekPickerHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+enum ManualCourseWeekPickerLayout {
+    private static let fixedChromeHeight: CGFloat = 132
+
+    static func maximumGridHeight(in availableHeight: CGFloat) -> CGFloat {
+        max(140, availableHeight - fixedChromeHeight)
+    }
+
+    static func gridViewportHeight(contentHeight: CGFloat?, maximum: CGFloat) -> CGFloat {
+        min(contentHeight ?? maximum, maximum)
+    }
+}
+
 private struct ManualCourseWeekPicker: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding private var weeks: Set<Int>
     @State private var draft: ManualCourseWeekDraft
+    @State private var measuredGridHeight: CGFloat?
+    let maximumGridHeight: CGFloat
     let onCancel: () -> Void
     let onComplete: () -> Void
 
-    init(weeks: Binding<Set<Int>>, onCancel: @escaping () -> Void,
+    init(weeks: Binding<Set<Int>>, maximumGridHeight: CGFloat,
+         onCancel: @escaping () -> Void,
          onComplete: @escaping () -> Void) {
         _weeks = weeks
         _draft = State(initialValue: ManualCourseWeekDraft(weeks: weeks.wrappedValue))
+        self.maximumGridHeight = maximumGridHeight
         self.onCancel = onCancel
         self.onComplete = onComplete
     }
@@ -480,45 +518,56 @@ private struct ManualCourseWeekPicker: View {
             HStack {
                 Text("上课周次").font(.headline)
                 Spacer()
-                Button("取消", action: onCancel)
+                secondaryGlassButton("取消", action: onCancel)
             }
             .padding(.horizontal, 20)
             .frame(minHeight: 56)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                            bulkButtons
-                        }
-                    } else {
-                        HStack(spacing: 8) { bulkButtons }
-                    }
-                    Text("教学周 · 已选 \(draft.selection.count) / 20 周")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    LazyVGrid(columns: columns, spacing: 10) {
-                        ForEach(1...20, id: \.self) { week in
-                            weekButton(week)
+                gridContent
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ManualCourseWeekPickerHeightKey.self,
+                                                   value: proxy.size.height)
                         }
                     }
-                }
-                .padding(18)
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+            .frame(height: ManualCourseWeekPickerLayout.gridViewportHeight(
+                contentHeight: measuredGridHeight, maximum: maximumGridHeight), alignment: .top)
             Divider()
-            Button("完成") {
-                guard let completed = draft.completedSelection else { return }
-                weeks = completed
-                onComplete()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(draft.completedSelection == nil)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            completeAction
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+        .onPreferenceChange(ManualCourseWeekPickerHeightKey.self) { height in
+            guard height > 0,
+                  measuredGridHeight.map({ abs($0 - height) > 0.5 }) ?? true else { return }
+            measuredGridHeight = height
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    private var gridContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if dynamicTypeSize.isAccessibilitySize {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                    bulkButtons
+                }
+            } else {
+                HStack(spacing: 8) { bulkButtons }
+            }
+            Text("教学周 · 已选 \(draft.selection.count) / 20 周")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(1...20, id: \.self) { week in
+                    weekButton(week)
+                }
+            }
+        }
+        .padding(18)
     }
 
     @ViewBuilder
@@ -530,12 +579,49 @@ private struct ManualCourseWeekPicker: View {
     }
 
     private func bulkButton(_ title: String, selection newSelection: Set<Int>) -> some View {
-        Button(title) { updateSelection(newSelection) }
-            .font(.subheadline)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
-            .frame(maxWidth: .infinity)
-            .buttonStyle(.bordered)
+        secondaryGlassButton(title, fullWidth: true) { updateSelection(newSelection) }
+    }
+
+    @ViewBuilder
+    private func secondaryGlassButton(_ title: String, fullWidth: Bool = false,
+                                      action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: fullWidth ? .infinity : nil, minWidth: fullWidth ? nil : 44,
+                       minHeight: 40)
+        }
+        if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+            button.buttonStyle(.glass)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    private var completeAction: some View {
+        let button = Button("完成") {
+            guard let completed = draft.completedSelection else { return }
+            weeks = completed
+            onComplete()
+        }
+        .font(.system(size: 15, weight: .bold))
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .tint(TodayStyle.color(0x2563eb))
+        .disabled(draft.completedSelection == nil)
+
+        return Group {
+            if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+                button.buttonStyle(.glassProminent)
+            } else {
+                button.buttonStyle(.borderedProminent)
+            }
+        }
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private func weekButton(_ week: Int) -> some View {

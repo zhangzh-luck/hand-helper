@@ -237,4 +237,10 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertEqual(ManualCourseEditorLayout.formViewportHeight(contentHeight: 480, maximum: 300), 300)
         XCTAssertEqual(ManualCourseEditorLayout.maximumFormHeight(in: 160), 120)
     }
+
+    func testWeekPickerViewportStaysCompactUntilSpaceIsConstrained() {
+        XCTAssertEqual(ManualCourseWeekPickerLayout.gridViewportHeight(contentHeight: 260, maximum: 360), 260)
+        XCTAssertEqual(ManualCourseWeekPickerLayout.gridViewportHeight(contentHeight: 480, maximum: 360), 360)
+        XCTAssertEqual(ManualCourseWeekPickerLayout.maximumGridHeight(in: 180), 140)
+    }
 }
