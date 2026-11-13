@@ -21,7 +21,7 @@ struct RootView: View {
             case .login:
                 LoginView(state: state)
             case .verifying:
-                AuthenticationStatusView(title: "正在验证登录状态", message: "确认账号后即可进入航的助手。", retry: nil)
+                AuthenticationVerificationView()
             case .offline:
                 AuthenticationStatusView(title: "暂时无法验证登录状态", message: "请检查网络连接后重试。", retry: {
                     Task { await state.retrySessionVerification() }
@@ -261,6 +261,31 @@ final class AvatarPreviewCoordinator: ObservableObject {
         guard activeRouteID != nil || isSourceAvatarHidden else { return }
         activeRouteID = nil
         isSourceAvatarHidden = false
+    }
+}
+
+private struct AuthenticationVerificationView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image("BrandMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .accessibilityHidden(true)
+            Text("航的助手")
+                .font(.title3.weight(.semibold))
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("正在验证登录状态")
+            Text("正在准备你的校园空间…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 
