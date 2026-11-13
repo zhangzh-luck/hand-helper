@@ -581,7 +581,9 @@ private struct ManualCourseWeekPicker: View {
             HStack {
                 Text("上课周次").font(.headline)
                 Spacer()
-                secondaryGlassButton("取消", action: onCancel)
+                GlassCloseButton(accessibilityLabel: "取消", diameter: 36, onDarkBackground: false,
+                                 action: onCancel)
+                    .frame(width: 44, height: 44)
             }
             .padding(.horizontal, 20)
             .frame(minHeight: 56)
@@ -638,7 +640,16 @@ private struct ManualCourseWeekPicker: View {
     }
 
     private func bulkButton(_ title: String, selection newSelection: Set<Int>) -> some View {
-        secondaryGlassButton(title) { updateSelection(newSelection) }
+        Button { updateSelection(newSelection) } label: {
+            Text(title).font(.subheadline.weight(.medium))
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 36)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
 
     @ViewBuilder
@@ -674,7 +685,7 @@ private struct ManualCourseWeekPicker: View {
                     .font(.system(size: 15, weight: .bold))
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: ManualCourseWeekPickerControlLayout.completeHeight)
+            .frame(maxWidth: .infinity, minHeight: 48)
         }
         .tint(TodayStyle.color(0x2563eb))
         .disabled(draft.completedSelection == nil)
@@ -687,7 +698,8 @@ private struct ManualCourseWeekPicker: View {
             }
         }
         .buttonBorderShape(.roundedRectangle(radius: 14))
-        .frame(maxWidth: .infinity, minHeight: ManualCourseWeekPickerControlLayout.completeHeight)
+        .frame(maxWidth: 240)
+        .frame(maxWidth: .infinity, minHeight: 48)
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
     }

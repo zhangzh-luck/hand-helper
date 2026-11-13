@@ -31,7 +31,19 @@ struct RootView: View {
                                          message: state.credentialRemovalError ?? "请重试清理设备钥匙串。",
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
-                mainTabLayer
+                NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
+                                   avatarPreviewCoordinator: avatarPreviewCoordinator,
+                                   timetableDetail: timetableDetail, gradeDetail: gradeDetail,
+                                   deleteConfirmation: deleteConfirmation,
+                                   scheduleEditor: scheduleEditor,
+                                   manualCourseEditor: manualCourseEditor)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
+                                      !gradeDetail.isPresenting && !deleteConfirmation.isPresenting &&
+                                      !scheduleEditor.isPresenting && !manualCourseEditor.isPresenting)
+                    .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
+                                         gradeDetail.isPresenting || deleteConfirmation.isPresenting ||
+                                         scheduleEditor.isPresenting || manualCourseEditor.isPresenting)
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -85,29 +97,6 @@ struct RootView: View {
         } message: { request in
             Text(request.kind.message)
         }
-    }
-
-    /// Keeps the UIKit tab hierarchy outside the keyboard-safe-area layout proposal.
-    /// Modal overlays remain sibling layers so their forms can still shrink and scroll
-    /// above the keyboard without resizing the timetable behind them.
-    private var mainTabLayer: some View {
-        GeometryReader { geometry in
-            NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
-                               avatarPreviewCoordinator: avatarPreviewCoordinator,
-                               timetableDetail: timetableDetail, gradeDetail: gradeDetail,
-                               deleteConfirmation: deleteConfirmation,
-                               scheduleEditor: scheduleEditor,
-                               manualCourseEditor: manualCourseEditor)
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .ignoresSafeArea()
-                .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
-                                  !gradeDetail.isPresenting && !deleteConfirmation.isPresenting &&
-                                  !scheduleEditor.isPresenting && !manualCourseEditor.isPresenting)
-                .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
-                                     gradeDetail.isPresenting || deleteConfirmation.isPresenting ||
-                                     scheduleEditor.isPresenting || manualCourseEditor.isPresenting)
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var presentationLifecycle: some View {
