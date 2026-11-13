@@ -32,11 +32,13 @@ enum AccountSettingsConfirmation: Equatable {
 enum AccountSettingsAlert: Equatable {
     case logout(hasUnsavedChanges: Bool)
     case profileError(String)
+    case discardChanges
 
     var title: String {
         switch self {
         case .logout: "退出当前账号？"
         case .profileError: "个人资料操作失败"
+        case .discardChanges: AccountSettingsConfirmation.discardChanges.title
         }
     }
 
@@ -48,6 +50,8 @@ enum AccountSettingsAlert: Equatable {
                 : "本机已保存的个人资料会保留，重新验证同一账号后可继续使用。"
         case .profileError(let message):
             return message
+        case .discardChanges:
+            return ""
         }
     }
 }
@@ -138,11 +142,7 @@ struct ProfileView: View {
             case .removeAvatar:
                 Button("移除头像", role: .destructive) { avatar = nil }
             case .discardChanges:
-                Button("放弃修改", role: .destructive) {
-                    selectionGeneration += 1
-                    mayDismiss = true
-                    dismissProfileEditor()
-                }
+                EmptyView()
             case nil:
                 EmptyView()
             }
@@ -152,6 +152,13 @@ struct ProfileView: View {
             set: { if !$0 { activeAlert = nil } }
         )) {
             switch activeAlert {
+            case .discardChanges:
+                Button("取消", role: .cancel) { }
+                Button("放弃修改", role: .destructive) {
+                    selectionGeneration += 1
+                    mayDismiss = true
+                    dismissProfileEditor()
+                }
             case .logout:
                 Button("取消", role: .cancel) { }
                 Button("退出登录", role: .destructive) {
@@ -172,7 +179,7 @@ struct ProfileView: View {
                 EmptyView()
             }
         } message: {
-            if let activeAlert { Text(activeAlert.message) }
+            if let activeAlert, !activeAlert.message.isEmpty { Text(activeAlert.message) }
         }
     }
 
@@ -194,7 +201,7 @@ struct ProfileView: View {
             Section("显示名称") {
                 nameInput
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
                     .listRowSeparator(.hidden)
                 if let profileError = state.profileError {
                     Text(profileError).foregroundStyle(.red)
@@ -301,7 +308,11 @@ struct ProfileView: View {
     private func requestConfirmation(_ choice: AccountSettingsConfirmation) {
         guard confirmation == nil, activeAlert == nil, !logoutRequested,
               !isBusy, !showPhotoPicker, !showPreview, !showCrop else { return }
-        confirmation = choice
+        if choice == .discardChanges {
+            activeAlert = .discardChanges
+        } else {
+            confirmation = choice
+        }
     }
 
     private func dismissProfileEditor() {

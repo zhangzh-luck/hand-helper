@@ -230,6 +230,8 @@ final class ProfileTests: XCTestCase {
             .contains("本机已保存的个人资料会保留"))
         XCTAssertEqual(AccountSettingsConfirmation.removeAvatar.title, "移除头像？")
         XCTAssertEqual(AccountSettingsConfirmation.discardChanges.title, "放弃未保存的修改？")
+        XCTAssertEqual(AccountSettingsAlert.discardChanges.title, "放弃未保存的修改？")
+        XCTAssertTrue(AccountSettingsAlert.discardChanges.message.isEmpty)
         XCTAssertEqual(AccountSettingsAlert.profileError("测试错误").message, "测试错误")
     }
 
