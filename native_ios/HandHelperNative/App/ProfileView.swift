@@ -194,11 +194,12 @@ struct ProfileView: View {
             Section("显示名称") {
                 nameInput
                     .listRowBackground(Color.clear)
-                Text("头像和显示名称保存在此设备，按当前账号区分，不会修改登录用户名或教务姓名。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
                 if let profileError = state.profileError {
                     Text(profileError).foregroundStyle(.red)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
             }
 
