@@ -1,5 +1,24 @@
 import SwiftUI
 
+private enum ManualCourseEditorFormHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+enum ManualCourseEditorLayout {
+    private static let fixedChromeHeight: CGFloat = 132
+
+    static func maximumFormHeight(in availableHeight: CGFloat) -> CGFloat {
+        max(120, availableHeight - fixedChromeHeight)
+    }
+
+    static func formViewportHeight(contentHeight: CGFloat?, maximum: CGFloat) -> CGFloat {
+        min(contentHeight ?? maximum, maximum)
+    }
+}
+
 struct ManualCourseDraft {
     var name = ""
     var weeks: Set<Int>
@@ -52,105 +71,337 @@ struct ManualCourseOperationRoute: Identifiable {
     let request: TimetableManualCourseActionRequest
 }
 
-@MainActor
-struct ManualCourseEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft: ManualCourseDraft
-    @State private var pending = false
-    @State private var errorMessage: String?
-    let periods: [PeriodInfo]
-    let save: (ManualCourseDraft) throws -> Void
-    let isEditing: Bool
+typealias ManualCourseEditorSaveAction = (ManualCourseDraft) throws -> Void
 
-    init(cell: TimetableEmptyCellSelection, periods: [PeriodInfo],
-         save: @escaping (ManualCourseDraft) throws -> Void) {
-        _draft = State(initialValue: ManualCourseDraft(cell: cell))
-        self.periods = periods
-        self.save = save
-        isEditing = false
+struct ManualCourseEditorPresentationRoute: Identifiable {
+    let id = UUID()
+    let draft: ManualCourseDraft
+    let periods: [PeriodInfo]
+    let isEditing: Bool
+    let onSave: ManualCourseEditorSaveAction
+    let onFinish: () -> Void
+}
+
+@MainActor
+final class ManualCourseEditorCoordinator: ObservableObject {
+    @Published private(set) var route: ManualCourseEditorPresentationRoute?
+    @Published private(set) var isVisible = false
+    private var isDismissing = false
+
+    var isPresenting: Bool { route != nil }
+
+    func present(draft: ManualCourseDraft, periods: [PeriodInfo], isEditing: Bool,
+                 onSave: @escaping ManualCourseEditorSaveAction,
+                 onFinish: @escaping () -> Void) {
+        guard route == nil else { return }
+        route = ManualCourseEditorPresentationRoute(draft: draft, periods: periods,
+                                                    isEditing: isEditing, onSave: onSave,
+                                                    onFinish: onFinish)
+        isVisible = false
+        isDismissing = false
     }
 
-    init(rule: ManualCourseRule, periods: [PeriodInfo],
-         save: @escaping (ManualCourseDraft) throws -> Void) {
-        _draft = State(initialValue: ManualCourseDraft(rule: rule))
-        self.periods = periods
-        self.save = save
-        isEditing = true
+    func show(id: UUID) {
+        guard route?.id == id, !isDismissing, !isVisible else { return }
+        isVisible = true
+    }
+
+    func prepareDismissal(id: UUID) -> Bool {
+        guard route?.id == id, isVisible, !isDismissing else { return false }
+        isDismissing = true
+        return true
+    }
+
+    func hide(id: UUID) {
+        guard route?.id == id, isDismissing, isVisible else { return }
+        isVisible = false
+    }
+
+    func finishDismissal(id: UUID) {
+        guard let route, route.id == id, isDismissing, !isVisible else { return }
+        self.route = nil
+        isDismissing = false
+        route.onFinish()
+    }
+
+    func clear() {
+        guard route != nil || isVisible || isDismissing else { return }
+        route = nil
+        isVisible = false
+        isDismissing = false
+    }
+}
+
+struct ManualCourseEditorOverlay: View {
+    @ObservedObject var coordinator: ManualCourseEditorCoordinator
+    let reduceMotion: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if let route = coordinator.route {
+            GeometryReader { geometry in
+                ZStack {
+                    Color.black
+                        .opacity(reduceTransparency ? 0.56 : 0.34)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {}
+                        .opacity(coordinator.isVisible ? 1 : 0)
+
+                    ManualCourseEditorView(route: route,
+                                           maximumFormHeight: ManualCourseEditorLayout.maximumFormHeight(
+                                            in: geometry.size.height - 48),
+                                           onClose: { dismiss(routeID: route.id) })
+                        .frame(maxWidth: 520)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 24)
+                        .opacity(coordinator.isVisible ? 1 : 0)
+                        .scaleEffect(reduceMotion ? 1 : (coordinator.isVisible ? 1 : 0.96))
+                        .accessibilityAddTraits(.isModal)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .onAppear { withAnimation(animation) { coordinator.show(id: route.id) } }
+        }
+    }
+
+    private var animation: Animation {
+        reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.22)
+    }
+
+    private func dismiss(routeID: UUID) {
+        guard coordinator.prepareDismissal(id: routeID) else { return }
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            coordinator.hide(id: routeID)
+        } completion: {
+            coordinator.finishDismissal(id: routeID)
+        }
+    }
+}
+
+private enum ManualCourseEditorDestination: Hashable {
+    case weeks
+}
+
+@MainActor
+struct ManualCourseEditorView: View {
+    @State private var draft: ManualCourseDraft
+    @State private var navigationPath: [ManualCourseEditorDestination] = []
+    @State private var pending = false
+    @State private var errorMessage: String?
+    @State private var measuredFormHeight: CGFloat?
+    let route: ManualCourseEditorPresentationRoute
+    let maximumFormHeight: CGFloat
+    let onClose: () -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AccessibilityFocusState private var titleFocused: Bool
+
+    init(route: ManualCourseEditorPresentationRoute, maximumFormHeight: CGFloat,
+         onClose: @escaping () -> Void) {
+        _draft = State(initialValue: route.draft)
+        self.route = route
+        self.maximumFormHeight = maximumFormHeight
+        self.onClose = onClose
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("课程") {
-                    TextField("课程名称", text: $draft.name)
-                        .accessibilityLabel("课程名称，必填")
-                    NavigationLink {
+        NavigationStack(path: $navigationPath) {
+            editorCard
+                .navigationDestination(for: ManualCourseEditorDestination.self) { destination in
+                    switch destination {
+                    case .weeks:
                         ManualCourseWeekPicker(weeks: $draft.weeks)
-                    } label: {
-                        LabeledContent("上课周次", value: weekSummary)
-                    }
-                    Picker("星期", selection: $draft.weekday) {
-                        ForEach(1...7, id: \.self) { day in
-                            Text(["周一", "周二", "周三", "周四", "周五", "周六", "周日"][day - 1]).tag(day)
-                        }
-                    }
-                    Picker("开始节次", selection: $draft.startPeriod) {
-                        ForEach(periods, id: \.periodNumber) { period in
-                            Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.startTime))")
-                                .tag(period.periodNumber)
-                        }
-                    }
-                    Picker("结束节次", selection: $draft.endPeriod) {
-                        ForEach(periods, id: \.periodNumber) { period in
-                            Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.endTime))")
-                                .tag(period.periodNumber)
-                        }
                     }
                 }
-                Section("补充信息") {
-                    TextField("教室（选填）", text: $draft.room)
-                    TextField("任课教师（选填）", text: $draft.teacher)
-                }
-                if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
-                }
-            }
-            .navigationTitle(isEditing ? "编辑课程" : "添加课程")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }.disabled(pending)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        guard !pending else { return }
-                        if let message = draft.validationMessage(
-                            availablePeriods: Set(periods.map(\.periodNumber))) {
-                            errorMessage = message
-                            return
-                        }
-                        pending = true
-                        errorMessage = nil
-                        defer { pending = false }
-                        do {
-                            try save(draft)
-                            dismiss()
-                        } catch {
-                            errorMessage = error.localizedDescription
-                        }
-                    } label: {
-                        if pending { ProgressView() } else { Text("保存") }
-                    }
-                    .disabled(pending)
-                }
-            }
         }
-        .interactiveDismissDisabled(pending)
+        .onAppear { titleFocused = true }
     }
 
     private var weekSummary: String {
         let sorted = draft.weeks.sorted()
         return sorted.isEmpty ? "请选择" : "第 \(sorted.map(String.init).joined(separator: "、")) 周"
+    }
+
+    private var editorCard: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                formContent
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ManualCourseEditorFormHeightKey.self,
+                                                   value: proxy.size.height)
+                        }
+                    }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+            .frame(height: ManualCourseEditorLayout.formViewportHeight(
+                contentHeight: measuredFormHeight, maximum: maximumFormHeight), alignment: .top)
+            Divider()
+            saveAction
+        }
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+        .onPreferenceChange(ManualCourseEditorFormHeightKey.self) { height in
+            guard height > 0,
+                  measuredFormHeight.map({ abs($0 - height) > 0.5 }) ?? true else { return }
+            measuredFormHeight = height
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(route.isEditing ? "编辑课程" : "添加课程")
+                .font(.headline)
+                .accessibilityFocused($titleFocused)
+            Spacer(minLength: 0)
+            GlassCloseButton(accessibilityLabel: "关闭", diameter: 36, onDarkBackground: false,
+                             action: onClose)
+                .frame(width: 44, height: 44)
+                .disabled(pending)
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 8)
+        .frame(minHeight: 56)
+    }
+
+    private var formContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            courseFieldsSurface
+            supplementaryFieldsSurface
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("manualCourseEditorError")
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private var courseFields: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("课程名称")
+                TextField("必填", text: $draft.name)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel("课程名称，必填")
+            }
+            .frame(minHeight: 57)
+            Divider()
+            NavigationLink(value: ManualCourseEditorDestination.weeks) {
+                LabeledContent("上课周次", value: weekSummary)
+            }
+            .frame(minHeight: 57)
+            Divider()
+            Picker("星期", selection: $draft.weekday) {
+                ForEach(1...7, id: \.self) { day in
+                    Text(["周一", "周二", "周三", "周四", "周五", "周六", "周日"][day - 1]).tag(day)
+                }
+            }
+            .frame(minHeight: 57)
+            Divider()
+            Picker("开始节次", selection: $draft.startPeriod) {
+                ForEach(route.periods, id: \.periodNumber) { period in
+                    Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.startTime))")
+                        .tag(period.periodNumber)
+                }
+            }
+            .frame(minHeight: 57)
+            Divider()
+            Picker("结束节次", selection: $draft.endPeriod) {
+                ForEach(route.periods, id: \.periodNumber) { period in
+                    Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.endTime))")
+                        .tag(period.periodNumber)
+                }
+            }
+            .frame(minHeight: 57)
+        }
+    }
+
+    private var supplementaryFields: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("教室")
+                TextField("选填", text: $draft.room)
+                    .multilineTextAlignment(.trailing)
+            }
+            .frame(minHeight: 57)
+            Divider()
+            HStack {
+                Text("任课教师")
+                TextField("选填", text: $draft.teacher)
+                    .multilineTextAlignment(.trailing)
+            }
+            .frame(minHeight: 57)
+        }
+    }
+
+    @ViewBuilder
+    private var courseFieldsSurface: some View { glassSurface(courseFields) }
+
+    @ViewBuilder
+    private var supplementaryFieldsSurface: some View { glassSurface(supplementaryFields) }
+
+    @ViewBuilder
+    private func glassSurface<Content: View>(_ content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+            content.padding(.horizontal, 15).glassEffect(.regular, in: shape)
+        } else if reduceTransparency || colorSchemeContrast == .increased {
+            content.padding(.horizontal, 15)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
+        } else {
+            content.padding(.horizontal, 15).background(.regularMaterial, in: shape)
+        }
+    }
+
+    private var saveAction: some View {
+        let button = Button(action: save) {
+            if pending { ProgressView().tint(.white) }
+            else { Text(route.isEditing ? "保存更改" : "保存课程") }
+        }
+        .font(.system(size: 15, weight: .bold))
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .tint(TodayStyle.color(0x2563eb))
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .disabled(pending || draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .accessibilityIdentifier("manualCourseEditorSave")
+
+        return Group {
+            if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
+                button.buttonStyle(.glassProminent)
+            } else {
+                button.buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private func save() {
+        guard !pending else { return }
+        if let message = draft.validationMessage(availablePeriods: Set(route.periods.map(\.periodNumber))) {
+            errorMessage = message
+            return
+        }
+        pending = true
+        errorMessage = nil
+        defer { pending = false }
+        do {
+            try route.onSave(draft)
+            onClose()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

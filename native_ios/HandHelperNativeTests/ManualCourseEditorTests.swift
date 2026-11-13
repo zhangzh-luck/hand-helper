@@ -190,4 +190,51 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertNil(coordinator.open(cell, context: context(), tappedAt: 11))
         XCTAssertNotNil(coordinator.route)
     }
+
+    @MainActor
+    func testOverlayCoordinatorIgnoresDuplicatesAndFinishesOnlyCurrentRoute() {
+        let coordinator = ManualCourseEditorCoordinator()
+        var firstFinishCount = 0
+        var secondFinishCount = 0
+        let draft = ManualCourseDraft(cell: cell)
+
+        coordinator.present(draft: draft, periods: [], isEditing: false, onSave: { _ in }, onFinish: {
+            firstFinishCount += 1
+        })
+        let firstID = try! XCTUnwrap(coordinator.route?.id)
+        coordinator.present(draft: draft, periods: [], isEditing: false, onSave: { _ in }, onFinish: {
+            secondFinishCount += 1
+        })
+        XCTAssertEqual(coordinator.route?.id, firstID)
+
+        coordinator.show(id: firstID)
+        XCTAssertTrue(coordinator.isVisible)
+        XCTAssertTrue(coordinator.prepareDismissal(id: firstID))
+        coordinator.hide(id: firstID)
+        coordinator.finishDismissal(id: firstID)
+        XCTAssertNil(coordinator.route)
+        XCTAssertEqual(firstFinishCount, 1)
+        XCTAssertEqual(secondFinishCount, 0)
+    }
+
+    @MainActor
+    func testOverlayCoordinatorClearMakesStaleCompletionHarmless() {
+        let coordinator = ManualCourseEditorCoordinator()
+        var finishCount = 0
+        coordinator.present(draft: ManualCourseDraft(cell: cell), periods: [], isEditing: false,
+                            onSave: { _ in }, onFinish: { finishCount += 1 })
+        let routeID = try! XCTUnwrap(coordinator.route?.id)
+        coordinator.show(id: routeID)
+        XCTAssertTrue(coordinator.prepareDismissal(id: routeID))
+        coordinator.clear()
+        coordinator.finishDismissal(id: routeID)
+        XCTAssertNil(coordinator.route)
+        XCTAssertEqual(finishCount, 0)
+    }
+
+    func testCompactFormViewportNeverExceedsAvailableHeight() {
+        XCTAssertEqual(ManualCourseEditorLayout.formViewportHeight(contentHeight: 180, maximum: 300), 180)
+        XCTAssertEqual(ManualCourseEditorLayout.formViewportHeight(contentHeight: 480, maximum: 300), 300)
+        XCTAssertEqual(ManualCourseEditorLayout.maximumFormHeight(in: 160), 120)
+    }
 }

@@ -19,6 +19,7 @@ enum TimetableWallpaperStyle {
 struct TimetableView: View {
     @ObservedObject private var state: AppState
     @ObservedObject private var detail: TimetableCourseDetailCoordinator
+    @ObservedObject private var manualCourseEditor: ManualCourseEditorCoordinator
     private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TimetableViewModel
     @StateObject private var emptyCellSelection = TimetableEmptyCellSelectionCoordinator()
@@ -31,7 +32,6 @@ struct TimetableView: View {
     @State private var unplacedCourses: [UnplacedCourse] = []
     @State private var conflictCourses: [CourseSession] = []
     @State private var showingConflicts = false
-    @State private var editingManualCourse: ManualCourseOperationRoute?
     @State private var deletingManualCourse: ManualCourseOperationRoute?
     @State private var pendingListManualAction: TimetableManualCourseActionRequest?
     @State private var manualCourseError: String?
@@ -41,9 +41,11 @@ struct TimetableView: View {
     @State private var wallpaperError: String?
 
     init(state: AppState, detail: TimetableCourseDetailCoordinator? = nil,
+         manualCourseEditor: ManualCourseEditorCoordinator? = nil,
          deleteConfirmation: DestructiveConfirmationCoordinator? = nil) {
         self.state = state
         self.detail = detail ?? TimetableCourseDetailCoordinator()
+        self.manualCourseEditor = manualCourseEditor ?? ManualCourseEditorCoordinator()
         self.deleteConfirmation = deleteConfirmation ?? DestructiveConfirmationCoordinator()
         let repository = DiskCourseRepository(api: state.api, session: state.sessionStore,
                                               account: state.verifiedAccount)
@@ -169,28 +171,6 @@ struct TimetableView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingUnplaced, onDismiss: presentPendingListManualAction) { unplacedList }
             .sheet(isPresented: $showingConflicts, onDismiss: presentPendingListManualAction) { conflictList }
-            .sheet(item: Binding(get: { emptyCellSelection.route },
-                                 set: { if $0 == nil { emptyCellSelection.dismissRoute(reason: "sheet_closed") } }),
-                   onDismiss: { emptyCellSelection.sheetDidDismiss() }) { route in
-                let _ = TimetableAddCourseDiagnostics.record("T3_sheet_content_created",
-                    operationID: route.operationID, startedAt: route.tappedAt)
-                ManualCourseEditorView(cell: route.cell, periods: model.periods) { draft in
-                    try model.addManualCourse(draft, from: route.cell)
-                }
-                .onAppear {
-                    TimetableAddCourseDiagnostics.record("T4_sheet_onAppear",
-                        operationID: route.operationID, startedAt: route.tappedAt)
-                }
-                .onDisappear {
-                    TimetableAddCourseDiagnostics.record("sheet_onDisappear",
-                        operationID: route.operationID, startedAt: route.tappedAt)
-                }
-            }
-            .sheet(item: $editingManualCourse) { route in
-                ManualCourseEditorView(rule: route.rule, periods: model.periods) { draft in
-                    try model.updateManualCourse(draft, for: route.request)
-                }
-            }
             .alert("无法操作课程", isPresented: Binding(get: { manualCourseError != nil },
                                                 set: { if !$0 { manualCourseError = nil } })) {
                 Button("好", role: .cancel) { manualCourseError = nil }
@@ -205,7 +185,7 @@ struct TimetableView: View {
                 if tab != .timetable {
                     emptyCellSelection.clear(reason: "tab_changed")
                     emptyCellSelection.dismissRoute(reason: "tab_changed")
-                    if editingManualCourse != nil { editingManualCourse = nil }
+                    manualCourseEditor.clear()
                     if deletingManualCourse != nil { deletingManualCourse = nil }
                     if pendingListManualAction != nil { pendingListManualAction = nil }
                     clearManualConfirmation()
@@ -231,7 +211,7 @@ struct TimetableView: View {
             .onChange(of: state.authenticationRevision) { _, _ in
                 emptyCellSelection.clear(reason: "authentication_changed")
                 emptyCellSelection.dismissRoute(reason: "authentication_changed")
-                editingManualCourse = nil
+                manualCourseEditor.clear()
                 deletingManualCourse = nil
                 pendingListManualAction = nil
                 clearManualConfirmation()
@@ -251,7 +231,7 @@ struct TimetableView: View {
             .onChange(of: model.selectedTermID) { _, _ in
                 emptyCellSelection.clear(reason: "term_changed")
                 emptyCellSelection.dismissRoute(reason: "term_changed")
-                editingManualCourse = nil
+                manualCourseEditor.clear()
                 deletingManualCourse = nil
                 pendingListManualAction = nil
                 clearManualConfirmation()
@@ -262,7 +242,7 @@ struct TimetableView: View {
             .onChange(of: model.snapshotRevision) { _, _ in
                 emptyCellSelection.clear(reason: "snapshot_changed")
                 emptyCellSelection.dismissRoute(reason: "snapshot_changed")
-                editingManualCourse = nil
+                manualCourseEditor.clear()
                 deletingManualCourse = nil
                 pendingListManualAction = nil
                 clearManualConfirmation()
@@ -273,7 +253,7 @@ struct TimetableView: View {
             .onChange(of: model.selectedWeek) { _, _ in
                 emptyCellSelection.clear(reason: "week_changed")
                 emptyCellSelection.dismissRoute(reason: "week_changed")
-                editingManualCourse = nil
+                manualCourseEditor.clear()
                 deletingManualCourse = nil
                 pendingListManualAction = nil
                 clearManualConfirmation()
@@ -290,6 +270,10 @@ struct TimetableView: View {
                 } else {
                     presentManualAction(request)
                 }
+            }
+            .onChange(of: emptyCellSelection.route?.id) { _, _ in
+                guard let route = emptyCellSelection.route else { return }
+                presentManualCourseEditor(route)
             }
         }
     }
@@ -552,6 +536,19 @@ struct TimetableView: View {
         }
     }
 
+    private func presentManualCourseEditor(_ route: ManualCourseEditorRoute) {
+        TimetableAddCourseDiagnostics.record("T3_overlay_route_created",
+                                             operationID: route.operationID,
+                                             startedAt: route.tappedAt)
+        manualCourseEditor.present(draft: ManualCourseDraft(cell: route.cell), periods: model.periods,
+                                   isEditing: false, onSave: { draft in
+            try model.addManualCourse(draft, from: route.cell)
+        }, onFinish: {
+            guard emptyCellSelection.route?.id == route.id else { return }
+            emptyCellSelection.dismissRoute(reason: "overlay_closed")
+        })
+    }
+
     private func periodLabel(_ period: PeriodInfo) -> some View {
         VStack(spacing: 1) {
             Text("\(period.periodNumber)").font(.caption.weight(.bold))
@@ -733,7 +730,11 @@ struct TimetableView: View {
         }
         let route = ManualCourseOperationRoute(rule: rule, request: request)
         switch request.action {
-        case .edit: editingManualCourse = route
+        case .edit:
+            manualCourseEditor.present(draft: ManualCourseDraft(rule: route.rule), periods: model.periods,
+                                       isEditing: true, onSave: { draft in
+                try model.updateManualCourse(draft, for: route.request)
+            }, onFinish: {})
         case .delete:
             deletingManualCourse = route
             if !deleteConfirmation.present(.manualCourse, confirm: {
