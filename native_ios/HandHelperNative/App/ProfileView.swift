@@ -58,6 +58,7 @@ struct ProfileView: View {
     let revision: Int
     let presentation: ProfilePresentation
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.settingsNavigator) private var settingsNavigator
     @State private var original: LocalProfile
     @State private var name: String
@@ -178,36 +179,22 @@ struct ProfileView: View {
     private var editor: some View {
         Form {
             Section {
-                VStack(spacing: 16) {
+                VStack(spacing: 10) {
                     Button { showPreview = true } label: {
                         avatarFace.frame(width: 112, height: 112)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("查看头像大图")
-                    HStack(spacing: 12) {
-                        Button("从相册选择") { showPhotoPicker = true }
-                        if avatar != nil {
-                            Button("移除头像", role: .destructive) { requestConfirmation(.removeAvatar) }
-                        }
-                    }
-                    .buttonStyle(.bordered)
+                    avatarActions
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 5)
             } header: { Text("头像") }
 
             Section("显示名称") {
-                TextField("显示名称", text: $name)
-                    .textContentType(.nickname)
-                    .autocorrectionDisabled()
-                    .accessibilityLabel("显示名称")
-                Text("仅用于本机显示，不会修改登录用户名或教务姓名。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Text("头像和显示名称仅保存在此设备，不会上传服务器，也不会在其他设备同步。")
+                nameInput
+                    .listRowBackground(Color.clear)
+                Text("头像和显示名称保存在此设备，按当前账号区分，不会修改登录用户名或教务姓名。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 if let profileError = state.profileError {
@@ -216,10 +203,8 @@ struct ProfileView: View {
             }
 
             Section {
-                Button(role: .destructive) { requestLogoutAlert() } label: {
-                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-                .disabled(isBusy || logoutRequested || showPhotoPicker || showPreview || showCrop)
+                logoutButton
+                    .listRowBackground(Color.clear)
             }
         }
         .navigationTitle("账户设置")
@@ -239,6 +224,51 @@ struct ProfileView: View {
                 Button("保存") { save() }
                     .disabled(!dirty || !validName || isBusy)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var avatarActions: some View {
+        let actions = HStack(spacing: 12) {
+            Button("从相册选择") { showPhotoPicker = true }
+            if avatar != nil {
+                Button("移除头像", role: .destructive) { requestConfirmation(.removeAvatar) }
+            }
+        }
+        if #available(iOS 26.0, *), !reduceTransparency {
+            actions.buttonStyle(.glass)
+        } else {
+            actions.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private var nameInput: some View {
+        let field = TextField("显示名称", text: $name)
+            .textContentType(.nickname)
+            .autocorrectionDisabled()
+            .accessibilityLabel("显示名称")
+            .padding(12)
+        if #available(iOS 26.0, *), !reduceTransparency {
+            field.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            field.background(Color(uiColor: .secondarySystemGroupedBackground),
+                             in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    @ViewBuilder
+    private var logoutButton: some View {
+        let button = Button(role: .destructive) { requestLogoutAlert() } label: {
+            Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .tint(.red)
+        .disabled(isBusy || logoutRequested || showPhotoPicker || showPreview || showCrop)
+        if #available(iOS 26.0, *), !reduceTransparency {
+            button.buttonStyle(.glassProminent)
+        } else {
+            button.buttonStyle(.borderedProminent)
         }
     }
 
