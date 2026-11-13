@@ -216,6 +216,26 @@ final class AnalysisDataTests: XCTestCase {
     }
 
     @MainActor
+    func testAISettingsLoadAndUserModelSelection() async {
+        let settings = #"{"configured":true,"provider":"APIKEY.FAN","base_url":"https://api.apikey.fan/v1","model":"model-a","api_key_hint":"••••abcd","available_models":["model-a","model-b"],"models_synced_at":null,"requires_apikey_fan_migration":false}"#
+        let api = AnalysisAPIStub(responses: ["/api/v1/ai/settings": settings])
+        let state = await makeState(user: "alice", api: api)
+        let model = AIModelSettingsModel(state: state)
+        model.load()
+        for _ in 0..<100 where !model.ready { await Task.yield() }
+        XCTAssertTrue(model.ready)
+        XCTAssertEqual(api.paths.filter { $0 == "/api/v1/ai/settings/model" }.count, 0)
+        XCTAssertNil(model.message)
+        model.selectSavedModel("model-a")
+        XCTAssertEqual(api.paths.filter { $0 == "/api/v1/ai/settings/model" }.count, 0)
+        model.selectSavedModel("model-b")
+        model.selectSavedModel("model-b")
+        for _ in 0..<100 where model.switching { await Task.yield() }
+        XCTAssertEqual(api.paths.filter { $0 == "/api/v1/ai/settings/model" }.count, 1)
+        XCTAssertEqual(model.message, "模型已切换。")
+    }
+
+    @MainActor
     private func makeState(user: String, api: AnalysisAPIStub, cookie: String? = nil) async -> AppState {
         let preferences = UserDefaults(suiteName: UUID().uuidString)!
         let state = AppState(api: api, sessionStore: AnalysisSessionStub(cookie: cookie ?? "session=\(user)"),
