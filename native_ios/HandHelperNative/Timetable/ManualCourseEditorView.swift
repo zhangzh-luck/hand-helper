@@ -590,7 +590,7 @@ private struct ManualCourseWeekPicker: View {
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-                .frame(maxWidth: fullWidth ? .infinity : nil, minWidth: fullWidth ? nil : 44,
+                .frame(minWidth: fullWidth ? nil : 44, maxWidth: fullWidth ? .infinity : nil,
                        minHeight: 40)
         }
         if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
