@@ -396,7 +396,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         CourseEditorKeyboardLayoutDiagnostics.recordNativeContainer(
             bounds: view.bounds,
             safeAreaInsets: view.safeAreaInsets,
-            timetableHost: viewControllers?[AppTab.timetable.rawValue]?.view,
+            timetableHost: viewControllers?[AppTab.timetable.rawValue].view,
             editorIsPresenting: suppressKeyboardTabBarUpdates)
 #endif
     }

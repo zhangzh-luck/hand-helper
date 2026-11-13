@@ -653,11 +653,11 @@ private struct ManualCourseWeekPicker: View {
         }
         if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
             button.buttonStyle(.glass)
-                .frame(maxWidth: .infinity, minWidth: 44,
+                .frame(minWidth: 44, maxWidth: .infinity,
                        minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         } else {
             button.buttonStyle(.bordered)
-                .frame(maxWidth: .infinity, minWidth: 44,
+                .frame(minWidth: 44, maxWidth: .infinity,
                        minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         }
     }
