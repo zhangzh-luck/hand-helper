@@ -1,1 +1,7 @@
-{"images":[{"filename":"login_icon.png","idiom":"universal"}],"info":{"author":"xcode","version":1}}
+{
+  "images": [
+    { "filename": "BrandMark-Light.png", "idiom": "universal" },
+    { "filename": "BrandMark-Dark.png", "idiom": "universal", "appearances": [{ "appearance": "luminosity", "value": "dark" }] }
+  ],
+  "info": { "author": "xcode", "version": 1 }
+}
