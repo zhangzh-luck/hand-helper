@@ -179,14 +179,10 @@ struct ManualCourseEditorOverlay: View {
     }
 }
 
-private enum ManualCourseEditorDestination: Hashable {
-    case weeks
-}
-
 @MainActor
 struct ManualCourseEditorView: View {
     @State private var draft: ManualCourseDraft
-    @State private var navigationPath: [ManualCourseEditorDestination] = []
+    @State private var showingWeekPicker = false
     @State private var pending = false
     @State private var errorMessage: String?
     @State private var measuredFormHeight: CGFloat?
@@ -195,7 +191,6 @@ struct ManualCourseEditorView: View {
     let onClose: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var titleFocused: Bool
 
     init(route: ManualCourseEditorPresentationRoute, maximumFormHeight: CGFloat,
@@ -207,15 +202,8 @@ struct ManualCourseEditorView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            editorCard
-                .navigationDestination(for: ManualCourseEditorDestination.self) { destination in
-                    switch destination {
-                    case .weeks:
-                        ManualCourseWeekPicker(weeks: $draft.weeks)
-                    }
-                }
-        }
+        editorCard
+            .overlay { weekPickerOverlay }
         .onAppear { titleFocused = true }
     }
 
@@ -296,31 +284,53 @@ struct ManualCourseEditorView: View {
             }
             .frame(minHeight: 57)
             Divider()
-            NavigationLink(value: ManualCourseEditorDestination.weeks) {
+            Button {
+                showingWeekPicker = true
+            } label: {
                 LabeledContent("上课周次", value: weekSummary)
             }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .frame(minHeight: 57)
             Divider()
-            Picker("星期", selection: $draft.weekday) {
-                ForEach(1...7, id: \.self) { day in
-                    Text(["周一", "周二", "周三", "周四", "周五", "周六", "周日"][day - 1]).tag(day)
+            HStack {
+                Text("星期")
+                Spacer(minLength: 12)
+                Picker("星期", selection: $draft.weekday) {
+                    ForEach(1...7, id: \.self) { day in
+                        Text(["周一", "周二", "周三", "周四", "周五", "周六", "周日"][day - 1]).tag(day)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
             .frame(minHeight: 57)
             Divider()
-            Picker("开始节次", selection: $draft.startPeriod) {
-                ForEach(route.periods, id: \.periodNumber) { period in
-                    Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.startTime))")
-                        .tag(period.periodNumber)
+            HStack {
+                Text("开始节次")
+                Spacer(minLength: 12)
+                Picker("开始节次", selection: $draft.startPeriod) {
+                    ForEach(route.periods, id: \.periodNumber) { period in
+                        Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.startTime))")
+                            .tag(period.periodNumber)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
             .frame(minHeight: 57)
             Divider()
-            Picker("结束节次", selection: $draft.endPeriod) {
-                ForEach(route.periods, id: \.periodNumber) { period in
-                    Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.endTime))")
-                        .tag(period.periodNumber)
+            HStack {
+                Text("结束节次")
+                Spacer(minLength: 12)
+                Picker("结束节次", selection: $draft.endPeriod) {
+                    ForEach(route.periods, id: \.periodNumber) { period in
+                        Text("第 \(period.periodNumber) 节 · \(TimetablePeriodLabel.safeTime(period.endTime))")
+                            .tag(period.periodNumber)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
             .frame(minHeight: 57)
         }
@@ -382,9 +392,26 @@ struct ManualCourseEditorView: View {
                 button.buttonStyle(.borderedProminent)
             }
         }
+        .buttonBorderShape(.roundedRectangle(radius: 14))
         .frame(maxWidth: .infinity, minHeight: 52)
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
+    }
+
+    @ViewBuilder
+    private var weekPickerOverlay: some View {
+        if showingWeekPicker {
+            ZStack {
+                Color.black.opacity(reduceTransparency ? 0.48 : 0.28)
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+                ManualCourseWeekPicker(weeks: $draft.weeks,
+                                       onCancel: { showingWeekPicker = false },
+                                       onComplete: { showingWeekPicker = false })
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
+                    .accessibilityAddTraits(.isModal)
+            }
+        }
     }
 
     private func save() {
@@ -430,55 +457,67 @@ struct ManualCourseWeekDraft {
 }
 
 private struct ManualCourseWeekPicker: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding private var weeks: Set<Int>
     @State private var draft: ManualCourseWeekDraft
+    let onCancel: () -> Void
+    let onComplete: () -> Void
 
-    init(weeks: Binding<Set<Int>>) {
+    init(weeks: Binding<Set<Int>>, onCancel: @escaping () -> Void,
+         onComplete: @escaping () -> Void) {
         _weeks = weeks
         _draft = State(initialValue: ManualCourseWeekDraft(weeks: weeks.wrappedValue))
+        self.onCancel = onCancel
+        self.onComplete = onComplete
     }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 5)
 
     var body: some View {
-        Form {
-            Section {
-                if dynamicTypeSize.isAccessibilitySize {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                        bulkButtons
+        VStack(spacing: 0) {
+            HStack {
+                Text("上课周次").font(.headline)
+                Spacer()
+                Button("取消", action: onCancel)
+            }
+            .padding(.horizontal, 20)
+            .frame(minHeight: 56)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                            bulkButtons
+                        }
+                    } else {
+                        HStack(spacing: 8) { bulkButtons }
                     }
-                } else {
-                    HStack(spacing: 8) { bulkButtons }
-                }
-            }
-            Section("教学周 · 已选 \(draft.selection.count) / 20 周") {
-                LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(1...20, id: \.self) { week in
-                        weekButton(week)
+                    Text("教学周 · 已选 \(draft.selection.count) / 20 周")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        ForEach(1...20, id: \.self) { week in
+                            weekButton(week)
+                        }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(18)
             }
+            Divider()
+            Button("完成") {
+                guard let completed = draft.completedSelection else { return }
+                weeks = completed
+                onComplete()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(draft.completedSelection == nil)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
         }
-        .navigationTitle("上课周次")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("完成") {
-                    guard let completed = draft.completedSelection else { return }
-                    weeks = completed
-                    dismiss()
-                }
-                .disabled(draft.completedSelection == nil)
-            }
-        }
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
