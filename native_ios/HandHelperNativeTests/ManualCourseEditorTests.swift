@@ -243,4 +243,17 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertEqual(ManualCourseWeekPickerLayout.gridViewportHeight(contentHeight: 480, maximum: 360), 360)
         XCTAssertEqual(ManualCourseWeekPickerLayout.maximumGridHeight(in: 180), 140)
     }
+
+    func testWeekPickerControlsKeepCompactVisualsAndAccessibleTargets() {
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.compactVisualHeight, 38)
+        XCTAssertGreaterThanOrEqual(ManualCourseWeekPickerControlLayout.minimumTouchHeight, 44)
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.completeHeight, 52)
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.controlSpacing, 8)
+    }
+
+    @MainActor
+    func testCourseEditorKeyboardSuppressionPolicyIsScopedToCourseEditor() {
+        XCTAssertTrue(NativeTabController.shouldSuppressKeyboardTabBarUpdates(forManualCourseEditor: true))
+        XCTAssertFalse(NativeTabController.shouldSuppressKeyboardTabBarUpdates(forManualCourseEditor: false))
+    }
 }

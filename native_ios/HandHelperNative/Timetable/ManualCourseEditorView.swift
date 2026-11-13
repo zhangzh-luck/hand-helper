@@ -477,6 +477,13 @@ private enum ManualCourseWeekPickerHeightKey: PreferenceKey {
     }
 }
 
+enum ManualCourseWeekPickerControlLayout {
+    static let compactVisualHeight: CGFloat = 38
+    static let minimumTouchHeight: CGFloat = 44
+    static let completeHeight: CGFloat = 52
+    static let controlSpacing: CGFloat = 8
+}
+
 enum ManualCourseWeekPickerLayout {
     private static let fixedChromeHeight: CGFloat = 132
 
@@ -556,7 +563,7 @@ private struct ManualCourseWeekPicker: View {
                     bulkButtons
                 }
             } else {
-                HStack(spacing: 8) { bulkButtons }
+                HStack(spacing: ManualCourseWeekPickerControlLayout.controlSpacing) { bulkButtons }
             }
             Text("教学周 · 已选 \(draft.selection.count) / 20 周")
                 .font(.subheadline)
@@ -579,35 +586,42 @@ private struct ManualCourseWeekPicker: View {
     }
 
     private func bulkButton(_ title: String, selection newSelection: Set<Int>) -> some View {
-        secondaryGlassButton(title, fullWidth: true) { updateSelection(newSelection) }
+        secondaryGlassButton(title) { updateSelection(newSelection) }
     }
 
     @ViewBuilder
-    private func secondaryGlassButton(_ title: String, fullWidth: Bool = false,
-                                      action: @escaping () -> Void) -> some View {
+    private func secondaryGlassButton(_ title: String, action: @escaping () -> Void) -> some View {
         let button = Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-                .frame(minWidth: fullWidth ? nil : 44, maxWidth: fullWidth ? .infinity : nil,
-                       minHeight: 40)
+                .padding(.horizontal, 10)
+                .frame(minHeight: ManualCourseWeekPickerControlLayout.compactVisualHeight)
         }
         if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
             button.buttonStyle(.glass)
+                .frame(minWidth: 44, minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         } else {
             button.buttonStyle(.bordered)
+                .frame(minWidth: 44, minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         }
     }
 
     private var completeAction: some View {
-        let button = Button("完成") {
+        let button = Button {
             guard let completed = draft.completedSelection else { return }
             weeks = completed
             onComplete()
+        } label: {
+            HStack {
+                Spacer(minLength: 0)
+                Text("完成")
+                    .font(.system(size: 15, weight: .bold))
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: ManualCourseWeekPickerControlLayout.completeHeight)
         }
-        .font(.system(size: 15, weight: .bold))
-        .frame(maxWidth: .infinity, minHeight: 52)
         .tint(TodayStyle.color(0x2563eb))
         .disabled(draft.completedSelection == nil)
 
@@ -619,7 +633,7 @@ private struct ManualCourseWeekPicker: View {
             }
         }
         .buttonBorderShape(.roundedRectangle(radius: 14))
-        .frame(maxWidth: .infinity, minHeight: 52)
+        .frame(maxWidth: .infinity, minHeight: ManualCourseWeekPickerControlLayout.completeHeight)
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
     }

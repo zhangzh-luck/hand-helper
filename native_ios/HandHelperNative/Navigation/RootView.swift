@@ -308,13 +308,18 @@ private struct NativeTabContainer: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: NativeTabController, context: Context) {
-        controller.apply(state: state)
+        controller.apply(state: state,
+                         suppressKeyboardTabBarUpdates: manualCourseEditor.isPresenting)
     }
 }
 
 final class NativeTabController: UITabBarController, UITabBarControllerDelegate {
     private weak var appState: AppState?
     private var keyboardCoversBottom = false
+    // A centered course editor owns keyboard avoidance inside its own card. Letting
+    // its keyboard alter the underlying tab controller's safe area would relayout
+    // the timetable and its wallpaper behind the modal.
+    private var suppressKeyboardTabBarUpdates = false
     private var detailPresented = false
     private var navigationDestinationPresented = false
     private var configuredHomeAvatarData: Data?
@@ -392,7 +397,16 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         tabBar.tintColor = UIColor.systemBlue
     }
 
-    func apply(state: AppState) {
+    func apply(state: AppState, suppressKeyboardTabBarUpdates: Bool = false) {
+        let shouldSuppressKeyboardUpdates = Self.shouldSuppressKeyboardTabBarUpdates(
+            forManualCourseEditor: suppressKeyboardTabBarUpdates)
+        if self.suppressKeyboardTabBarUpdates != shouldSuppressKeyboardUpdates {
+            self.suppressKeyboardTabBarUpdates = shouldSuppressKeyboardUpdates
+            if shouldSuppressKeyboardUpdates {
+                keyboardCoversBottom = false
+            }
+            updateTabVisibility()
+        }
         let style: UIUserInterfaceStyle
         switch state.appearance {
         case .system: style = .unspecified
@@ -415,6 +429,10 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             updateTabVisibility()
         }
         applyHomeTabImageIfNeeded(state: state)
+    }
+
+    static func shouldSuppressKeyboardTabBarUpdates(forManualCourseEditor isPresenting: Bool) -> Bool {
+        isPresenting
     }
 
     @discardableResult
@@ -466,6 +484,7 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     @objc private func keyboardChanged(_ notification: Notification) {
+        guard !suppressKeyboardTabBarUpdates else { return }
         guard let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
               let window = view.window else { return }
         let frame = view.convert(window.convert(endFrame, from: window.screen.coordinateSpace), from: window)
