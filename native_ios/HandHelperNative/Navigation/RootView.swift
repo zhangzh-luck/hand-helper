@@ -356,9 +356,11 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
          gradeDetail: GradeDetailCoordinator? = nil,
          deleteConfirmation: DestructiveConfirmationCoordinator? = nil,
          scheduleEditor: ScheduleEditorCoordinator? = nil,
-         manualCourseEditor: ManualCourseEditorCoordinator? = nil) {
+         manualCourseEditor: ManualCourseEditorCoordinator? = nil,
+         deviceIdiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) {
         super.init(nibName: nil, bundle: nil)
         appState = state
+        let useSidebar = Self.supportsIPadSidebar(deviceIdiom: deviceIdiom)
         viewControllers = AppTab.allCases.map { tab in
             let controller: UIViewController
             switch tab {
@@ -382,9 +384,13 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
                     manualCourseEditor: manualCourseEditor ?? ManualCourseEditorCoordinator(),
                     deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             }
-            controller.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
+            controller.tabBarItem = UITabBarItem(title: useSidebar ? tab.title : nil,
+                                                 image: UIImage(systemName: tab.symbol), tag: tab.rawValue)
             controller.tabBarItem.accessibilityLabel = tab.title
             return controller
+        }
+        if #available(iOS 18.0, *), useSidebar {
+            mode = .tabSidebar
         }
         delegate = self
         selectedIndex = state.selectedTab.rawValue
@@ -394,6 +400,12 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(state:)") }
+
+    static func supportsIPadSidebar(deviceIdiom: UIUserInterfaceIdiom) -> Bool {
+        guard deviceIdiom == .pad else { return false }
+        if #available(iOS 18.0, *) { return true }
+        return false
+    }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()

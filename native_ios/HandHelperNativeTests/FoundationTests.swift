@@ -179,6 +179,38 @@ final class FoundationTests: XCTestCase {
     }
 
     @MainActor
+    func testIPadSidebarKeepsExistingControllersAndSelection() throws {
+        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        state.selectedTab = .timetable
+        let controller = NativeTabController(state: state, deviceIdiom: .pad)
+        let original = try XCTUnwrap(controller.viewControllers)
+        XCTAssertEqual(original.count, AppTab.allCases.count)
+        XCTAssertEqual(controller.selectedIndex, AppTab.timetable.rawValue)
+
+        if #available(iOS 18.0, *) {
+            XCTAssertEqual(controller.mode, .tabSidebar)
+            XCTAssertEqual(original.compactMap { $0.tabBarItem.title }, AppTab.allCases.map(\.title))
+        }
+
+        state.selectedTab = .analysis
+        controller.apply(state: state)
+        let after = try XCTUnwrap(controller.viewControllers)
+        XCTAssertEqual(controller.selectedIndex, AppTab.analysis.rawValue)
+        XCTAssertTrue(zip(original, after).allSatisfy { pair in pair.0 === pair.1 })
+    }
+
+    @MainActor
+    func testPhoneDoesNotEnableIPadSidebar() throws {
+        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
+        let controller = NativeTabController(state: state, deviceIdiom: .phone)
+        XCTAssertFalse(NativeTabController.supportsIPadSidebar(deviceIdiom: .phone))
+        XCTAssertTrue(try XCTUnwrap(controller.viewControllers).allSatisfy { $0.tabBarItem.title == nil })
+        if #available(iOS 18.0, *) {
+            XCTAssertNotEqual(controller.mode, .tabSidebar)
+        }
+    }
+
+    @MainActor
     func testAppearancePersistsAndSwitches() {
         let suite = "appearance-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
