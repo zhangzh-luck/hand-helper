@@ -189,6 +189,7 @@ struct ManualCourseEditorView: View {
     let route: ManualCourseEditorPresentationRoute
     let maximumFormHeight: CGFloat
     let onClose: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @AccessibilityFocusState private var titleFocused: Bool
