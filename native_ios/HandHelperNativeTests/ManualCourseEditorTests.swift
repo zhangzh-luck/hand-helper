@@ -251,6 +251,15 @@ final class ManualCourseEditorTests: XCTestCase {
         XCTAssertEqual(ManualCourseWeekPickerControlLayout.controlSpacing, 8)
     }
 
+    func testWeekPickerShortcutLayoutUsesFourColumnsOnlyWhenAllLabelsFit() {
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.shortcutColumnCount(availableWidth: 312,
+                                                                                 isAccessibilitySize: false), 4)
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.shortcutColumnCount(availableWidth: 311,
+                                                                                 isAccessibilitySize: false), 2)
+        XCTAssertEqual(ManualCourseWeekPickerControlLayout.shortcutColumnCount(availableWidth: 500,
+                                                                                 isAccessibilitySize: true), 2)
+    }
+
     @MainActor
     func testCourseEditorKeyboardSuppressionPolicyIsScopedToCourseEditor() {
         XCTAssertTrue(NativeTabController.shouldSuppressKeyboardTabBarUpdates(forManualCourseEditor: true))

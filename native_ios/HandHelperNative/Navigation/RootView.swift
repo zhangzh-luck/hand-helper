@@ -31,19 +31,7 @@ struct RootView: View {
                                          message: state.credentialRemovalError ?? "请重试清理设备钥匙串。",
                                          retry: { _ = state.retryCredentialRemoval() })
             case .main:
-                NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
-                                   avatarPreviewCoordinator: avatarPreviewCoordinator,
-                                   timetableDetail: timetableDetail, gradeDetail: gradeDetail,
-                                   deleteConfirmation: deleteConfirmation,
-                                   scheduleEditor: scheduleEditor,
-                                   manualCourseEditor: manualCourseEditor)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
-                                      !gradeDetail.isPresenting && !deleteConfirmation.isPresenting &&
-                                      !scheduleEditor.isPresenting && !manualCourseEditor.isPresenting)
-                    .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
-                                         gradeDetail.isPresenting || deleteConfirmation.isPresenting ||
-                                         scheduleEditor.isPresenting || manualCourseEditor.isPresenting)
+                mainTabLayer
             }
             if let avatarPreview,
                state.entry == .main, state.selectedTab == .today,
@@ -97,6 +85,29 @@ struct RootView: View {
         } message: { request in
             Text(request.kind.message)
         }
+    }
+
+    /// Keeps the UIKit tab hierarchy outside the keyboard-safe-area layout proposal.
+    /// Modal overlays remain sibling layers so their forms can still shrink and scroll
+    /// above the keyboard without resizing the timetable behind them.
+    private var mainTabLayer: some View {
+        GeometryReader { geometry in
+            NativeTabContainer(state: state, onAvatarPreview: showAvatarPreview,
+                               avatarPreviewCoordinator: avatarPreviewCoordinator,
+                               timetableDetail: timetableDetail, gradeDetail: gradeDetail,
+                               deleteConfirmation: deleteConfirmation,
+                               scheduleEditor: scheduleEditor,
+                               manualCourseEditor: manualCourseEditor)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .ignoresSafeArea()
+                .allowsHitTesting(avatarPreview == nil && !timetableDetail.isPresenting &&
+                                  !gradeDetail.isPresenting && !deleteConfirmation.isPresenting &&
+                                  !scheduleEditor.isPresenting && !manualCourseEditor.isPresenting)
+                .accessibilityHidden(avatarPreview != nil || timetableDetail.isPresenting ||
+                                     gradeDetail.isPresenting || deleteConfirmation.isPresenting ||
+                                     scheduleEditor.isPresenting || manualCourseEditor.isPresenting)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var presentationLifecycle: some View {
@@ -381,6 +392,13 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
             case .settings: continue
             }
         }
+#if DEBUG
+        CourseEditorKeyboardLayoutDiagnostics.recordNativeContainer(
+            bounds: view.bounds,
+            safeAreaInsets: view.safeAreaInsets,
+            timetableHost: viewControllers?[AppTab.timetable.rawValue]?.view,
+            editorIsPresenting: suppressKeyboardTabBarUpdates)
+#endif
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -493,3 +511,36 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
         updateTabVisibility()
     }
 }
+
+#if DEBUG
+@MainActor
+enum CourseEditorKeyboardLayoutDiagnostics {
+    private static let launchArgument = "-CourseEditorKeyboardLayoutDiagnostics"
+    private static var lastNativeSignature: String?
+    private static var lastTimetableSignature: String?
+
+    static func recordNativeContainer(bounds: CGRect, safeAreaInsets: UIEdgeInsets,
+                                      timetableHost: UIView?, editorIsPresenting: Bool) {
+        guard editorIsPresenting, isEnabled else { return }
+        let hostBounds = timetableHost?.bounds ?? .zero
+        let hostInsets = timetableHost?.safeAreaInsets ?? .zero
+        let signature = "native=\(bounds) safe=\(safeAreaInsets) host=\(hostBounds) hostSafe=\(hostInsets)"
+        guard signature != lastNativeSignature else { return }
+        lastNativeSignature = signature
+        print("[CourseEditorKeyboardLayout] \(signature)")
+    }
+
+    static func recordTimetableViewport(size: CGSize, bottomSafeArea: CGFloat,
+                                        editorIsPresenting: Bool) {
+        guard editorIsPresenting, isEnabled else { return }
+        let signature = "viewport=\(size) bottomSafe=\(bottomSafeArea)"
+        guard signature != lastTimetableSignature else { return }
+        lastTimetableSignature = signature
+        print("[CourseEditorKeyboardLayout] \(signature)")
+    }
+
+    private static var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(launchArgument)
+    }
+}
+#endif

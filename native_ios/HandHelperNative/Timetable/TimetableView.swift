@@ -167,6 +167,26 @@ struct TimetableView: View {
                 }
                 .background { pageBackground }
                 .ignoresSafeArea(.container, edges: .bottom)
+#if DEBUG
+                .onAppear {
+                    CourseEditorKeyboardLayoutDiagnostics.recordTimetableViewport(
+                        size: viewport.size,
+                        bottomSafeArea: viewport.safeAreaInsets.bottom,
+                        editorIsPresenting: manualCourseEditor.isPresenting)
+                }
+                .onChange(of: viewport.size) { _, size in
+                    CourseEditorKeyboardLayoutDiagnostics.recordTimetableViewport(
+                        size: size,
+                        bottomSafeArea: viewport.safeAreaInsets.bottom,
+                        editorIsPresenting: manualCourseEditor.isPresenting)
+                }
+                .onChange(of: viewport.safeAreaInsets.bottom) { _, bottomSafeArea in
+                    CourseEditorKeyboardLayoutDiagnostics.recordTimetableViewport(
+                        size: viewport.size,
+                        bottomSafeArea: bottomSafeArea,
+                        editorIsPresenting: manualCourseEditor.isPresenting)
+                }
+#endif
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingUnplaced, onDismiss: presentPendingListManualAction) { unplacedList }

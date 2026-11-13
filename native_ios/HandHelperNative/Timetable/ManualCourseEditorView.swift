@@ -482,6 +482,62 @@ enum ManualCourseWeekPickerControlLayout {
     static let minimumTouchHeight: CGFloat = 44
     static let completeHeight: CGFloat = 52
     static let controlSpacing: CGFloat = 8
+    static let compactControlMinimumWidth: CGFloat = 72
+
+    static func shortcutColumnCount(availableWidth: CGFloat, isAccessibilitySize: Bool) -> Int {
+        guard !isAccessibilitySize else { return 2 }
+        let requiredWidth = compactControlMinimumWidth * 4 + controlSpacing * 3
+        return availableWidth >= requiredWidth ? 4 : 2
+    }
+}
+
+private struct ManualCourseWeekPickerShortcutLayout: Layout {
+    let isAccessibilitySize: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let availableWidth = proposal.width ?? ManualCourseWeekPickerControlLayout.compactControlMinimumWidth * 4 +
+            ManualCourseWeekPickerControlLayout.controlSpacing * 3
+        let columns = ManualCourseWeekPickerControlLayout.shortcutColumnCount(
+            availableWidth: availableWidth, isAccessibilitySize: isAccessibilitySize)
+        let cellWidth = cellWidth(availableWidth: availableWidth, columns: columns)
+        let rowHeights = rowHeights(for: subviews, cellWidth: cellWidth, columns: columns)
+        return CGSize(width: availableWidth,
+                      height: rowHeights.reduce(0, +) +
+                        ManualCourseWeekPickerControlLayout.controlSpacing * CGFloat(max(0, rowHeights.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let columns = ManualCourseWeekPickerControlLayout.shortcutColumnCount(
+            availableWidth: bounds.width, isAccessibilitySize: isAccessibilitySize)
+        let cellWidth = cellWidth(availableWidth: bounds.width, columns: columns)
+        let rowHeights = rowHeights(for: subviews, cellWidth: cellWidth, columns: columns)
+        var y = bounds.minY
+
+        for (index, subview) in subviews.enumerated() {
+            let row = index / columns
+            let column = index % columns
+            let rowHeight = rowHeights[row]
+            let x = bounds.minX + CGFloat(column) * (cellWidth + ManualCourseWeekPickerControlLayout.controlSpacing)
+            subview.place(at: CGPoint(x: x + cellWidth / 2, y: y + rowHeight / 2), anchor: .center,
+                          proposal: ProposedViewSize(width: cellWidth, height: rowHeight))
+            if column == columns - 1 || index == subviews.count - 1 {
+                y += rowHeight + ManualCourseWeekPickerControlLayout.controlSpacing
+            }
+        }
+    }
+
+    private func cellWidth(availableWidth: CGFloat, columns: Int) -> CGFloat {
+        (availableWidth - ManualCourseWeekPickerControlLayout.controlSpacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
+
+    private func rowHeights(for subviews: Subviews, cellWidth: CGFloat, columns: Int) -> [CGFloat] {
+        stride(from: 0, to: subviews.count, by: columns).map { rowStart in
+            let rowEnd = min(rowStart + columns, subviews.count)
+            return subviews[rowStart..<rowEnd].map {
+                $0.sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height
+            }.max() ?? ManualCourseWeekPickerControlLayout.minimumTouchHeight
+        }
+    }
 }
 
 enum ManualCourseWeekPickerLayout {
@@ -558,12 +614,8 @@ private struct ManualCourseWeekPicker: View {
 
     private var gridContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if dynamicTypeSize.isAccessibilitySize {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                    bulkButtons
-                }
-            } else {
-                HStack(spacing: ManualCourseWeekPickerControlLayout.controlSpacing) { bulkButtons }
+            ManualCourseWeekPickerShortcutLayout(isAccessibilitySize: dynamicTypeSize.isAccessibilitySize) {
+                bulkButtons
             }
             Text("教学周 · 已选 \(draft.selection.count) / 20 周")
                 .font(.subheadline)
@@ -595,16 +647,18 @@ private struct ManualCourseWeekPicker: View {
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
                 .padding(.horizontal, 10)
                 .frame(minHeight: ManualCourseWeekPickerControlLayout.compactVisualHeight)
+                .layoutPriority(1)
         }
         if #available(iOS 26.0, *), !reduceTransparency, colorSchemeContrast != .increased {
             button.buttonStyle(.glass)
-                .frame(minWidth: 44, minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
+                .frame(maxWidth: .infinity, minWidth: 44,
+                       minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         } else {
             button.buttonStyle(.bordered)
-                .frame(minWidth: 44, minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
+                .frame(maxWidth: .infinity, minWidth: 44,
+                       minHeight: ManualCourseWeekPickerControlLayout.minimumTouchHeight)
         }
     }
 
