@@ -13,9 +13,6 @@ struct AcademicTimeView: View {
 
     var body: some View {
         List {
-            if model.isLoading {
-                Section { ProgressView("正在读取时间设置") }
-            }
             if let error = model.errorMessage {
                 Section {
                     Text(error).foregroundStyle(.red)
@@ -25,15 +22,21 @@ struct AcademicTimeView: View {
                     }
                 }
             }
+            if model.hasFinishedLoading && !model.isLoading && model.errorMessage == nil &&
+                (model.terms.isEmpty || model.periods.isEmpty) {
+                Section {
+                    Text(model.terms.isEmpty ? "尚无学期数据，请先导入打印课表文件。" : "节次时间暂不可用。")
+                        .foregroundStyle(.secondary)
+                    Button("重试读取") { Task { await model.load() } }
+                        .disabled(model.isSaving || model.isLoading)
+                }
+            }
             if let status = model.statusMessage {
                 Section { Text(status).foregroundStyle(.secondary) }
             }
 
             Section {
-                if model.terms.isEmpty {
-                    Text("尚无学期数据，请先导入打印课表文件。")
-                        .foregroundStyle(.secondary)
-                } else {
+                if model.selectedTerm != nil && !model.isLoading {
                     Picker("学期", selection: Binding(
                         get: { model.selectedTermID },
                         set: { model.selectTerm($0) }
@@ -43,9 +46,16 @@ struct AcademicTimeView: View {
                         }
                     }
                     .disabled(model.isSaving || model.isLoading)
+                } else {
+                    placeholderRow("学期", value: termPlaceholder)
+                }
+                if model.hasValidTermDate && !model.isLoading {
                     DatePicker("第一周周一", selection: $model.firstMonday, displayedComponents: .date)
                         .disabled(model.isSaving || model.isLoading)
-                    if model.termIsDirty {
+                } else {
+                    placeholderRow("第一周周一", value: model.selectedTerm != nil && !model.isLoading ? "日期无效" : termPlaceholder)
+                }
+                if model.termIsDirty {
                         HStack {
                             Button("取消") { model.selectTerm(model.selectedTermID) }
                             Spacer()
@@ -53,7 +63,6 @@ struct AcademicTimeView: View {
                                 .buttonStyle(.borderedProminent)
                         }
                         .disabled(model.isSaving || model.isLoading)
-                    }
                 }
             } header: {
                 Text("学期第一周")
@@ -62,9 +71,7 @@ struct AcademicTimeView: View {
             }
 
             Section {
-                if model.periods.isEmpty {
-                    Text("节次时间暂不可用。").foregroundStyle(.secondary)
-                } else {
+                if model.selectedPeriod != nil && !model.isLoading {
                     Picker("节次", selection: Binding(
                         get: { model.selectedPeriodNumber },
                         set: { model.selectPeriod($0) }
@@ -74,11 +81,20 @@ struct AcademicTimeView: View {
                         }
                     }
                     .disabled(model.isSaving || model.isLoading)
+                } else {
+                    placeholderRow("节次", value: periodPlaceholder)
+                }
+                if model.hasValidPeriodTimes && !model.isLoading {
                     DatePicker("上课时间", selection: $model.startTime, displayedComponents: .hourAndMinute)
                         .disabled(model.isSaving || model.isLoading)
                     DatePicker("下课时间", selection: $model.endTime, displayedComponents: .hourAndMinute)
                         .disabled(model.isSaving || model.isLoading)
-                    if model.periodIsDirty {
+                } else {
+                    let value = model.selectedPeriod != nil && !model.isLoading ? "时间无效" : periodPlaceholder
+                    placeholderRow("上课时间", value: value)
+                    placeholderRow("下课时间", value: value)
+                }
+                if model.periodIsDirty {
                         HStack {
                             Button("取消") { model.selectPeriod(model.selectedPeriodNumber) }
                             Spacer()
@@ -86,7 +102,6 @@ struct AcademicTimeView: View {
                                 .buttonStyle(.borderedProminent)
                         }
                         .disabled(model.isSaving || model.isLoading)
-                    }
                 }
             } header: {
                 Text("节次时间")
@@ -126,5 +141,24 @@ struct AcademicTimeView: View {
             model.reset()
             if state.canAccessPrivateData { Task { await model.load() } }
         }
+    }
+
+    private var termPlaceholder: String {
+        if model.isLoading || !model.hasFinishedLoading { return "正在读取" }
+        return model.errorMessage == nil ? "尚无学期数据" : "读取失败"
+    }
+
+    private var periodPlaceholder: String {
+        if model.isLoading || !model.hasFinishedLoading { return "正在读取" }
+        return model.errorMessage == nil ? "节次不可用" : "读取失败"
+    }
+
+    private func placeholderRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

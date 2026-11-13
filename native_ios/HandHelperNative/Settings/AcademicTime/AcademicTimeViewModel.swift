@@ -54,6 +54,7 @@ final class AcademicTimeViewModel: ObservableObject {
     @Published var startTime = Date()
     @Published var endTime = Date()
     @Published private(set) var isLoading = false
+    @Published private(set) var hasFinishedLoading = false
     @Published private(set) var isSaving = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var statusMessage: String?
@@ -69,20 +70,25 @@ final class AcademicTimeViewModel: ObservableObject {
 
     var selectedTerm: TermInfo? { terms.first { $0.id == selectedTermID } }
     var selectedPeriod: PeriodInfo? { periods.first { $0.periodNumber == selectedPeriodNumber } }
+    var hasValidTermDate: Bool { selectedTerm.flatMap { AcademicTimeValidation.date($0.startDate) } != nil }
+    var hasValidPeriodTimes: Bool {
+        guard let period = selectedPeriod else { return false }
+        return AcademicTimeValidation.validPeriod(start: period.startTime, end: period.endTime)
+    }
     var termIsDirty: Bool {
-        guard let term = selectedTerm else { return false }
+        guard let term = selectedTerm, hasValidTermDate else { return false }
         return AcademicTimeValidation.dateString(firstMonday) != term.startDate
     }
     var periodIsDirty: Bool {
-        guard let period = selectedPeriod else { return false }
+        guard let period = selectedPeriod, hasValidPeriodTimes else { return false }
         return AcademicTimeValidation.timeString(startTime) != period.startTime ||
             AcademicTimeValidation.timeString(endTime) != period.endTime
     }
 
     func selectTerm(_ id: Int?) {
         selectedTermID = id
-        if let term = selectedTerm {
-            firstMonday = AcademicTimeValidation.date(term.startDate) ?? Date()
+        if let term = selectedTerm, let date = AcademicTimeValidation.date(term.startDate) {
+            firstMonday = date
         }
         errorMessage = nil
         statusMessage = nil
@@ -90,9 +96,10 @@ final class AcademicTimeViewModel: ObservableObject {
 
     func selectPeriod(_ number: Int?) {
         selectedPeriodNumber = number
-        if let period = selectedPeriod {
-            startTime = AcademicTimeValidation.time(period.startTime) ?? Date()
-            endTime = AcademicTimeValidation.time(period.endTime) ?? Date()
+        if let period = selectedPeriod, let start = AcademicTimeValidation.time(period.startTime),
+           let end = AcademicTimeValidation.time(period.endTime) {
+            startTime = start
+            endTime = end
         }
         errorMessage = nil
         statusMessage = nil
@@ -101,6 +108,7 @@ final class AcademicTimeViewModel: ObservableObject {
     func reset() {
         generation += 1
         isLoading = false
+        hasFinishedLoading = false
         isSaving = false
         terms = []
         periods = []
@@ -118,7 +126,7 @@ final class AcademicTimeViewModel: ObservableObject {
         let request = generation
         isLoading = true
         errorMessage = nil
-        defer { if request == generation { isLoading = false } }
+        defer { if request == generation { isLoading = false; hasFinishedLoading = !Task.isCancelled } }
         do {
             let loadedTerms = try await service.terms()
             _ = try state.requireCurrentAccount(revision: revision)
@@ -139,7 +147,7 @@ final class AcademicTimeViewModel: ObservableObject {
     }
 
     func saveTerm() async {
-        guard !isSaving, !isLoading, let term = selectedTerm else { return }
+        guard !isSaving, !isLoading, hasValidTermDate, let term = selectedTerm else { return }
         guard AcademicTimeValidation.isMonday(firstMonday) else {
             errorMessage = "请选择星期一作为第一周的开始日期。"
             return
@@ -156,7 +164,7 @@ final class AcademicTimeViewModel: ObservableObject {
     }
 
     func savePeriod() async {
-        guard !isSaving, !isLoading, let period = selectedPeriod else { return }
+        guard !isSaving, !isLoading, hasValidPeriodTimes, let period = selectedPeriod else { return }
         let start = AcademicTimeValidation.timeString(startTime)
         let end = AcademicTimeValidation.timeString(endTime)
         guard AcademicTimeValidation.validPeriod(start: start, end: end) else {

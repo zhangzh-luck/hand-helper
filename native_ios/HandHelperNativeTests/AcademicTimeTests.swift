@@ -3,6 +3,12 @@ import XCTest
 @testable import HandHelperNative
 
 final class AcademicTimeTests: XCTestCase {
+    func testInvalidServerTimeValuesAreNotValidInput() {
+        XCTAssertNil(AcademicTimeValidation.date(nil))
+        XCTAssertNil(AcademicTimeValidation.date("not-a-date"))
+        XCTAssertNil(AcademicTimeValidation.time("25:00"))
+        XCTAssertFalse(AcademicTimeValidation.validPeriod(start: "09:15", end: "08:30"))
+    }
     private let termJSON = #"{"id":8,"source_term_id":"2026-2027-1","display_name":"秋季","start_date":"2026-08-31","is_current":true}"#
     private let periodJSON = #"{"period_number":1,"start_time":"08:30","end_time":"09:15"}"#
 
