@@ -23,6 +23,7 @@ struct CourseCardView: View {
 struct TodayEntryFace: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
 
     let kind: String
     let title: String
@@ -60,6 +61,14 @@ struct TodayEntryFace: View {
                 shape.fill(.regularMaterial)
             } else {
                 shape.fill(Color(uiColor: .secondarySystemGroupedBackground))
+            }
+        }
+        .overlay {
+            if active {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(TodayStyle.color(colorScheme == .dark ? 0x0A84FF : 0x60A5FA), lineWidth: 2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
     }
