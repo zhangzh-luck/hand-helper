@@ -370,13 +370,9 @@ final class NativeTabController: UITabBarController, UITabBarControllerDelegate 
                     scheduleEditor: scheduleEditor ?? ScheduleEditorCoordinator(),
                     deleteConfirmation: deleteConfirmation ?? DestructiveConfirmationCoordinator()))
             case .settings:
-                if deviceIdiom == .pad {
-                    controller = IPadSettingsSplitController()
-                } else {
-                    let navigation = SettingsNavigationController(state: state)
-                    navigation.stackVisibilityDidChange = { [weak self] in self?.updateTabVisibility() }
-                    controller = navigation
-                }
+                let navigation = SettingsNavigationController(state: state)
+                navigation.stackVisibilityDidChange = { [weak self] in self?.updateTabVisibility() }
+                controller = navigation
             case .analysis:
                 controller = UIHostingController(rootView: AnalysisView(state: state,
                     gradeDetail: gradeDetail ?? GradeDetailCoordinator(),

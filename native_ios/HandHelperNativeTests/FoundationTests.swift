@@ -200,24 +200,9 @@ final class FoundationTests: XCTestCase {
     }
 
     @MainActor
-    func testIPadSettingsPrototypeKeepsOneSplitController() throws {
-        let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
-        let tabs = NativeTabController(state: state, deviceIdiom: .pad)
-        let split = try XCTUnwrap(tabs.viewControllers?[AppTab.settings.rawValue] as? IPadSettingsSplitController)
-        XCTAssertEqual(IPadSettingsCategory.allCases.map(\.title),
-                       ["账户设置", "时间设置", "个性化", "数据与导入", "AI 模型配置", "关于航的助手"])
-        XCTAssertNotNil(split.viewController(for: .primary))
-        XCTAssertNotNil(split.viewController(for: .secondary))
-        state.selectedTab = .settings
-        tabs.apply(state: state)
-        XCTAssertTrue(tabs.viewControllers?[AppTab.settings.rawValue] === split)
-    }
-
-    @MainActor
     func testPhoneDoesNotEnableIPadSidebar() throws {
         let state = AppState(api: MockAPIClient(), sessionStore: MemorySessionStore())
         let controller = NativeTabController(state: state, deviceIdiom: .phone)
-        XCTAssertTrue(controller.viewControllers?[AppTab.settings.rawValue] is SettingsNavigationController)
         XCTAssertFalse(NativeTabController.supportsIPadSidebar(deviceIdiom: .phone))
         XCTAssertTrue(try XCTUnwrap(controller.viewControllers).allSatisfy { $0.tabBarItem.title == nil })
         if #available(iOS 18.0, *) {
