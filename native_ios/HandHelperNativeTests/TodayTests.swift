@@ -6,21 +6,24 @@ import UIKit
 
 final class TodayTests: XCTestCase {
     func testTodayEntryColumnsRespectAvailableWidthAndAccessibility() {
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: 900, isIPad: false, usesLargeText: false), 1)
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: 699, isIPad: true, usesLargeText: false), 1)
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: 700, isIPad: true, usesLargeText: false), 2)
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, isIPad: true, usesLargeText: false), 2)
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, isIPad: true, usesLargeText: true), 1)
-        XCTAssertEqual(TodayEntryLayout.columnCount(width: .infinity, isIPad: true, usesLargeText: false), 1)
+        let landscape = CGSize(width: 1_000, height: 700)
+        let portrait = CGSize(width: 800, height: 1_000)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 900, viewport: landscape, isIPad: false, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 699, viewport: landscape, isIPad: true, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 700, viewport: landscape, isIPad: true, usesLargeText: false), 2)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, viewport: portrait, isIPad: true, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, viewport: landscape, isIPad: true, usesLargeText: true), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, viewport: .zero, isIPad: true, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: .infinity, viewport: landscape, isIPad: true, usesLargeText: false), 1)
     }
 
     func testTodayContentWidthAdaptsOnlyOnWideIPad() {
         XCTAssertEqual(TodayContentWidth.maximum(for: 1_200, isIPad: false), 680)
         XCTAssertEqual(TodayContentWidth.maximum(for: 500, isIPad: true), 680)
-        XCTAssertEqual(TodayContentWidth.maximum(for: 850, isIPad: true), 680)
-        XCTAssertEqual(TodayContentWidth.maximum(for: 930, isIPad: true), 760)
-        XCTAssertEqual(TodayContentWidth.maximum(for: 1_010, isIPad: true), 840)
-        XCTAssertEqual(TodayContentWidth.maximum(for: 1_400, isIPad: true), 840)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 850, isIPad: true), 802)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 930, isIPad: true), 882)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 1_010, isIPad: true), 962)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 1_400, isIPad: true), 1_100)
         XCTAssertEqual(TodayContentWidth.maximum(for: .infinity, isIPad: true), 680)
     }
 

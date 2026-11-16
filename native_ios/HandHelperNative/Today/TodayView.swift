@@ -2,8 +2,8 @@ import SwiftUI
 
 enum TodayContentWidth {
     static let standard: CGFloat = 680
-    static let wideMaximum: CGFloat = 840
-    private static let wideSideSpace: CGFloat = 170
+    static let wideMaximum: CGFloat = 1_100
+    private static let wideSideSpace: CGFloat = 48
 
     static func maximum(for availableWidth: CGFloat, isIPad: Bool) -> CGFloat {
         guard isIPad, availableWidth.isFinite else { return standard }
@@ -15,8 +15,10 @@ enum TodayEntryLayout {
     static let minimumTwoColumnWidth: CGFloat = 700
     static let spacing: CGFloat = 12
 
-    static func columnCount(width: CGFloat, isIPad: Bool, usesLargeText: Bool) -> Int {
-        guard isIPad, !usesLargeText, width.isFinite, width >= minimumTwoColumnWidth else { return 1 }
+    static func columnCount(width: CGFloat, viewport: CGSize, isIPad: Bool, usesLargeText: Bool) -> Int {
+        guard isIPad, !usesLargeText, width.isFinite, width >= minimumTwoColumnWidth,
+              viewport.width.isFinite, viewport.height.isFinite, viewport.height > 0,
+              viewport.width > viewport.height else { return 1 }
         return 2
     }
 }
@@ -41,6 +43,7 @@ struct TodayView: View {
     @State private var avatarImage: UIImage?
     @State private var contentMaxWidth = TodayContentWidth.standard
     @State private var entryContentWidth: CGFloat = 0
+    @State private var contentViewport: CGSize = .zero
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -81,6 +84,7 @@ struct TodayView: View {
 
     private var entryColumnCount: Int {
         TodayEntryLayout.columnCount(width: entryContentWidth,
+                                     viewport: contentViewport,
                                      isIPad: UIDevice.current.userInterfaceIdiom == .pad,
                                      usesLargeText: dynamicTypeSize >= .xxxLarge)
     }
@@ -151,11 +155,12 @@ struct TodayView: View {
             .padding(.horizontal, 18)
             .padding(.top, 26)
         }
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            TodayContentWidth.maximum(for: proxy.size.width,
-                                      isIPad: UIDevice.current.userInterfaceIdiom == .pad)
-        } action: { width in
-            contentMaxWidth = width
+        .onGeometryChange(for: CGSize.self) { proxy in
+            UIDevice.current.userInterfaceIdiom == .pad ? proxy.size : .zero
+        } action: { size in
+            contentViewport = size
+            contentMaxWidth = TodayContentWidth.maximum(for: size.width,
+                isIPad: UIDevice.current.userInterfaceIdiom == .pad)
         }
         .task {
             reloadAvatarImageIfNeeded()
