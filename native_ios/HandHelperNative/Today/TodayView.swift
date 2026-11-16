@@ -11,6 +11,16 @@ enum TodayContentWidth {
     }
 }
 
+enum TodayEntryLayout {
+    static let minimumTwoColumnWidth: CGFloat = 700
+    static let spacing: CGFloat = 12
+
+    static func columnCount(width: CGFloat, isIPad: Bool, usesLargeText: Bool) -> Int {
+        guard isIPad, !usesLargeText, width.isFinite, width >= minimumTwoColumnWidth else { return 1 }
+        return 2
+    }
+}
+
 @MainActor
 struct TodayView: View {
     @ObservedObject private var state: AppState
@@ -30,6 +40,7 @@ struct TodayView: View {
     @State private var avatarSourceData: Data?
     @State private var avatarImage: UIImage?
     @State private var contentMaxWidth = TodayContentWidth.standard
+    @State private var entryContentWidth: CGFloat = 0
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -66,6 +77,12 @@ struct TodayView: View {
         ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
          (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule))
             .sorted { ($0.sortTime, $0.id) < ($1.sortTime, $1.id) }
+    }
+
+    private var entryColumnCount: Int {
+        TodayEntryLayout.columnCount(width: entryContentWidth,
+                                     isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                                     usesLargeText: dynamicTypeSize >= .xxxLarge)
     }
 
     var body: some View {
@@ -107,18 +124,26 @@ struct TodayView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        ForEach(entries) { entry in
-                            switch entry {
-                            case .course(let course):
-                                CourseCardView(course: course, active: model.active?.id == course.id,
-                                               hasWallpaper: model.wallpaperData != nil)
-                            case .schedule(let schedule):
-                                scheduleCard(schedule, revision: state.authenticationRevision)
+                        if entryColumnCount == 2 {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: TodayEntryLayout.spacing), count: 2),
+                                      spacing: TodayEntryLayout.spacing) {
+                                ForEach(entries) { entry in
+                                    entryCard(entry)
+                                }
+                            }
+                        } else {
+                            ForEach(entries) { entry in
+                                entryCard(entry)
                             }
                         }
                     }
                     .padding(.top, entries.isEmpty ? 0 : 12)
                     .padding(.bottom, 16)
+                }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    UIDevice.current.userInterfaceIdiom == .pad ? proxy.size.width : 0
+                } action: { width in
+                    entryContentWidth = width
                 }
                 .scrollIndicators(.hidden)
             }
@@ -195,6 +220,17 @@ struct TodayView: View {
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
+    }
+
+    @ViewBuilder
+    private func entryCard(_ entry: TodayEntry) -> some View {
+        switch entry {
+        case .course(let course):
+            CourseCardView(course: course, active: model.active?.id == course.id,
+                           hasWallpaper: model.wallpaperData != nil)
+        case .schedule(let schedule):
+            scheduleCard(schedule, revision: state.authenticationRevision)
+        }
     }
 
     private func scheduleCard(_ schedule: CustomSchedule, revision: Int) -> some View {

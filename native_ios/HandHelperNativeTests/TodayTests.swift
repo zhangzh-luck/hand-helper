@@ -5,6 +5,15 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testTodayEntryColumnsRespectAvailableWidthAndAccessibility() {
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 900, isIPad: false, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 699, isIPad: true, usesLargeText: false), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 700, isIPad: true, usesLargeText: false), 2)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, isIPad: true, usesLargeText: false), 2)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: 840, isIPad: true, usesLargeText: true), 1)
+        XCTAssertEqual(TodayEntryLayout.columnCount(width: .infinity, isIPad: true, usesLargeText: false), 1)
+    }
+
     func testTodayContentWidthAdaptsOnlyOnWideIPad() {
         XCTAssertEqual(TodayContentWidth.maximum(for: 1_200, isIPad: false), 680)
         XCTAssertEqual(TodayContentWidth.maximum(for: 500, isIPad: true), 680)
