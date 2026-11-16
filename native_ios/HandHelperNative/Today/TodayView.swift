@@ -1,5 +1,16 @@
 import SwiftUI
 
+enum TodayContentWidth {
+    static let standard: CGFloat = 680
+    static let wideMaximum: CGFloat = 840
+    private static let wideSideSpace: CGFloat = 170
+
+    static func maximum(for availableWidth: CGFloat, isIPad: Bool) -> CGFloat {
+        guard isIPad, availableWidth.isFinite else { return standard }
+        return min(wideMaximum, max(standard, availableWidth - wideSideSpace))
+    }
+}
+
 @MainActor
 struct TodayView: View {
     @ObservedObject private var state: AppState
@@ -18,6 +29,7 @@ struct TodayView: View {
     @State private var appliedCourseInvalidationSequence: Int?
     @State private var avatarSourceData: Data?
     @State private var avatarImage: UIImage?
+    @State private var contentMaxWidth = TodayContentWidth.standard
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -110,9 +122,15 @@ struct TodayView: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            .frame(maxWidth: 680)
+            .frame(maxWidth: contentMaxWidth)
             .padding(.horizontal, 18)
             .padding(.top, 26)
+        }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            TodayContentWidth.maximum(for: proxy.size.width,
+                                      isIPad: UIDevice.current.userInterfaceIdiom == .pad)
+        } action: { width in
+            contentMaxWidth = width
         }
         .task {
             reloadAvatarImageIfNeeded()

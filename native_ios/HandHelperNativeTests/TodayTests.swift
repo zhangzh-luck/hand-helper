@@ -5,6 +5,16 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testTodayContentWidthAdaptsOnlyOnWideIPad() {
+        XCTAssertEqual(TodayContentWidth.maximum(for: 1_200, isIPad: false), 680)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 500, isIPad: true), 680)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 850, isIPad: true), 680)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 930, isIPad: true), 760)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 1_010, isIPad: true), 840)
+        XCTAssertEqual(TodayContentWidth.maximum(for: 1_400, isIPad: true), 840)
+        XCTAssertEqual(TodayContentWidth.maximum(for: .infinity, isIPad: true), 680)
+    }
+
     @MainActor
     func testTodayAvatarPreviewRequiresVerifiedAccountAndValidImage() throws {
         let format = UIGraphicsImageRendererFormat()
