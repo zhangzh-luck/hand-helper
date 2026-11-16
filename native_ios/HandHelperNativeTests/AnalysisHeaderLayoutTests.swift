@@ -4,6 +4,19 @@ import XCTest
 @testable import HandHelperNative
 
 final class AnalysisHeaderLayoutTests: XCTestCase {
+    func testWideLayoutRequiresIPadLandscapeAndEnoughContentWidth() {
+        let landscape = CGSize(width: 1_000, height: 700)
+        let portrait = CGSize(width: 800, height: 1_000)
+        XCTAssertTrue(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 760, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.overviewMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 759, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.overviewMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: portrait, contentWidth: 900, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.overviewMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 900, isIPad: false, usesLargeText: false, minimumWidth: AnalysisWideLayout.tableMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 900, isIPad: true, usesLargeText: true, minimumWidth: AnalysisWideLayout.tableMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 849, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.tableMinimumWidth))
+        XCTAssertTrue(AnalysisWideLayout.enabled(viewport: landscape, contentWidth: 850, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.tableMinimumWidth))
+        XCTAssertFalse(AnalysisWideLayout.enabled(viewport: .zero, contentWidth: 900, isIPad: true, usesLargeText: false, minimumWidth: AnalysisWideLayout.tableMinimumWidth))
+    }
+
     @MainActor
     func testDeleteButtonHasCompactSurfaceAndSeparateTouchHeight() {
         let visible = measured(GradeDeleteVisualLabel(deleting: false))

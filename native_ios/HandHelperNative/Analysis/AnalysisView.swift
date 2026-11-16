@@ -1,6 +1,18 @@
 import SwiftUI
 import UIKit
 
+enum AnalysisWideLayout {
+    static func enabled(viewport: CGSize, contentWidth: CGFloat, isIPad: Bool,
+                        usesLargeText: Bool, minimumWidth: CGFloat) -> Bool {
+        isIPad && !usesLargeText && viewport.width.isFinite && viewport.height.isFinite &&
+        viewport.height > 0 && viewport.width > viewport.height &&
+        contentWidth.isFinite && contentWidth >= minimumWidth
+    }
+
+    static let overviewMinimumWidth: CGFloat = 760
+    static let tableMinimumWidth: CGFloat = 850
+}
+
 @MainActor
 struct AnalysisView: View {
     @ObservedObject private var state: AppState
@@ -12,6 +24,8 @@ struct AnalysisView: View {
     @State private var historyOpen = false
     @State private var deleteTermID: Int?
     @State private var wallpaperImage: UIImage?
+    @State private var viewportSize: CGSize = .zero
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
@@ -19,6 +33,12 @@ struct AnalysisView: View {
     @ScaledMetric(relativeTo: .body) private var gradeTitleMinimumHeight: CGFloat = 42
     @ScaledMetric(relativeTo: .body) private var gradeRowMinimumHeight: CGFloat = 90
     @ScaledMetric(relativeTo: .title2) private var gradeScoreColumnWidth: CGFloat = 82
+
+    private func usesWideLayout(minimumWidth: CGFloat) -> Bool {
+        AnalysisWideLayout.enabled(viewport: viewportSize, contentWidth: max(0, viewportSize.width - 32),
+                                   isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                                   usesLargeText: dynamicTypeSize >= .xxxLarge, minimumWidth: minimumWidth)
+    }
 
     init(state: AppState, gradeDetail: GradeDetailCoordinator,
          timetableDetail: TimetableCourseDetailCoordinator,
@@ -73,6 +93,11 @@ struct AnalysisView: View {
                     }
                     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 32)
                 }
+            }
+            .onGeometryChange(for: CGSize.self) { proxy in
+                UIDevice.current.userInterfaceIdiom == .pad ? proxy.size : .zero
+            } action: { size in
+                viewportSize = size
             }
             .navigationTitle("成绩分析")
             .toolbar {
@@ -224,7 +249,8 @@ struct AnalysisView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("成绩概览").font(.title3.weight(.semibold))
             let summary = model.selectedData?.summary
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
+                                    count: usesWideLayout(minimumWidth: AnalysisWideLayout.overviewMinimumWidth) ? 4 : 2), spacing: 10) {
                 metric("已获学分", summary?.earnedCredits.map { String($0) } ?? "—", symbol: "graduationcap")
                 metric("平均成绩", summary?.averageScore.map { String(format: "%.1f", $0) } ?? "—", symbol: "number")
                 metric("绩点", summary?.gpa.map { String(format: "%.2f", $0) } ?? "—", symbol: "chart.bar")
@@ -375,6 +401,14 @@ struct AnalysisView: View {
                                        description: Text("导入并确认成绩后，这里会显示课程明细。"))
             } else {
                 LazyVStack(spacing: 0) {
+                    if usesWideLayout(minimumWidth: AnalysisWideLayout.tableMinimumWidth) {
+                        GradeTableColumns(course: "课程名称", type: "课程性质", credits: "学分", point: "绩点", score: "成绩")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 15).padding(.vertical, 12)
+                            .accessibilityHidden(true)
+                        Divider().padding(.leading, 14)
+                    }
                     ForEach(grades) { grade in
                         Button { openGradeDetail(grade) } label: { gradeRow(grade) }
                             .buttonStyle(.plain)
@@ -388,11 +422,42 @@ struct AnalysisView: View {
         }
     }
 
-    private func gradeRow(_ grade: GradeRecord) -> some View {
-        GradeRowContent(grade: grade,
+    @ViewBuilder private func gradeRow(_ grade: GradeRecord) -> some View {
+        if usesWideLayout(minimumWidth: AnalysisWideLayout.tableMinimumWidth) {
+            GradeTableColumns(course: grade.courseName, type: grade.courseType ?? "课程性质未提供",
+                              credits: grade.credits.map { String($0) } ?? "—",
+                              point: grade.gradePoint.map { String($0) } ?? "—", score: grade.score ?? "未公布")
+                .padding(.horizontal, 15).padding(.vertical, 13)
+                .frame(minHeight: gradeRowMinimumHeight)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("课程\(grade.courseName)，课程性质\(grade.courseType ?? "未提供")，学分\(grade.credits.map { String($0) } ?? "未提供")，绩点\(grade.gradePoint.map { String($0) } ?? "未提供")，成绩\(grade.score ?? "未公布")")
+        } else {
+            GradeRowContent(grade: grade,
                         titleMinimumHeight: gradeTitleMinimumHeight,
                         scoreColumnWidth: gradeScoreColumnWidth,
                         minimumHeight: gradeRowMinimumHeight)
+        }
+    }
+}
+
+private struct GradeTableColumns: View {
+    let course: String
+    let type: String
+    let credits: String
+    let point: String
+    let score: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(course).frame(maxWidth: .infinity, alignment: .leading)
+            Text(type).frame(width: 140, alignment: .leading)
+            Text(credits).frame(width: 70, alignment: .trailing)
+            Text(point).frame(width: 70, alignment: .trailing)
+            Text(score).frame(width: 90, alignment: .trailing)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
