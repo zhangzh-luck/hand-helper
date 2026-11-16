@@ -128,8 +128,8 @@ struct TodayView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if entryColumnCount == 2 {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: TodayEntryLayout.spacing), count: 2),
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: TodayEntryLayout.spacing), count: entryColumnCount),
                                       spacing: TodayEntryLayout.spacing) {
                                 ForEach(entries) { entry in
                                     entryCard(entry)
