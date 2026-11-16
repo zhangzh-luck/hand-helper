@@ -4,6 +4,29 @@ import XCTest
 @testable import HandHelperNative
 
 final class AnalysisHeaderLayoutTests: XCTestCase {
+    func testGradeCardColumnCountsAdaptToWidthAndTextSize() {
+        let landscape = CGSize(width: 1_024, height: 700)
+        let portrait = CGSize(width: 800, height: 1_024)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: landscape, contentWidth: 744, usesLargeText: false), 3)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: landscape, contentWidth: 743, usesLargeText: false), 2)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: portrait, contentWidth: 800, usesLargeText: false), 2)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: portrait, contentWidth: 491, usesLargeText: false), 1)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: portrait, contentWidth: 492, usesLargeText: false), 2)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: landscape, contentWidth: 1_000, usesLargeText: true), 1)
+        XCTAssertEqual(GradeCardLayout.columns(viewport: .zero, contentWidth: 1_000, usesLargeText: false), 1)
+    }
+
+    @MainActor
+    func testGradeCardAllowsLongNameAndMissingValues() {
+        let grade = GradeRecord(id: 1, termID: 1, courseCode: "C001",
+            courseName: String(repeating: "课程名称", count: 12), courseType: nil,
+            credits: nil, score: nil, finalExamScore: nil, usualScore: nil,
+            gradePoint: nil, weightedGradePoint: nil, examType: nil, makeupFlag: false, retakeFlag: false)
+        let size = measured(GradeCardContent(grade: grade).frame(width: 240))
+        XCTAssertEqual(size.width, 240, accuracy: 0.5)
+        XCTAssertGreaterThan(size.height, 90)
+    }
+
     func testWideLayoutRequiresIPadLandscapeAndEnoughContentWidth() {
         let landscape = CGSize(width: 1_000, height: 700)
         let portrait = CGSize(width: 800, height: 1_000)

@@ -13,6 +13,19 @@ enum AnalysisWideLayout {
     static let tableMinimumWidth: CGFloat = 850
 }
 
+enum GradeCardLayout {
+    static let spacing: CGFloat = 12
+    private static let minimumCardWidth: CGFloat = 240
+
+    static func columns(viewport: CGSize, contentWidth: CGFloat, usesLargeText: Bool) -> Int {
+        guard viewport.width.isFinite, viewport.height.isFinite, viewport.height > 0,
+              contentWidth.isFinite, !usesLargeText else { return 1 }
+        if viewport.width > viewport.height && contentWidth >= minimumCardWidth * 3 + spacing * 2 { return 3 }
+        if contentWidth >= minimumCardWidth * 2 + spacing { return 2 }
+        return 1
+    }
+}
+
 @MainActor
 struct AnalysisView: View {
     @ObservedObject private var state: AppState
@@ -399,18 +412,23 @@ struct AnalysisView: View {
             if grades.isEmpty {
                 ContentUnavailableView("暂无课程成绩", systemImage: "doc.text",
                                        description: Text("导入并确认成绩后，这里会显示课程明细。"))
+            } else if UIDevice.current.userInterfaceIdiom == .pad {
+                let count = GradeCardLayout.columns(viewport: viewportSize,
+                    contentWidth: max(0, viewportSize.width - 32), usesLargeText: dynamicTypeSize >= .xxxLarge)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: GradeCardLayout.spacing), count: count),
+                          alignment: .leading, spacing: GradeCardLayout.spacing) {
+                    ForEach(grades) { grade in
+                        Button { openGradeDetail(grade) } label: { GradeCardContent(grade: grade) }
+                            .buttonStyle(.plain)
+                    }
+                }
             } else {
                 LazyVStack(spacing: 0) {
-                    if usesWideLayout(minimumWidth: AnalysisWideLayout.tableMinimumWidth) {
-                        GradeTableColumns(course: "课程名称", type: "课程性质", credits: "学分", point: "绩点", score: "成绩")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 15).padding(.vertical, 12)
-                            .accessibilityHidden(true)
-                        Divider().padding(.leading, 14)
-                    }
                     ForEach(grades) { grade in
-                        Button { openGradeDetail(grade) } label: { gradeRow(grade) }
+                        Button { openGradeDetail(grade) } label: {
+                            GradeRowContent(grade: grade, titleMinimumHeight: gradeTitleMinimumHeight,
+                                            scoreColumnWidth: gradeScoreColumnWidth, minimumHeight: gradeRowMinimumHeight)
+                        }
                             .buttonStyle(.plain)
                         if grade.id != grades.last?.id { Divider().padding(.leading, 14) }
                     }
@@ -422,42 +440,37 @@ struct AnalysisView: View {
         }
     }
 
-    @ViewBuilder private func gradeRow(_ grade: GradeRecord) -> some View {
-        if usesWideLayout(minimumWidth: AnalysisWideLayout.tableMinimumWidth) {
-            GradeTableColumns(course: grade.courseName, type: grade.courseType ?? "课程性质未提供",
-                              credits: grade.credits.map { String($0) } ?? "—",
-                              point: grade.gradePoint.map { String($0) } ?? "—", score: grade.score ?? "未公布")
-                .padding(.horizontal, 15).padding(.vertical, 13)
-                .frame(minHeight: gradeRowMinimumHeight)
-                .contentShape(Rectangle())
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("课程\(grade.courseName)，课程性质\(grade.courseType ?? "未提供")，学分\(grade.credits.map { String($0) } ?? "未提供")，绩点\(grade.gradePoint.map { String($0) } ?? "未提供")，成绩\(grade.score ?? "未公布")")
-        } else {
-            GradeRowContent(grade: grade,
-                        titleMinimumHeight: gradeTitleMinimumHeight,
-                        scoreColumnWidth: gradeScoreColumnWidth,
-                        minimumHeight: gradeRowMinimumHeight)
-        }
-    }
 }
 
-private struct GradeTableColumns: View {
-    let course: String
-    let type: String
-    let credits: String
-    let point: String
-    let score: String
+struct GradeCardContent: View {
+    let grade: GradeRecord
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(course).frame(maxWidth: .infinity, alignment: .leading)
-            Text(type).frame(width: 140, alignment: .leading)
-            Text(credits).frame(width: 70, alignment: .trailing)
-            Text(point).frame(width: 70, alignment: .trailing)
-            Text(score).frame(width: 90, alignment: .trailing)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(grade.courseName).font(.body.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(grade.courseType ?? "课程性质未提供").font(.footnote).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(grade.score ?? "未公布")
+                    .font(grade.score == nil ? .subheadline.weight(.semibold) : .title2.weight(.bold))
+                    .monospacedDigit().fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 16) {
+                Text("学分 \(grade.credits.map { String($0) } ?? "—")")
+                Text("绩点 \(grade.gradePoint.map { String($0) } ?? "—")")
+            }
+            .font(.footnote).foregroundStyle(.secondary)
         }
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
