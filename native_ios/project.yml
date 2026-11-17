@@ -29,6 +29,13 @@ targets:
       path: HandHelperNative/Resources/AppInfo.plist
       properties:
         NSSupportsLiveActivities: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
           - CFBundleURLName: com.zhangzh.hangassistant.native.dev.today
             CFBundleURLSchemes: [handhelper]

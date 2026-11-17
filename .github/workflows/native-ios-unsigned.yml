@@ -104,6 +104,7 @@ jobs:
           test -x "$extracted/HandHelperNative"
           test -f "$extracted/Assets.car"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$extracted/Info.plist")" = 'com.zhangzh.hangassistant.native.dev'
+          python3 -c 'import plistlib,sys; p=plistlib.load(open(sys.argv[1],"rb")); phone=p.get("UISupportedInterfaceOrientations"); ipad=p.get("UISupportedInterfaceOrientations~ipad"); expected=["UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]; print("iPhone orientations:", phone); print("iPad orientations:", ipad); assert phone == ["UIInterfaceOrientationPortrait"], "Unexpected iPhone orientations"; assert isinstance(ipad,list) and len(ipad)==len(expected) and set(ipad)==set(expected), "Unexpected iPad orientations"' "$extracted/Info.plist"
           test -x "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/HandHelperLiveActivityWidget"
           test "$(/usr/libexec/PlistBuddy -c 'Print NSExtension:NSExtensionPointIdentifier' "$extracted/PlugIns/HandHelperLiveActivityWidget.appex/Info.plist")" = 'com.apple.widgetkit-extension'
 
