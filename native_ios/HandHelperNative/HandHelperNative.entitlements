@@ -2,5 +2,5 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
     <key>com.apple.security.application-groups</key>
-    <array><string>group.com.zhangzh.hangassistant.native</string></array>
+    <array><string>group.5e7e951f5e3f59e7.1</string></array>
 </dict></plist>

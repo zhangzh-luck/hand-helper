@@ -2,7 +2,7 @@ import Foundation
 
 /// A fixed, non-personal payload for the first-stage App Group experiment.
 enum WidgetProbeStore {
-    static let groupID = "group.com.zhangzh.hangassistant.native"
+    static let groupID = "group.5e7e951f5e3f59e7.1"
     static let kind = "HandHelperTodayCourseProbe"
     static let payload = "共享容器测试成功（非真实课程）"
     private static let fileName = "widget-probe-v1.txt"

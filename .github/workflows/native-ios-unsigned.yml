@@ -98,7 +98,7 @@ jobs:
           # Verify both target settings and entitlement inputs; device signing is tested separately.
           xcodebuild -showBuildSettings -project HandHelperNative.xcodeproj -target HandHelperNative -configuration Release | grep -F 'CODE_SIGN_ENTITLEMENTS = HandHelperNative/HandHelperNative.entitlements'
           xcodebuild -showBuildSettings -project HandHelperNative.xcodeproj -target HandHelperLiveActivityWidget -configuration Release | grep -F 'CODE_SIGN_ENTITLEMENTS = HandHelperLiveActivityWidget/HandHelperLiveActivityWidget.entitlements'
-          python3 -c 'import plistlib,sys; expected=["group.com.zhangzh.hangassistant.native"]; files=sys.argv[1:]; values=[plistlib.load(open(f,"rb")).get("com.apple.security.application-groups") for f in files]; print("Configured App Groups:", values); assert all(v==expected for v in values), "App Group entitlements do not match"' HandHelperNative/HandHelperNative.entitlements HandHelperLiveActivityWidget/HandHelperLiveActivityWidget.entitlements
+          python3 -c 'import plistlib,sys; expected=["group.5e7e951f5e3f59e7.1"]; files=sys.argv[1:]; values=[plistlib.load(open(f,"rb")).get("com.apple.security.application-groups") for f in files]; print("Configured App Groups:", values); assert all(v==expected for v in values), "App Group entitlements do not match"' HandHelperNative/HandHelperNative.entitlements HandHelperLiveActivityWidget/HandHelperLiveActivityWidget.entitlements
           mkdir -p build/ipa/Payload
           /usr/bin/ditto "$app" build/ipa/Payload/HandHelperNative.app
           (cd build/ipa && /usr/bin/ditto -c -k --keepParent Payload ../HandHelperNative-unsigned.ipa)
