@@ -17,6 +17,22 @@ struct TimetableDetailRoute: Identifiable {
     let context: TimetableDetailContext
     let courseColor: Color
     let editableManualCourse: TimetableManualCourseIdentity?
+    var source: TimetableDetailSource? = nil
+}
+
+struct TimetableDetailSource: Equatable {
+    let frame: CGRect
+    let visibleFrame: CGRect
+    let viewportSize: CGSize
+
+    var isValid: Bool {
+        let values = [frame.minX, frame.minY, frame.width, frame.height,
+                      visibleFrame.minX, visibleFrame.minY, visibleFrame.width, visibleFrame.height,
+                      viewportSize.width, viewportSize.height]
+        return values.allSatisfy(\.isFinite) && frame.width > 0 && frame.height > 0 &&
+            visibleFrame.width > 0 && visibleFrame.height > 0 && frame.intersects(visibleFrame) &&
+            viewportSize.width > 0 && viewportSize.height > 0
+    }
 }
 
 struct TimetableManualCourseIdentity: Equatable {
@@ -94,23 +110,56 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     @Published private(set) var readyAction: TimetableManualCourseActionRequest?
     @Published private(set) var pendingDelete: TimetableManualCourseActionRequest?
     @Published private(set) var deletionError: String?
+    @Published private(set) var hiddenSource: TimetableDetailContext?
     private(set) var pagerBusy = false
     private var closingAction: TimetableManualCourseActionRequest?
     private weak var rootView: UIView?
+    private var sourceViews: [TimetableDetailContext: WeakTimetableSource] = [:]
 
     var isPresenting: Bool { route != nil }
 
     func setRootView(_ view: UIView) { rootView = view }
+    func setSourceView(_ view: UIView, context: TimetableDetailContext) {
+        sourceViews = sourceViews.filter { $0.value.view != nil }
+        sourceViews[context] = WeakTimetableSource(view)
+    }
+
+    func sourceGeometry(for context: TimetableDetailContext) -> TimetableDetailSource? {
+        guard let root = rootView, let source = sourceViews[context]?.view,
+              let window = root.window, source.window === window else { return nil }
+        let frame = source.convert(source.bounds, to: root)
+        var visible = root.bounds
+        var ancestor = source.superview
+        while let view = ancestor, view !== window {
+            if view.clipsToBounds {
+                visible = visible.intersection(view.convert(view.bounds, to: root))
+            }
+            ancestor = view.superview
+        }
+        let geometry = TimetableDetailSource(frame: frame, visibleFrame: visible,
+                                             viewportSize: root.bounds.size)
+        return geometry.isValid ? geometry : nil
+    }
+
+    func hideSource(id: UUID) {
+        guard let route, route.id == id, phase == .opening, route.source != nil else { return }
+        hiddenSource = route.context
+    }
+
+    func restoreSource() {
+        if hiddenSource != nil { hiddenSource = nil }
+    }
     var windowSafeArea: UIEdgeInsets { rootView?.window?.safeAreaInsets ?? .zero }
 
     func setPagerBusy(_ busy: Bool) { pagerBusy = busy }
 
     @discardableResult
     func open(course: CourseSession, context: TimetableDetailContext, color: Color,
-              editableManualCourse: TimetableManualCourseIdentity? = nil) -> Bool {
+              editableManualCourse: TimetableManualCourseIdentity? = nil,
+              source: TimetableDetailSource? = nil) -> Bool {
         guard phase == .idle, !pagerBusy, readyAction == nil else { return false }
         route = TimetableDetailRoute(course: course, context: context, courseColor: color,
-                                     editableManualCourse: editableManualCourse)
+                                     editableManualCourse: editableManualCourse, source: source)
         phase = .opening
         return true
     }
@@ -165,6 +214,7 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
 
     func finish(id: UUID) {
         guard route?.id == id, phase == .closing else { return }
+        restoreSource()
         route = nil
         phase = .idle
         readyAction = closingAction
@@ -180,7 +230,8 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     @discardableResult
     func clear() -> Bool {
         guard closingAction != nil || readyAction != nil || pendingDelete != nil || deletionError != nil ||
-                route != nil || phase != .idle || pagerBusy else { return false }
+                route != nil || phase != .idle || pagerBusy || hiddenSource != nil else { return false }
+        restoreSource()
         closingAction = nil
         readyAction = nil
         pendingDelete = nil
@@ -195,6 +246,26 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
         guard let context = route?.context else { return }
         if context.termID != termID || context.snapshotRevision != snapshotRevision ||
             context.authenticationRevision != authenticationRevision { clear() }
+    }
+}
+
+private final class WeakTimetableSource {
+    weak var view: UIView?
+    init(_ view: UIView) { self.view = view }
+}
+
+struct TimetableDetailSourceAnchor: UIViewRepresentable {
+    let detail: TimetableCourseDetailCoordinator
+    let context: TimetableDetailContext
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        detail.setSourceView(view, context: self.context)
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) {
+        detail.setSourceView(view, context: self.context)
     }
 }
 

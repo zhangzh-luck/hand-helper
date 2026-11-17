@@ -5,6 +5,34 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    func testMorphSourceRejectsInvalidOrInvisibleGeometry() {
+        let frame = CGRect(x: 10, y: 20, width: 80, height: 60)
+        let viewport = CGSize(width: 390, height: 844)
+        XCTAssertTrue(TimetableDetailSource(frame: frame, visibleFrame: CGRect(x: 0, y: 30, width: 390, height: 500), viewportSize: viewport).isValid)
+        XCTAssertFalse(TimetableDetailSource(frame: frame, visibleFrame: CGRect(x: 0, y: 200, width: 390, height: 500), viewportSize: viewport).isValid)
+        XCTAssertFalse(TimetableDetailSource(frame: .zero, visibleFrame: frame, viewportSize: viewport).isValid)
+    }
+
+    @MainActor
+    func testHiddenSourceIsClearedOnInvalidationAndClose() {
+        let detail = TimetableCourseDetailCoordinator()
+        let source = TimetableDetailSource(frame: CGRect(x: 10, y: 20, width: 80, height: 60),
+            visibleFrame: CGRect(x: 0, y: 0, width: 390, height: 844), viewportSize: CGSize(width: 390, height: 844))
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue, source: source))
+        let firstID = detail.route!.id
+        detail.hideSource(id: firstID)
+        XCTAssertEqual(detail.hiddenSource, context)
+        detail.invalidate(termID: nil, snapshotRevision: context.snapshotRevision, authenticationRevision: context.authenticationRevision)
+        XCTAssertNil(detail.hiddenSource)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue, source: source))
+        let secondID = detail.route!.id
+        detail.hideSource(id: secondID)
+        detail.finish(id: firstID)
+        XCTAssertEqual(detail.hiddenSource, context)
+        XCTAssertTrue(detail.beginClose(id: secondID))
+        detail.finish(id: secondID)
+        XCTAssertNil(detail.hiddenSource)
+    }
     @MainActor
     func testClearDoesNotPublishWhenDetailIsAlreadyIdle() {
         let detail = TimetableCourseDetailCoordinator()

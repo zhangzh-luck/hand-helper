@@ -605,7 +605,8 @@ struct TimetableView: View {
                    model.snapshotRevision == context.snapshotRevision,
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
             if detail.open(course: course, context: context, color: courseColor(course.name),
-                           editableManualCourse: model.editableManualCourse(for: course, context: context)) {
+                           editableManualCourse: model.editableManualCourse(for: course, context: context),
+                           source: detail.sourceGeometry(for: context)) {
                 AppHaptics.trigger(.detailOpened)
                 emptyCellSelection.clear(reason: "course_detail_opened")
             }
@@ -644,6 +645,8 @@ struct TimetableView: View {
         .buttonStyle(.plain)
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(TimetableDetailSourceAnchor(detail: detail, context: context))
+        .opacity(detail.hiddenSource == context ? 0 : 1)
         .accessibilityLabel("\(course.name)，\(course.date)，\(course.room ?? "教室未提供")，\(course.teacher ?? "教师未提供")")
     }
 
