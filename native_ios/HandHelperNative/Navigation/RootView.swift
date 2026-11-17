@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WidgetKit
 
 @MainActor
 struct RootView: View {
@@ -14,6 +15,7 @@ struct RootView: View {
     @StateObject private var manualCourseEditor = ManualCourseEditorCoordinator()
     @State private var avatarPreview: TodayAvatarPreviewRoute?
     @State private var avatarPreviewVisible = false
+    @State private var widgetProbeMessage: String?
 
     private var presentation: some View {
         ZStack {
@@ -185,10 +187,29 @@ struct RootView: View {
         .onChange(of: state.localManualCourseChange) { _, _ in syncLiveActivities(reason: "manual_course") }
         .onChange(of: state.localScheduleVersion) { _, _ in syncLiveActivities(reason: "local_schedule") }
         .onOpenURL { url in
+            if url.scheme == "handhelper", url.host == "widget-test" {
+                let result = WidgetProbeStore.write(to: WidgetProbeStore.container())
+                switch result {
+                case .success:
+                    widgetProbeMessage = "测试数据已写入，已请求刷新小组件。请返回桌面查看。"
+                    WidgetCenter.shared.reloadTimelines(ofKind: WidgetProbeStore.kind)
+                case .containerUnavailable:
+                    widgetProbeMessage = "共享容器不可用，请检查 App Group 签名权限。"
+                default:
+                    widgetProbeMessage = "测试数据写入失败，请检查共享容器权限。"
+                }
+                return
+            }
             guard url.scheme == "handhelper", url.host == "today",
                   state.entry == .main, state.canAccessPrivateData else { return }
             state.selectedTab = .today
         }
+        .alert("今日课程共享测试", isPresented: Binding(
+            get: { widgetProbeMessage != nil },
+            set: { if !$0 { widgetProbeMessage = nil } }
+        )) {
+            Button("确定", role: .cancel) { widgetProbeMessage = nil }
+        } message: { Text(widgetProbeMessage ?? "") }
         .task { syncLiveActivities(reason: "root_task") }
     }
 

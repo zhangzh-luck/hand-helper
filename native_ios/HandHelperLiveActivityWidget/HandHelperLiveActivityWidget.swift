@@ -4,7 +4,10 @@ import WidgetKit
 
 @main
 struct HandHelperLiveActivityBundle: WidgetBundle {
-    var body: some Widget { HandHelperLiveActivityWidget() }
+    var body: some Widget {
+        HandHelperLiveActivityWidget()
+        TodayCourseProbeWidget()
+    }
 }
 
 struct HandHelperLiveActivityWidget: Widget {
