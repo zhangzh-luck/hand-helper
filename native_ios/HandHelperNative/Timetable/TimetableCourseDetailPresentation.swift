@@ -76,6 +76,15 @@ enum TimetableDetailMotion {
     static let openingDuration = 0.32
     static let closingDuration = 0.22
     static let reducedDuration = 0.15
+    static let morphDuration = 0.26
+
+    static func canReturn(to original: TimetableDetailSource?, current: TimetableDetailSource?, viewport: CGSize) -> Bool {
+        guard let original, let current, original.isValid, current.isValid,
+              original.viewportSize == viewport, current.viewportSize == viewport else { return false }
+        let a = original.frame, b = current.frame
+        return abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1 &&
+            abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
+    }
 
     static func scale(visible: Bool, reduceMotion: Bool) -> CGFloat {
         visible || reduceMotion ? 1 : 0.92

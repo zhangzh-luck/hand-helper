@@ -600,6 +600,7 @@ struct TimetableView: View {
                               context: TimetableDetailContext) -> some View {
         let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
         return Button {
+            TimetableMotionDiagnostics.event("course tapped")
             guard state.selectedTab == .timetable, state.canAccessPrivateData,
                    model.selectedWeek == context.week, model.selectedTermID == context.termID,
                    model.snapshotRevision == context.snapshotRevision,

@@ -5,6 +5,20 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    func testReverseRequiresSameValidSourceAndViewport() {
+        let viewport = CGSize(width: 390, height: 844)
+        let visible = CGRect(origin: .zero, size: viewport)
+        let original = TimetableDetailSource(frame: CGRect(x: 10, y: 20, width: 80, height: 60),
+                                            visibleFrame: visible, viewportSize: viewport)
+        let shifted = TimetableDetailSource(frame: CGRect(x: 12, y: 20, width: 80, height: 60),
+                                           visibleFrame: visible, viewportSize: viewport)
+        XCTAssertTrue(TimetableDetailMotion.canReturn(to: original, current: original, viewport: viewport))
+        XCTAssertFalse(TimetableDetailMotion.canReturn(to: original, current: shifted, viewport: viewport))
+        XCTAssertFalse(TimetableDetailMotion.canReturn(to: original, current: nil, viewport: viewport))
+        XCTAssertFalse(TimetableDetailMotion.canReturn(to: original, current: original,
+                                                       viewport: CGSize(width: 844, height: 390)))
+    }
+
     func testMorphSourceRejectsInvalidOrInvisibleGeometry() {
         let frame = CGRect(x: 10, y: 20, width: 80, height: 60)
         let viewport = CGSize(width: 390, height: 844)

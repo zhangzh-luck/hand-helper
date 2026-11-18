@@ -1,5 +1,17 @@
 import SwiftUI
 import UIKit
+import os
+
+enum TimetableMotionDiagnostics {
+    #if DEBUG
+    private static let log = OSLog(subsystem: "com.handhelper.timetable", category: "detail-motion")
+    #endif
+    static func event(_ name: StaticString) {
+        #if DEBUG
+        os_signpost(.event, log: log, name: name)
+        #endif
+    }
+}
 
 /// The root overlay sits above NativeTabContainer, including its UIKit tab bar.
 struct TimetableCourseDetailOverlay: View {
@@ -57,8 +69,9 @@ private struct TimetableDetailSurface: View {
     @State private var measuredContentHeight: CGFloat = 0
     @State private var closing = false
     @State private var focusTitle = false
-    @State private var morphing = false
     @State private var morphProgress: CGFloat = 0
+    @State private var panelOpacity: Double = 1
+    @State private var useMorph = false
 
     private var targetWidth: CGFloat {
         TimetableDetailLayout.frame(in: bounds, safeArea: safeArea, preferredHeight: 0).width
@@ -98,58 +111,35 @@ private struct TimetableDetailSurface: View {
         }
     }
 
-    private var panelTransition: AnyTransition {
-        if reduceMotion { return .opacity }
-        return .scale(scale: TimetableDetailMotion.scale(visible: false, reduceMotion: false))
-            .combined(with: .offset(y: TimetableDetailMotion.verticalOffset(visible: false,
-                                                                            reduceMotion: false)))
-            .combined(with: .opacity)
-    }
-
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let destination {
-                Color.black.opacity(morphing ? 0 : TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark))
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
-                    .transition(.opacity)
-
-                panelSurface(ScrollView(.vertical) {
-                    TimetableDetailContent(course: route.course, courseColor: route.courseColor,
-                                           focusTitle: focusTitle, onClose: { close() },
-                                           glassHeader: surfaceKind == .glass,
-                                           onAction: route.editableManualCourse == nil ? nil : { action in
-                                                if action == .delete { requestDelete() }
-                                               else { close(action: action) }
-                                           })
-                        .frame(width: destination.width)
+                TimetableOpeningMorph(progress: morphProgress,
+                                      source: useMorph ? route.source : nil,
+                                      destination: destination, bounds: bounds,
+                                      course: route.course, color: route.courseColor,
+                                      scrimOpacity: TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark),
+                                      panelOpacity: panelOpacity,
+                                      onBackdrop: { close() }) {
+                    panelSurface(ScrollView(.vertical) {
+                        TimetableDetailContent(course: route.course, courseColor: route.courseColor,
+                            focusTitle: focusTitle, onClose: { close() },
+                            glassHeader: surfaceKind == .glass,
+                            onAction: route.editableManualCourse == nil ? nil : { action in
+                                if action == .delete { requestDelete() } else { close(action: action) }
+                            })
+                            .frame(width: destination.width)
+                    }
+                    .scrollDisabled(!TimetableDetailLayout.needsScrolling(
+                        contentHeight: measuredContentHeight, viewportHeight: destination.height))
+                    .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                    .frame(width: destination.width, height: destination.height))
+                    .clipShape(panelShape)
+                    .overlay(panelShape.strokeBorder(Color.primary.opacity(borderOpacity), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
                 }
-                .scrollDisabled(!TimetableDetailLayout.needsScrolling(
-                    contentHeight: measuredContentHeight, viewportHeight: destination.height))
-                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-                .frame(width: destination.width, height: destination.height))
-                .clipShape(panelShape)
-                .overlay(panelShape.strokeBorder(Color.primary.opacity(borderOpacity),
-                                                 lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
-                .transition(panelTransition)
-                .position(x: destination.midX, y: destination.midY)
-                .opacity(morphing ? 0 : 1)
                 .allowsHitTesting(!closing)
                 .accessibilityHidden(closing)
-
-                if morphing, let source = route.source {
-                    TimetableOpeningMorph(progress: morphProgress, source: source,
-                                          destination: destination, bounds: bounds,
-                                          course: route.course, color: route.courseColor,
-                                          scrimOpacity: TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark)) {
-                        panelSurface(TimetableDetailContent(course: route.course,
-                            courseColor: route.courseColor, focusTitle: false, onClose: {},
-                            glassHeader: surfaceKind == .glass))
-                    }
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                }
             } else {
                 // Measure once at the final width, before the visible presentation begins.
                 TimetableDetailContent(course: route.course, courseColor: route.courseColor,
@@ -171,6 +161,7 @@ private struct TimetableDetailSurface: View {
         .onPreferenceChange(TimetableDetailHeightKey.self) { height in
             guard destination == nil, height > 0, detail.route?.id == route.id,
                   detail.phase == .opening else { return }
+            TimetableMotionDiagnostics.event("detail measured")
             open(at: TimetableDetailLayout.frame(in: bounds, safeArea: safeArea,
                                                  preferredHeight: height),
                  contentHeight: height)
@@ -179,36 +170,27 @@ private struct TimetableDetailSurface: View {
     }
 
     private func open(at frame: CGRect, contentHeight: CGFloat) {
-        if let source = route.source, source.isValid, !reduceMotion,
-           source.viewportSize == bounds.size {
-            measuredContentHeight = contentHeight
-            morphing = true
-            morphProgress = 0
-            destination = frame
-            detail.hideSource(id: route.id)
-            DispatchQueue.main.async {
-                guard detail.route?.id == route.id, detail.phase == .opening, morphing else { return }
-                withAnimation(.easeInOut(duration: 0.26), completionCriteria: .removed) {
-                    morphProgress = 1
-                } completion: {
-                    guard detail.route?.id == route.id, detail.phase == .opening, morphing else { return }
-                    morphing = false
-                    detail.markOpen(id: route.id)
-                    focusTitle = true
-                }
-            }
-            return
-        }
-        // Animate the insertion controlled by the measured destination itself.
-        // The panel is never inserted at its final height before this transaction.
-        withAnimation(TimetableDetailMotion.animation(opening: true, reduceMotion: reduceMotion),
-                      completionCriteria: .removed) {
-            measuredContentHeight = contentHeight
-            destination = frame
-        } completion: {
+        let currentSource = detail.sourceGeometry(for: route.context)
+        useMorph = !reduceMotion && TimetableDetailMotion.canReturn(
+            to: route.source, current: currentSource, viewport: bounds.size)
+        measuredContentHeight = contentHeight
+        morphProgress = 0
+        panelOpacity = 1
+        destination = frame
+        if useMorph { detail.hideSource(id: route.id) }
+        TimetableMotionDiagnostics.event("opening scheduled")
+        DispatchQueue.main.async {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
-            detail.markOpen(id: route.id)
-            focusTitle = true
+            TimetableMotionDiagnostics.event("opening start")
+            withAnimation(.easeInOut(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
+                          completionCriteria: .removed) {
+                morphProgress = 1
+            } completion: {
+                guard detail.route?.id == route.id, detail.phase == .opening else { return }
+                TimetableMotionDiagnostics.event("opening complete")
+                detail.markOpen(id: route.id)
+                focusTitle = true
+            }
         }
     }
 
@@ -221,13 +203,16 @@ private struct TimetableDetailSurface: View {
         }
         if userInitiated { AppHaptics.trigger(.detailClosed) }
         closing = true
-        morphing = false
         focusTitle = false
-        withAnimation(TimetableDetailMotion.animation(opening: false, reduceMotion: reduceMotion),
+        let canReverse = useMorph && !reduceMotion && TimetableDetailMotion.canReturn(
+            to: route.source, current: detail.sourceGeometry(for: route.context), viewport: bounds.size)
+        TimetableMotionDiagnostics.event("closing start")
+        withAnimation(.easeInOut(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.closingDuration),
                       completionCriteria: .removed) {
-            destination = nil
+            if canReverse { morphProgress = 0 } else { panelOpacity = 0 }
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
+            TimetableMotionDiagnostics.event("closing complete")
             detail.finish(id: route.id)
             UIAccessibility.post(notification: .layoutChanged, argument: nil)
         }
@@ -248,45 +233,54 @@ private struct TimetableDetailSurface: View {
 
 private struct TimetableOpeningMorph<Content: View>: View, Animatable {
     var progress: CGFloat
-    let source: TimetableDetailSource
+    let source: TimetableDetailSource?
     let destination: CGRect
     let bounds: CGRect
     let course: CourseSession
     let color: Color
     let scrimOpacity: Double
+    var panelOpacity: Double
+    let onBackdrop: () -> Void
     @ViewBuilder let content: () -> Content
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<CGFloat, Double> {
+        get { AnimatablePair(progress, panelOpacity) }
+        set { progress = newValue.first; panelOpacity = newValue.second }
     }
 
     var body: some View {
         let p = min(max(progress, 0), 1)
-        let frame = interpolate(source.frame, destination, p)
-        let viewport = interpolate(source.visibleFrame, bounds, min(p / 0.6, 1))
-        let corner = 8 + 14 * p
+        let frame = source.map { interpolate($0.frame, destination, p) } ?? destination
+        let viewport = source.map { interpolate($0.visibleFrame, bounds, min(p / 0.6, 1)) } ?? bounds
+        let corner = source == nil ? 22 : 8 + 14 * p
         ZStack(alignment: .topLeading) {
-            Color.black.opacity(scrimOpacity * Double(p))
+            Color.black.opacity(scrimOpacity * Double(p) * panelOpacity)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onBackdrop)
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(Color(uiColor: .secondarySystemGroupedBackground))
                     .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous)
                         .fill(color.opacity(0.28 * Double(1 - p))))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(course.name).font(.caption.weight(.semibold)).lineLimit(2)
-                    if let room = course.room, !room.isEmpty { Text(room).font(.caption2).lineLimit(1) }
+                    .opacity(source == nil ? 0 : Double(1 - p))
+                if let source {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(course.name).font(.caption.weight(.semibold)).lineLimit(2)
+                        if let room = course.room, !room.isEmpty { Text(room).font(.caption2).lineLimit(1) }
+                    }
+                    .padding(3)
+                    .frame(width: source.frame.width, height: source.frame.height, alignment: .topLeading)
+                    .opacity(Double(max(0, 1 - p * 3)))
+                    .accessibilityHidden(true)
                 }
-                .padding(3)
-                .frame(width: source.frame.width, height: source.frame.height, alignment: .topLeading)
-                .opacity(Double(max(0, 1 - p * 3)))
                 content()
                     .frame(width: destination.width, height: destination.height, alignment: .topLeading)
-                    .opacity(Double(max(0, min(1, (p - 0.26) / 0.3))))
+                    .opacity(source == nil ? Double(p) : Double(max(0, min(1, (p - 0.26) / 0.3))))
             }
             .frame(width: frame.width, height: frame.height, alignment: .topLeading)
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
             .position(x: frame.midX, y: frame.midY)
+            .opacity(panelOpacity)
             .mask(alignment: .topLeading) {
                 Rectangle().frame(width: max(0, viewport.width), height: max(0, viewport.height))
                     .offset(x: viewport.minX, y: viewport.minY)
