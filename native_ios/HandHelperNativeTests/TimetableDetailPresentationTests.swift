@@ -42,6 +42,8 @@ final class TimetableDetailPresentationTests: XCTestCase {
         probe.event("course tapped")
         probe.event("cancel")
         let report = probe.report(engine: "test")
+        XCTAssertTrue(report.contains("Motion Probe v3"))
+        XCTAssertTrue(report.contains("callback_delay_max_ms="))
         XCTAssertTrue(report.contains("samples=2"))
         XCTAssertTrue(report.contains("id=1 interrupted=false"))
         XCTAssertTrue(report.contains("id=2 interrupted=true"))

@@ -16,6 +16,7 @@ final class MotionProbe: NSObject {
         var previous: CFTimeInterval?
         var intervals: [Double] = []
         var targets: [Double] = []
+        var callbackDelays: [Double] = []
         var marks: [String: CFTimeInterval] = [:]
         var morph: Bool?
         var interrupted = false
@@ -68,6 +69,9 @@ final class MotionProbe: NSObject {
         guard var sample = current else { return }
         let now = CACurrentMediaTime()
         if sample.first == nil { sample.first = now }
+        if sample.callbackDelays.count < 240 {
+            sample.callbackDelays.append(max(0, (now - display.timestamp) * 1000))
+        }
         if let previous = sample.previous, sample.intervals.count < 240 {
             let gap = (display.timestamp - previous) * 1000
             let target = (display.targetTimestamp - display.timestamp) * 1000
@@ -89,10 +93,11 @@ final class MotionProbe: NSObject {
     }
 
     func report(engine: String) -> String {
-        var lines = ["Hand Helper Motion Probe v2", "engine=\(engine)",
+        var lines = ["Hand Helper Motion Probe v3", "engine=\(engine)",
                      "clock=CADisplayLink/CACurrentMediaTime; frames=callback intervals, not screen presentation",
                      "tap=Flutter platform-channel arrival for Flutter; native handler for Swift",
                      "stages=milliseconds from tap; gaps include scheduling and are not CPU duration",
+                     "callback_delay=callback entry minus display timestamp; not main-thread CPU or GPU time",
                      engine == "Swift" ? "swift_opening_strategy=surface_onAppear" : "opening_strategy=flutter",
                      "samples=\(samples.count); active=\(current != nil); max_refresh=\(UIScreen.main.maximumFramesPerSecond)",
                      "low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled); reduce_motion=\(UIAccessibility.isReduceMotionEnabled)"]
@@ -106,7 +111,7 @@ final class MotionProbe: NSObject {
             let sorted = intervals.sorted()
             let p95: Double? = sorted.count >= 10 ? sorted[Int(ceil(Double(sorted.count) * 0.95)) - 1] : nil
             let path = sample.morph.map { $0 ? "morph" : "fallback" } ?? "unknown"
-            lines.append("id=\(sample.id) interrupted=\(sample.interrupted) path=\(path) start_ms=\(number(start)) first_ms=\(number(first)) end_ms=\(number(end)) frames=\(intervals.count) max_ms=\(number(intervals.max())) p95_ms=\(number(p95)) long=\(long) target_min_ms=\(number(sample.targets.min())) target_max_ms=\(number(sample.targets.max()))")
+            lines.append("id=\(sample.id) interrupted=\(sample.interrupted) path=\(path) start_ms=\(number(start)) first_ms=\(number(first)) end_ms=\(number(end)) frames=\(intervals.count) max_ms=\(number(intervals.max())) p95_ms=\(number(p95)) long=\(long) target_min_ms=\(number(sample.targets.min())) target_max_ms=\(number(sample.targets.max())) callback_delay_max_ms=\(number(sample.callbackDelays.max()))")
             let stageNames = ["geometry begin", "geometry end", "route begin", "route end",
                               "measure appear", "detail measured", "recheck begin", "recheck end",
                               "hide begin", "hide end", "opening scheduled", "surface appeared"]

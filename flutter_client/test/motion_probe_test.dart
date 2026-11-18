@@ -19,11 +19,15 @@ void main() {
     expect(calls, isEmpty);
     await MotionProbe.setEnabled(true);
     MotionProbe.event('tap');
+    MotionProbe.event('start');
+    MotionProbe.event('complete');
     await Future<void>.delayed(Duration.zero);
     expect(calls, containsAllInOrder(['enable', 'event']));
     final report = await MotionProbe.report();
     expect(report, contains('samples=0'));
     expect(report, contains('entire enabled session'));
+    expect(report, contains('Flutter per-opening FrameTiming'));
+    expect(report, contains('id=1 frames='));
     await MotionProbe.setEnabled(false);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
