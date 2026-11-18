@@ -35,6 +35,19 @@ struct TimetableCourseCardSurface: View {
     }
 }
 
+/// The week page lives in its own hosting controller, so observe here rather
+/// than relying on the parent TimetableView to refresh the cached page.
+struct TimetableSourceVisibility: ViewModifier {
+    @ObservedObject var detail: TimetableCourseDetailCoordinator
+    let context: TimetableDetailContext
+
+    var isHidden: Bool { detail.hiddenSource == context }
+
+    func body(content: Content) -> some View {
+        content.opacity(isHidden ? 0 : 1)
+    }
+}
+
 enum TimetableWallpaperStyle {
     static func showsPhoto(hasImage: Bool, reduceTransparency: Bool, increasedContrast: Bool) -> Bool {
         hasImage && !reduceTransparency && !increasedContrast
@@ -655,7 +668,7 @@ struct TimetableView: View {
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .background(TimetableDetailSourceAnchor(detail: detail, context: context))
-        .opacity(detail.hiddenSource == context ? 0 : 1)
+        .modifier(TimetableSourceVisibility(detail: detail, context: context))
         .accessibilityLabel("\(course.name)，\(course.date)，\(course.room ?? "教室未提供")，\(course.teacher ?? "教师未提供")")
     }
 

@@ -5,6 +5,28 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    @MainActor
+    func testSourceVisibilityTracksSelectedContextUntilCloseCompletion() {
+        let detail = TimetableCourseDetailCoordinator()
+        let source = TimetableDetailSource(frame: CGRect(x: 10, y: 20, width: 80, height: 60),
+            visibleFrame: CGRect(x: 0, y: 0, width: 390, height: 844),
+            viewportSize: CGSize(width: 390, height: 844))
+        let other = TimetableDetailContext(authenticationRevision: 3, termID: 8,
+            week: 2, snapshotRevision: 5, courseID: 12, placementIndex: 1)
+        let selectedVisibility = TimetableSourceVisibility(detail: detail, context: context)
+        let otherVisibility = TimetableSourceVisibility(detail: detail, context: other)
+        XCTAssertTrue(detail.open(course: course(), context: context, color: .blue, source: source))
+        let routeID = detail.route!.id
+        XCTAssertFalse(selectedVisibility.isHidden)
+        detail.hideSource(id: routeID)
+        XCTAssertTrue(selectedVisibility.isHidden)
+        XCTAssertFalse(otherVisibility.isHidden)
+        XCTAssertTrue(detail.beginClose(id: routeID))
+        XCTAssertTrue(selectedVisibility.isHidden)
+        detail.finish(id: routeID)
+        XCTAssertFalse(selectedVisibility.isHidden)
+    }
+
     func testFlutterMotionCurveAndHandoffPhases() {
         XCTAssertEqual(TimetableDetailMotion.geometryProgress(0), 0)
         XCTAssertEqual(TimetableDetailMotion.geometryProgress(1), 1)

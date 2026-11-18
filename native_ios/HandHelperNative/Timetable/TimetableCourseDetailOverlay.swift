@@ -13,6 +13,57 @@ enum TimetableMotionDiagnostics {
     }
 }
 
+#if DEBUG
+/// Launch arguments affect only debug builds and never persist between launches.
+private enum TimetableMotionExperiment {
+    static let opaque = ProcessInfo.processInfo.arguments.contains("-TimetableMotionOpaque")
+    static let noClip = ProcessInfo.processInfo.arguments.contains("-TimetableMotionNoClip")
+}
+
+@MainActor
+private final class TimetableMotionFrameSampler: NSObject {
+    private let log = OSLog(subsystem: "com.handhelper.timetable", category: "detail-motion-frames")
+    private var link: CADisplayLink?
+    private var previous: CFTimeInterval?
+    private var maxInterval: CFTimeInterval = 0
+    private var count = 0
+    private var longCount = 0
+    private var label = ""
+
+    func start(_ label: String) {
+        stop(interrupted: true)
+        self.label = label
+        previous = nil
+        maxInterval = 0
+        count = 0
+        longCount = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        defer { previous = link.timestamp }
+        guard let previous else { return }
+        let interval = link.timestamp - previous
+        guard interval > 0 else { return }
+        count += 1
+        maxInterval = max(maxInterval, interval)
+        if interval > (link.targetTimestamp - link.timestamp) * 1.5 { longCount += 1 }
+    }
+
+    func stop(interrupted: Bool = false) {
+        guard let link else { return }
+        link.invalidate()
+        self.link = nil
+        os_log("phase=%{public}@ frames=%{public}d long=%{public}d max_ms=%{public}.2f interrupted=%{public}d opaque=%{public}d no_clip=%{public}d",
+               log: log, type: .info, label as NSString, count, longCount,
+               maxInterval * 1000, interrupted ? 1 : 0,
+               TimetableMotionExperiment.opaque ? 1 : 0, TimetableMotionExperiment.noClip ? 1 : 0)
+    }
+}
+#endif
+
 /// The root overlay sits above NativeTabContainer, including its UIKit tab bar.
 struct TimetableCourseDetailOverlay: View {
     @ObservedObject var detail: TimetableCourseDetailCoordinator
@@ -72,12 +123,18 @@ private struct TimetableDetailSurface: View {
     @State private var morphProgress: CGFloat = 0
     @State private var panelOpacity: Double = 1
     @State private var useMorph = false
+    #if DEBUG
+    @State private var frameSampler = TimetableMotionFrameSampler()
+    #endif
 
     private var targetWidth: CGFloat {
         TimetableDetailLayout.frame(in: bounds, safeArea: safeArea, preferredHeight: 0).width
     }
 
     private var surfaceKind: TimetableDetailSurfaceKind {
+        #if DEBUG
+        if TimetableMotionExperiment.opaque { return .opaque }
+        #endif
         let supportsGlass: Bool
         if #available(iOS 26.0, *) { supportsGlass = true }
         else { supportsGlass = false }
@@ -169,6 +226,9 @@ private struct TimetableDetailSurface: View {
                  contentHeight: height)
         }
         .onChange(of: bounds.size) { _, _ in close(userInitiated: false) }
+        #if DEBUG
+        .onDisappear { frameSampler.stop(interrupted: true) }
+        #endif
     }
 
     private func open(at frame: CGRect, contentHeight: CGFloat) {
@@ -184,12 +244,18 @@ private struct TimetableDetailSurface: View {
         DispatchQueue.main.async {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
             TimetableMotionDiagnostics.event("opening start")
+            #if DEBUG
+            frameSampler.start("opening")
+            #endif
             withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
                           completionCriteria: .removed) {
                 morphProgress = 1
             } completion: {
                 guard detail.route?.id == route.id, detail.phase == .opening else { return }
                 TimetableMotionDiagnostics.event("opening complete")
+                #if DEBUG
+                frameSampler.stop()
+                #endif
                 detail.markOpen(id: route.id)
                 focusTitle = true
             }
@@ -209,12 +275,18 @@ private struct TimetableDetailSurface: View {
         let canReverse = useMorph && !reduceMotion && TimetableDetailMotion.canReturn(
             to: route.source, current: detail.sourceGeometry(for: route.context), viewport: bounds.size)
         TimetableMotionDiagnostics.event("closing start")
+        #if DEBUG
+        frameSampler.start("closing")
+        #endif
         withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
                       completionCriteria: .removed) {
             if canReverse { morphProgress = 0 } else { panelOpacity = 0 }
         } completion: {
             guard detail.route?.id == route.id, detail.phase == .closing else { return }
             TimetableMotionDiagnostics.event("closing complete")
+            #if DEBUG
+            frameSampler.stop()
+            #endif
             detail.finish(id: route.id)
             UIAccessibility.post(notification: .layoutChanged, argument: nil)
         }
@@ -262,6 +334,11 @@ private struct TimetableOpeningMorph<Content: View>: View, Animatable {
                    height: source.visibleFrame.height +
                        (bounds.height - source.visibleFrame.height) * TimetableDetailMotion.phase(p, from: 0.35, to: 0.62))
         } ?? bounds
+        #if DEBUG
+        let clippingViewport = TimetableMotionExperiment.noClip ? bounds : viewport
+        #else
+        let clippingViewport = viewport
+        #endif
         let corner = source == nil ? 22 : 8 + 14 * curved
         ZStack(alignment: .topLeading) {
             Color.black.opacity(scrimOpacity * Double(p) * panelOpacity)
@@ -288,8 +365,8 @@ private struct TimetableOpeningMorph<Content: View>: View, Animatable {
             .position(x: frame.midX, y: frame.midY)
             .opacity(panelOpacity)
             .mask(alignment: .topLeading) {
-                Rectangle().frame(width: max(0, viewport.width), height: max(0, viewport.height))
-                    .offset(x: viewport.minX, y: viewport.minY)
+                Rectangle().frame(width: max(0, clippingViewport.width), height: max(0, clippingViewport.height))
+                    .offset(x: clippingViewport.minX, y: clippingViewport.minY)
             }
         }
         .frame(width: bounds.width, height: bounds.height)
