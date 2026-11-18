@@ -221,6 +221,9 @@ private struct TimetableDetailSurface: View {
                                                value: proxy.size.height)
                     })
                     .hidden()
+                    #if MOTION_PROBE
+                    .onAppear { TimetableMotionDiagnostics.event("measure appear") }
+                    #endif
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -244,14 +247,23 @@ private struct TimetableDetailSurface: View {
     }
 
     private func open(at frame: CGRect, contentHeight: CGFloat) {
+        TimetableMotionDiagnostics.event("recheck begin")
         let currentSource = detail.sourceGeometry(for: route.context)
         useMorph = !reduceMotion && TimetableDetailMotion.canReturn(
             to: route.source, current: currentSource, viewport: bounds.size)
+        TimetableMotionDiagnostics.event("recheck end")
+        #if MOTION_PROBE
+        MotionProbe.shared.event(useMorph ? "morph enabled" : "morph fallback")
+        #endif
         measuredContentHeight = contentHeight
         morphProgress = 0
         panelOpacity = 1
         destination = frame
-        if useMorph { detail.hideSource(id: route.id) }
+        if useMorph {
+            TimetableMotionDiagnostics.event("hide begin")
+            detail.hideSource(id: route.id)
+            TimetableMotionDiagnostics.event("hide end")
+        }
         TimetableMotionDiagnostics.event("opening scheduled")
         DispatchQueue.main.async {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }

@@ -16,6 +16,8 @@ final class MotionProbe: NSObject {
         var previous: CFTimeInterval?
         var intervals: [Double] = []
         var targets: [Double] = []
+        var marks: [String: CFTimeInterval] = [:]
+        var morph: Bool?
         var interrupted = false
     }
     private var current: Sample?
@@ -46,8 +48,18 @@ final class MotionProbe: NSObject {
             current?.animation = CACurrentMediaTime()
         case "opening complete", "complete":
             finish(interrupted: false)
+        case "morph enabled":
+            current?.morph = true
+        case "morph fallback":
+            current?.morph = false
         case "closing start", "cancel":
             finish(interrupted: true)
+        case "geometry begin", "geometry end", "route begin", "route end",
+             "measure appear", "detail measured", "recheck begin", "recheck end",
+             "hide begin", "hide end", "opening scheduled":
+            guard current != nil else { return }
+            // Keep the first timestamp when SwiftUI repeats a lifecycle callback.
+            if current?.marks[name] == nil { current?.marks[name] = CACurrentMediaTime() }
         default: break
         }
     }
@@ -77,9 +89,10 @@ final class MotionProbe: NSObject {
     }
 
     func report(engine: String) -> String {
-        var lines = ["Hand Helper Motion Probe v1", "engine=\(engine)",
+        var lines = ["Hand Helper Motion Probe v2", "engine=\(engine)",
                      "clock=CADisplayLink/CACurrentMediaTime; frames=callback intervals, not screen presentation",
                      "tap=Flutter platform-channel arrival for Flutter; native handler for Swift",
+                     "stages=milliseconds from tap; gaps include scheduling and are not CPU duration",
                      "samples=\(samples.count); active=\(current != nil); max_refresh=\(UIScreen.main.maximumFramesPerSecond)",
                      "low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled); reduce_motion=\(UIAccessibility.isReduceMotionEnabled)"]
         for sample in samples {
@@ -91,7 +104,16 @@ final class MotionProbe: NSObject {
             func number(_ x: Double?) -> String { x.map { String(format: "%.2f", $0) } ?? "n/a" }
             let sorted = intervals.sorted()
             let p95: Double? = sorted.count >= 10 ? sorted[Int(ceil(Double(sorted.count) * 0.95)) - 1] : nil
-            lines.append("id=\(sample.id) interrupted=\(sample.interrupted) start_ms=\(number(start)) first_ms=\(number(first)) end_ms=\(number(end)) frames=\(intervals.count) max_ms=\(number(intervals.max())) p95_ms=\(number(p95)) long=\(long) target_min_ms=\(number(sample.targets.min())) target_max_ms=\(number(sample.targets.max()))")
+            let path = sample.morph.map { $0 ? "morph" : "fallback" } ?? "unknown"
+            lines.append("id=\(sample.id) interrupted=\(sample.interrupted) path=\(path) start_ms=\(number(start)) first_ms=\(number(first)) end_ms=\(number(end)) frames=\(intervals.count) max_ms=\(number(intervals.max())) p95_ms=\(number(p95)) long=\(long) target_min_ms=\(number(sample.targets.min())) target_max_ms=\(number(sample.targets.max()))")
+            let stageNames = ["geometry begin", "geometry end", "route begin", "route end",
+                              "measure appear", "detail measured", "recheck begin", "recheck end",
+                              "hide begin", "hide end", "opening scheduled"]
+            let stages = stageNames.map { name in
+                let value = sample.marks[name].map { ($0 - sample.start) * 1000 }
+                return "\(name.replacingOccurrences(of: " ", with: "_"))_ms=\(number(value))"
+            }
+            lines.append("stages id=\(sample.id) " + stages.joined(separator: " "))
         }
         return lines.joined(separator: "\n")
     }

@@ -661,11 +661,17 @@ struct TimetableView: View {
                    model.snapshotRevision == context.snapshotRevision,
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
             TimetableMotionDiagnostics.event("course tapped")
-            if detail.open(course: course, context: context, color: courseColor(course.name),
+            TimetableMotionDiagnostics.event("geometry begin")
+            let source = detail.sourceGeometry(for: context)
+            TimetableMotionDiagnostics.event("geometry end")
+            TimetableMotionDiagnostics.event("route begin")
+            let didOpen = detail.open(course: course, context: context, color: courseColor(course.name),
                            editableManualCourse: model.editableManualCourse(for: course, context: context),
-                           source: detail.sourceGeometry(for: context),
+                           source: source,
                            sourceStyle: TimetableDetailSourceStyle(rowSpan: rowSpan,
-                               showsWallpaper: showsWallpaper, increasedContrast: contrast == .increased)) {
+                               showsWallpaper: showsWallpaper, increasedContrast: contrast == .increased))
+            TimetableMotionDiagnostics.event("route end")
+            if didOpen {
                 AppHaptics.trigger(.detailOpened)
                 emptyCellSelection.clear(reason: "course_detail_opened")
             } else {
