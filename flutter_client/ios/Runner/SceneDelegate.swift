@@ -35,6 +35,9 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
   private var dateChannel: FlutterMethodChannel!
   private var datePickerPresenter: NativeDatePickerPresenter!
   private var imageActionChannel: FlutterMethodChannel!
+  #if MOTION_PROBE
+  private var motionProbeChannel: FlutterMethodChannel!
+  #endif
   private var imageActionPresenter: NativeImageActionSheetPresenter!
   private var tabHeight: NSLayoutConstraint!
   private var wantsTabs = false
@@ -98,6 +101,26 @@ private final class NativeTabHostController: UIViewController, UITabBarDelegate 
     ])
 
     channel = FlutterMethodChannel(name: "hand_helper/native_tab", binaryMessenger: flutter.binaryMessenger)
+    #if MOTION_PROBE
+    motionProbeChannel = FlutterMethodChannel(name: "hand_helper/motion_probe", binaryMessenger: flutter.binaryMessenger)
+    motionProbeChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "enable":
+        MotionProbe.shared.setEnabled(call.arguments as? Bool ?? false)
+        result(nil)
+      case "event":
+        if let event = call.arguments as? String { MotionProbe.shared.event(event) }
+        result(nil)
+      case "clear":
+        MotionProbe.shared.clear()
+        result(nil)
+      case "report":
+        result(MotionProbe.shared.report(engine: "Flutter"))
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    #endif
     timePickerPresenter = NativeTimePickerPresenter(host: self)
     timeChannel = FlutterMethodChannel(
       name: "hand_helper/native_period_time", binaryMessenger: flutter.binaryMessenger

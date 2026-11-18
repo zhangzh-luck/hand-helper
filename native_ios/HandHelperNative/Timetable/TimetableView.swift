@@ -86,6 +86,9 @@ struct TimetableView: View {
     @State private var wallpaperTask: Task<Void, Never>?
     @State private var wallpaperGeneration = 0
     @State private var wallpaperError: String?
+    #if MOTION_PROBE
+    @State private var showingMotionProbe = false
+    #endif
 
     init(state: AppState, detail: TimetableCourseDetailCoordinator? = nil,
          manualCourseEditor: ManualCourseEditorCoordinator? = nil,
@@ -236,6 +239,9 @@ struct TimetableView: View {
 #endif
             }
             .toolbar(.hidden, for: .navigationBar)
+            #if MOTION_PROBE
+            .sheet(isPresented: $showingMotionProbe) { MotionProbePanel() }
+            #endif
             .sheet(isPresented: $showingUnplaced, onDismiss: presentPendingListManualAction) { unplacedList }
             .sheet(isPresented: $showingConflicts, onDismiss: presentPendingListManualAction) { conflictList }
             .alert("无法操作课程", isPresented: Binding(get: { manualCourseError != nil },
@@ -379,6 +385,10 @@ struct TimetableView: View {
             Button { changeWeek(1) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel("下一周")
                 .disabled(model.selectedTermID == nil || model.selectedWeek >= 999)
+            #if MOTION_PROBE
+            Button { showingMotionProbe = true } label: { Image(systemName: "waveform.path.ecg") }
+                .accessibilityLabel("动画测试")
+            #endif
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -646,11 +656,11 @@ struct TimetableView: View {
                               width: CGFloat, height: CGFloat,
                               context: TimetableDetailContext) -> some View {
         return Button {
-            TimetableMotionDiagnostics.event("course tapped")
             guard state.selectedTab == .timetable, state.canAccessPrivateData,
                    model.selectedWeek == context.week, model.selectedTermID == context.termID,
                    model.snapshotRevision == context.snapshotRevision,
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
+            TimetableMotionDiagnostics.event("course tapped")
             if detail.open(course: course, context: context, color: courseColor(course.name),
                            editableManualCourse: model.editableManualCourse(for: course, context: context),
                            source: detail.sourceGeometry(for: context),
@@ -658,6 +668,10 @@ struct TimetableView: View {
                                showsWallpaper: showsWallpaper, increasedContrast: contrast == .increased)) {
                 AppHaptics.trigger(.detailOpened)
                 emptyCellSelection.clear(reason: "course_detail_opened")
+            } else {
+                #if MOTION_PROBE
+                MotionProbe.shared.event("cancel")
+                #endif
             }
         } label: {
             TimetableCourseCardSurface(course: course, color: courseColor(course.name),

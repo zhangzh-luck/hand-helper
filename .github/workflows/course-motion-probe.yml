@@ -1,0 +1,129 @@
+name: Course Motion Probe (unsigned)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/course-motion-probe.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+      - name: Install pinned XcodeGen
+        run: |
+          git init --quiet .tools/XcodeGen
+          git -C .tools/XcodeGen remote add origin https://github.com/yonaskolb/XcodeGen.git
+          git -C .tools/XcodeGen fetch --quiet --depth 1 origin refs/tags/2.44.1:refs/tags/2.44.1
+          git -C .tools/XcodeGen checkout --quiet --detach refs/tags/2.44.1
+          test "$(git -C .tools/XcodeGen rev-parse HEAD)" = 21ac9944b0ab546a07422dbed86f33dd2ebd76f8
+          swift build --package-path .tools/XcodeGen --configuration release
+          echo "XCODEGEN=$PWD/.tools/XcodeGen/.build/release/xcodegen" >> "$GITHUB_ENV"
+      - name: Generate isolated test project
+        working-directory: native_ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("project.yml")
+          s = p.read_text()
+          s = s.replace("com.zhangzh.hangassistant.native.dev", "com.zhangzh.hangassistant.motion.swift")
+          s = s.replace("INFOPLIST_KEY_CFBundleDisplayName: 航的助手", "INFOPLIST_KEY_CFBundleDisplayName: 课程动画 Swift")
+          s = s.replace("CFBundleURLSchemes: [handhelper]", "CFBundleURLSchemes: [handhelper-motion-swift]")
+          marker = 'PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.motion.swift\n'
+          assert marker in s
+          s = s.replace(marker, marker + '        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MOTION_PROBE"\n', 1)
+          test_marker = 'PRODUCT_BUNDLE_IDENTIFIER: com.zhangzh.hangassistant.motion.swift.tests\n'
+          assert test_marker in s
+          s = s.replace(test_marker, test_marker + '        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MOTION_PROBE"\n', 1)
+          p.write_text(s)
+          PY
+          "$XCODEGEN" generate --spec project.yml
+      - name: Run motion probe XCTest
+        working-directory: native_ios
+        run: |
+          xcodebuild test -project HandHelperNative.xcodeproj -scheme HandHelperNative -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' -only-testing:HandHelperNativeTests/TimetableDetailPresentationTests/testMotionProbeReportsOnlyOptedInSamplesAndMarksInterruptions -derivedDataPath build/MotionDerived CODE_SIGNING_ALLOWED=NO
+      - name: Build test IPA
+        working-directory: native_ios
+        run: |
+          xcodebuild build -project HandHelperNative.xcodeproj -scheme HandHelperNative -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/MotionDerived CODE_SIGNING_ALLOWED=NO
+          app=build/MotionDerived/Build/Products/Release-iphoneos/HandHelperNative.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = 'com.zhangzh.hangassistant.motion.swift'
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/PlugIns/HandHelperLiveActivityWidget.appex/Info.plist")" = 'com.zhangzh.hangassistant.motion.swift.liveactivity'
+          mkdir -p build/motion/Payload
+          /usr/bin/ditto "$app" build/motion/Payload/HandHelperNative.app
+          (cd build/motion && /usr/bin/ditto -c -k --keepParent Payload ../CourseMotion-Swift-unsigned.ipa)
+          /usr/bin/unzip -tqq build/CourseMotion-Swift-unsigned.ipa
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CourseMotion-Swift-unsigned
+          path: native_ios/build/CourseMotion-Swift-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  flutter:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: flutter_client
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.1.1.app/Contents/Developer
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e
+        with:
+          channel: stable
+          flutter-version: '3.47.3'
+          cache: true
+      - name: Configure isolated test build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("ios/Runner.xcodeproj/project.pbxproj")
+          s = p.read_text()
+          old = "com.zhangzh.hangassistant.handHelperFlutter"
+          assert old in s
+          p.write_text(s.replace(old, "com.zhangzh.hangassistant.motion.flutter"))
+          info = Path("ios/Runner/Info.plist")
+          s = info.read_text()
+          assert "Hand Helper Flutter" in s
+          info.write_text(s.replace("Hand Helper Flutter", "课程动画 Flutter"))
+          config = Path("ios/Flutter/Release.xcconfig")
+          config.write_text(config.read_text() + '\nSWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) MOTION_PROBE\n')
+          shared = Path("../native_ios/HandHelperNative/Timetable/MotionProbe.swift").read_text()
+          assert "\nimport SwiftUI\n" in shared
+          shared = shared.split("\nimport SwiftUI\n", 1)[0] + "\n#endif\n"
+          scene = Path("ios/Runner/SceneDelegate.swift")
+          scene.write_text(scene.read_text() + "\n" + shared)
+          PY
+      - run: flutter precache --ios
+      - run: flutter pub get
+      - name: Run Flutter tests
+        run: flutter test
+      - name: Run opt-in probe test
+        run: flutter test --dart-define=MOTION_PROBE=true test/motion_probe_test.dart
+      - run: pod install --repo-update
+        working-directory: flutter_client/ios
+      - name: Build test IPA
+        run: |
+          flutter build ios --release --no-codesign --dart-define=MOTION_PROBE=true
+          app=build/ios/iphoneos/Runner.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = 'com.zhangzh.hangassistant.motion.flutter'
+          mkdir -p build/motion/Payload
+          /usr/bin/ditto "$app" build/motion/Payload/Runner.app
+          (cd build/motion && /usr/bin/ditto -c -k --keepParent Payload ../CourseMotion-Flutter-unsigned.ipa)
+          /usr/bin/unzip -tqq build/CourseMotion-Flutter-unsigned.ipa
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CourseMotion-Flutter-unsigned
+          path: flutter_client/build/CourseMotion-Flutter-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

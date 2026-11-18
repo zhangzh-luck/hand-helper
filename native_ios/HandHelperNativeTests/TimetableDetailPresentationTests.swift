@@ -5,6 +5,29 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    #if MOTION_PROBE
+    @MainActor
+    func testMotionProbeReportsOnlyOptedInSamplesAndMarksInterruptions() {
+        let probe = MotionProbe.shared
+        probe.setEnabled(false)
+        probe.clear()
+        probe.event("course tapped")
+        XCTAssertTrue(probe.report(engine: "test").contains("samples=0"))
+        probe.setEnabled(true)
+        probe.event("course tapped")
+        probe.event("opening start")
+        probe.event("opening complete")
+        probe.event("course tapped")
+        probe.event("cancel")
+        let report = probe.report(engine: "test")
+        XCTAssertTrue(report.contains("samples=2"))
+        XCTAssertTrue(report.contains("id=1 interrupted=false"))
+        XCTAssertTrue(report.contains("id=2 interrupted=true"))
+        XCTAssertTrue(report.contains("p95_ms=n/a"))
+        probe.setEnabled(false)
+        probe.clear()
+    }
+    #endif
     @MainActor
     func testSourceVisibilityTracksSelectedContextUntilCloseCompletion() {
         let detail = TimetableCourseDetailCoordinator()

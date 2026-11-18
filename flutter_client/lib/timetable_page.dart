@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'container_morph_transition.dart';
 import 'native_tab_bridge.dart';
+import 'motion_probe.dart';
 import 'today_page.dart' show dataImage;
 
 DateTime mondayOf(DateTime date) {
@@ -348,11 +349,13 @@ class _TimetablePageState extends State<TimetablePage> {
 
   Future<void> showCourse(TimetableCourse course, int span) async {
     if (_activeCourse != null) return;
+    MotionProbe.event('tap');
     _activeCourse = course;
     _activeCoursePage = pageIndex;
     _activeCourseTerm = selectedTerm?.sourceId;
     final startRect = _courseRect(course);
     if (startRect == null) {
+      MotionProbe.event('cancel');
       _activeCourse = null;
       _activeCoursePage = null;
       _activeCourseTerm = null;
@@ -395,6 +398,7 @@ class _TimetablePageState extends State<TimetablePage> {
         await deleteCourse(course);
       }
     } finally {
+      MotionProbe.event('cancel');
       if (mounted) {
         setState(() {
           _activeCourse = null;
@@ -697,6 +701,12 @@ class _TimetablePageState extends State<TimetablePage> {
                   icon: const Icon(Icons.chevron_right),
                   tooltip: '下一周或开学周',
                 ),
+                if (MotionProbe.available)
+                  IconButton(
+                    onPressed: _showMotionProbe,
+                    icon: const Icon(Icons.monitor_heart_outlined),
+                    tooltip: '动画测试',
+                  ),
               ],
             ),
           ),
@@ -781,6 +791,37 @@ class _TimetablePageState extends State<TimetablePage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showMotionProbe() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('课程动画测试'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            SwitchListTile(
+              title: const Text('开启采样'),
+              value: MotionProbe.enabled,
+              onChanged: (value) async {
+                await MotionProbe.setEnabled(value);
+                if (dialogContext.mounted) update(() {});
+              },
+            ),
+            const Text('开启后关闭此面板，反复打开课程详情；不记录课程或账号。'),
+          ]),
+          actions: [
+            TextButton(onPressed: () async { await MotionProbe.clear(); }, child: const Text('清空')),
+            TextButton(onPressed: () async {
+              final report = await MotionProbe.report();
+              await Clipboard.setData(ClipboardData(text: report));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            }, child: const Text('复制报告')),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('完成')),
+          ],
+        ),
       ),
     );
   }
@@ -1161,6 +1202,16 @@ class _CourseMorphDialogState extends State<_CourseMorphDialog>
   double? _frozenProgress;
 
   @override
+  void initState() {
+    super.initState();
+    _animation.addStatusListener((status) {
+      if (status == AnimationStatus.completed && !_closing) {
+        MotionProbe.event('complete');
+      }
+    });
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_started) return;
@@ -1172,6 +1223,7 @@ class _CourseMorphDialogState extends State<_CourseMorphDialog>
           ? box.size.height
           : 520.0;
       setState(() => _endRect = _detailEndRect(measuredHeight));
+      MotionProbe.event('start');
       if (MediaQuery.disableAnimationsOf(context)) {
         _animation.value = 1;
       } else {
@@ -1191,6 +1243,7 @@ class _CourseMorphDialogState extends State<_CourseMorphDialog>
     _CourseDetailAction? action,
   }) async {
     if (_closing) return;
+    MotionProbe.event('cancel');
     if (userInitiated) HapticFeedback.lightImpact();
     final currentRect = widget.currentSourceRect();
     setState(() {

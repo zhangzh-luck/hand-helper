@@ -7,6 +7,9 @@ enum TimetableMotionDiagnostics {
     private static let log = OSLog(subsystem: "com.handhelper.timetable", category: "detail-motion")
     #endif
     static func event(_ name: StaticString) {
+        #if MOTION_PROBE
+        MotionProbe.shared.event(String(describing: name))
+        #endif
         #if DEBUG
         os_signpost(.event, log: log, name: name)
         #endif
@@ -231,6 +234,9 @@ private struct TimetableDetailSurface: View {
                  contentHeight: height)
         }
         .onChange(of: bounds.size) { _, _ in close(userInitiated: false) }
+        #if MOTION_PROBE
+        .onDisappear { MotionProbe.shared.event("cancel") }
+        #endif
         #if DEBUG
         .onDisappear { frameSampler.stop(interrupted: true) }
         #endif
