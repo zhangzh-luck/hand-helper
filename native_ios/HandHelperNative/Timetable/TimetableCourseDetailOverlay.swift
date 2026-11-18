@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import os
 
+@MainActor
 enum TimetableMotionDiagnostics {
     #if DEBUG
     private static let log = OSLog(subsystem: "com.handhelper.timetable", category: "detail-motion")

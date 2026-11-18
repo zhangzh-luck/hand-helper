@@ -1,4 +1,5 @@
 name: Course Motion Probe (unsigned)
+# Test bundles use isolated identifiers and compile the opt-in probe.
 on:
   workflow_dispatch:
   push:
