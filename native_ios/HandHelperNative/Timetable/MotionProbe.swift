@@ -56,7 +56,7 @@ final class MotionProbe: NSObject {
             finish(interrupted: true)
         case "geometry begin", "geometry end", "route begin", "route end",
              "measure appear", "detail measured", "recheck begin", "recheck end",
-             "hide begin", "hide end", "opening scheduled":
+             "hide begin", "hide end", "opening scheduled", "surface appeared":
             guard current != nil else { return }
             // Keep the first timestamp when SwiftUI repeats a lifecycle callback.
             if current?.marks[name] == nil { current?.marks[name] = CACurrentMediaTime() }
@@ -93,6 +93,7 @@ final class MotionProbe: NSObject {
                      "clock=CADisplayLink/CACurrentMediaTime; frames=callback intervals, not screen presentation",
                      "tap=Flutter platform-channel arrival for Flutter; native handler for Swift",
                      "stages=milliseconds from tap; gaps include scheduling and are not CPU duration",
+                     engine == "Swift" ? "swift_opening_strategy=surface_onAppear" : "opening_strategy=flutter",
                      "samples=\(samples.count); active=\(current != nil); max_refresh=\(UIScreen.main.maximumFramesPerSecond)",
                      "low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled); reduce_motion=\(UIAccessibility.isReduceMotionEnabled)"]
         for sample in samples {
@@ -108,7 +109,7 @@ final class MotionProbe: NSObject {
             lines.append("id=\(sample.id) interrupted=\(sample.interrupted) path=\(path) start_ms=\(number(start)) first_ms=\(number(first)) end_ms=\(number(end)) frames=\(intervals.count) max_ms=\(number(intervals.max())) p95_ms=\(number(p95)) long=\(long) target_min_ms=\(number(sample.targets.min())) target_max_ms=\(number(sample.targets.max()))")
             let stageNames = ["geometry begin", "geometry end", "route begin", "route end",
                               "measure appear", "detail measured", "recheck begin", "recheck end",
-                              "hide begin", "hide end", "opening scheduled"]
+                              "hide begin", "hide end", "opening scheduled", "surface appeared"]
             let stages = stageNames.map { name in
                 let value = sample.marks[name].map { ($0 - sample.start) * 1000 }
                 return "\(name.replacingOccurrences(of: " ", with: "_"))_ms=\(number(value))"

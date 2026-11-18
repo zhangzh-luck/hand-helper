@@ -132,6 +132,7 @@ private struct TimetableDetailSurface: View {
     @State private var morphProgress: CGFloat = 0
     @State private var panelOpacity: Double = 1
     @State private var useMorph = false
+    @State private var openingStarted = false
     #if DEBUG
     @State private var frameSampler = TimetableMotionFrameSampler()
     #endif
@@ -208,6 +209,12 @@ private struct TimetableDetailSurface: View {
                 }
                 .allowsHitTesting(!closing)
                 .accessibilityHidden(closing)
+                #if MOTION_PROBE
+                .onAppear {
+                    TimetableMotionDiagnostics.event("surface appeared")
+                    startOpening()
+                }
+                #endif
             } else {
                 // Measure once at the final width, before the visible presentation begins.
                 TimetableDetailContent(course: route.course, courseColor: route.courseColor,
@@ -265,24 +272,34 @@ private struct TimetableDetailSurface: View {
             TimetableMotionDiagnostics.event("hide end")
         }
         TimetableMotionDiagnostics.event("opening scheduled")
+        #if !MOTION_PROBE
         DispatchQueue.main.async {
+            startOpening()
+        }
+        #endif
+    }
+
+    private func startOpening() {
+        guard TimetableDetailMotion.mayStartOpening(routeMatches: detail.route?.id == route.id,
+                                                   phase: detail.phase,
+                                                   alreadyStarted: openingStarted,
+                                                   closing: closing) else { return }
+        openingStarted = true
+        TimetableMotionDiagnostics.event("opening start")
+        #if DEBUG
+        frameSampler.start("opening")
+        #endif
+        withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
+                      completionCriteria: .removed) {
+            morphProgress = 1
+        } completion: {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
-            TimetableMotionDiagnostics.event("opening start")
+            TimetableMotionDiagnostics.event("opening complete")
             #if DEBUG
-            frameSampler.start("opening")
+            frameSampler.stop()
             #endif
-            withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
-                          completionCriteria: .removed) {
-                morphProgress = 1
-            } completion: {
-                guard detail.route?.id == route.id, detail.phase == .opening else { return }
-                TimetableMotionDiagnostics.event("opening complete")
-                #if DEBUG
-                frameSampler.stop()
-                #endif
-                detail.markOpen(id: route.id)
-                focusTitle = true
-            }
+            detail.markOpen(id: route.id)
+            focusTitle = true
         }
     }
 

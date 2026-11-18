@@ -5,6 +5,19 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    func testOpeningStartsOnlyOnceForCurrentActiveRoute() {
+        XCTAssertTrue(TimetableDetailMotion.mayStartOpening(routeMatches: true, phase: .opening,
+                                                            alreadyStarted: false, closing: false))
+        XCTAssertFalse(TimetableDetailMotion.mayStartOpening(routeMatches: false, phase: .opening,
+                                                             alreadyStarted: false, closing: false))
+        XCTAssertFalse(TimetableDetailMotion.mayStartOpening(routeMatches: true, phase: .opening,
+                                                             alreadyStarted: true, closing: false))
+        XCTAssertFalse(TimetableDetailMotion.mayStartOpening(routeMatches: true, phase: .closing,
+                                                             alreadyStarted: false, closing: true))
+        XCTAssertFalse(TimetableDetailMotion.mayStartOpening(routeMatches: true, phase: .open,
+                                                             alreadyStarted: false, closing: false))
+    }
+
     #if MOTION_PROBE
     @MainActor
     func testMotionProbeReportsOnlyOptedInSamplesAndMarksInterruptions() {

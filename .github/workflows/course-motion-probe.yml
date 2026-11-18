@@ -1,5 +1,5 @@
 name: Course Motion Probe (unsigned)
-# Test bundles use isolated identifiers and compile the opt-in v2 stage probe.
+# Test bundles use isolated identifiers and the opt-in onAppear experiment.
 on:
   workflow_dispatch:
   push:
@@ -48,7 +48,7 @@ jobs:
       - name: Run motion probe XCTest
         working-directory: native_ios
         run: |
-          xcodebuild test -project HandHelperNative.xcodeproj -scheme HandHelperNative -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' -only-testing:HandHelperNativeTests/TimetableDetailPresentationTests/testMotionProbeReportsOnlyOptedInSamplesAndMarksInterruptions -derivedDataPath build/MotionDerived CODE_SIGNING_ALLOWED=NO
+          xcodebuild test -project HandHelperNative.xcodeproj -scheme HandHelperNative -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1' -only-testing:HandHelperNativeTests/TimetableDetailPresentationTests -derivedDataPath build/MotionDerived CODE_SIGNING_ALLOWED=NO
       - name: Build test IPA
         working-directory: native_ios
         run: |

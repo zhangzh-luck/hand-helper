@@ -85,6 +85,11 @@ enum TimetableDetailMotion {
     static let reducedDuration = 0.15
     static let morphDuration = 0.26
 
+    static func mayStartOpening(routeMatches: Bool, phase: TimetableDetailPhase,
+                                alreadyStarted: Bool, closing: Bool) -> Bool {
+        routeMatches && phase == .opening && !alreadyStarted && !closing
+    }
+
     static func phase(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
         guard end > start else { return 0 }
         return min(max((progress - start) / (end - start), 0), 1)
