@@ -25,6 +25,8 @@ private final class TimetableMotionFrameSampler: NSObject {
     private let log = OSLog(subsystem: "com.handhelper.timetable", category: "detail-motion-frames")
     private var link: CADisplayLink?
     private var previous: CFTimeInterval?
+    private var startedAt: CFTimeInterval = 0
+    private var firstCallbackDelay: CFTimeInterval?
     private var maxInterval: CFTimeInterval = 0
     private var count = 0
     private var longCount = 0
@@ -34,6 +36,8 @@ private final class TimetableMotionFrameSampler: NSObject {
         stop(interrupted: true)
         self.label = label
         previous = nil
+        startedAt = CACurrentMediaTime()
+        firstCallbackDelay = nil
         maxInterval = 0
         count = 0
         longCount = 0
@@ -43,6 +47,7 @@ private final class TimetableMotionFrameSampler: NSObject {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
+        if firstCallbackDelay == nil { firstCallbackDelay = CACurrentMediaTime() - startedAt }
         defer { previous = link.timestamp }
         guard let previous else { return }
         let interval = link.timestamp - previous
@@ -56,9 +61,9 @@ private final class TimetableMotionFrameSampler: NSObject {
         guard let link else { return }
         link.invalidate()
         self.link = nil
-        os_log("phase=%{public}@ frames=%{public}d long=%{public}d max_ms=%{public}.2f interrupted=%{public}d opaque=%{public}d no_clip=%{public}d",
-               log: log, type: .info, label as NSString, count, longCount,
-               maxInterval * 1000, interrupted ? 1 : 0,
+        os_log("phase=%{public}@ frames=%{public}d first_ms=%{public}.2f long=%{public}d max_ms=%{public}.2f interrupted=%{public}d opaque=%{public}d no_clip=%{public}d",
+               log: log, type: .info, label as NSString, count,
+               (firstCallbackDelay ?? -0.001) * 1000, longCount, maxInterval * 1000, interrupted ? 1 : 0,
                TimetableMotionExperiment.opaque ? 1 : 0, TimetableMotionExperiment.noClip ? 1 : 0)
     }
 }
