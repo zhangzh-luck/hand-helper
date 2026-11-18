@@ -5,6 +5,17 @@ import Combine
 @testable import HandHelperNative
 
 final class TimetableDetailPresentationTests: XCTestCase {
+    func testFlutterMotionCurveAndHandoffPhases() {
+        XCTAssertEqual(TimetableDetailMotion.geometryProgress(0), 0)
+        XCTAssertEqual(TimetableDetailMotion.geometryProgress(1), 1)
+        XCTAssertEqual(TimetableDetailMotion.geometryProgress(0.5), 0.7756, accuracy: 0.001)
+        XCTAssertEqual(TimetableDetailMotion.phase(0.18, from: 0.18, to: 0.34), 0, accuracy: 0.0001)
+        XCTAssertEqual(TimetableDetailMotion.phase(0.26, from: 0.18, to: 0.34), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(TimetableDetailMotion.phase(0.45, from: 0.30, to: 0.45), 1, accuracy: 0.0001)
+        let samples = (0...20).map { TimetableDetailMotion.geometryProgress(CGFloat($0) / 20) }
+        XCTAssertTrue(zip(samples, samples.dropFirst()).allSatisfy { $0.0 <= $0.1 })
+    }
+
     func testReverseRequiresSameValidSourceAndViewport() {
         let viewport = CGSize(width: 390, height: 844)
         let visible = CGRect(origin: .zero, size: viewport)

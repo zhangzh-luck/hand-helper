@@ -1,6 +1,40 @@
 import SwiftUI
 import UIKit
 
+/// The same source surface is used by the grid and by its transition.
+struct TimetableCourseCardSurface: View {
+    let course: CourseSession
+    let color: Color
+    let style: TimetableDetailSourceStyle
+
+    var body: some View {
+        let policy = TimetableCardContentPolicy(rowSpan: style.rowSpan)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(course.name).font(.caption.weight(.semibold))
+                .lineLimit(policy.titleLines).minimumScaleFactor(0.8)
+                .allowsTightening(true).truncationMode(.tail).layoutPriority(1)
+            if policy.showsRoom, let room = course.room, !room.isEmpty {
+                Text(room).font(.caption2)
+                    .foregroundStyle(style.increasedContrast ? Color.primary : Color.primary.opacity(0.82))
+                    .lineLimit(policy.roomLines).minimumScaleFactor(0.8)
+                    .truncationMode(.tail).layoutPriority(0.5)
+            }
+            if policy.showsTeacher, let teacher = course.teacher, !teacher.isEmpty {
+                Text(teacher).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(3)
+        .background(color.opacity(style.showsWallpaper ? 0.36 : 0.28), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color(uiColor: .secondarySystemGroupedBackground)
+            .opacity(TimetableWallpaperStyle.cardOpacity(hasPhoto: style.showsWallpaper)),
+            in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(color.opacity(style.showsWallpaper ? 0.7 : 0.55), lineWidth: 0.5))
+    }
+}
+
 enum TimetableWallpaperStyle {
     static func showsPhoto(hasImage: Bool, reduceTransparency: Bool, increasedContrast: Bool) -> Bool {
         hasImage && !reduceTransparency && !increasedContrast
@@ -598,7 +632,6 @@ struct TimetableView: View {
     private func courseButton(_ course: CourseSession, rowSpan: Int,
                               width: CGFloat, height: CGFloat,
                               context: TimetableDetailContext) -> some View {
-        let policy = TimetableCardContentPolicy(rowSpan: rowSpan)
         return Button {
             TimetableMotionDiagnostics.event("course tapped")
             guard state.selectedTab == .timetable, state.canAccessPrivateData,
@@ -607,41 +640,16 @@ struct TimetableView: View {
                    (try? state.requireCurrentAccount(revision: context.authenticationRevision)) != nil else { return }
             if detail.open(course: course, context: context, color: courseColor(course.name),
                            editableManualCourse: model.editableManualCourse(for: course, context: context),
-                           source: detail.sourceGeometry(for: context)) {
+                           source: detail.sourceGeometry(for: context),
+                           sourceStyle: TimetableDetailSourceStyle(rowSpan: rowSpan,
+                               showsWallpaper: showsWallpaper, increasedContrast: contrast == .increased)) {
                 AppHaptics.trigger(.detailOpened)
                 emptyCellSelection.clear(reason: "course_detail_opened")
             }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(course.name).font(.caption.weight(.semibold))
-                    .lineLimit(policy.titleLines)
-                    .minimumScaleFactor(0.8)
-                    .allowsTightening(true)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                if policy.showsRoom, let room = course.room, !room.isEmpty {
-                    Text(room).font(.caption2)
-                        .foregroundStyle(contrast == .increased ? Color.primary : Color.primary.opacity(0.82))
-                        .lineLimit(policy.roomLines)
-                        .minimumScaleFactor(0.8)
-                        .truncationMode(.tail)
-                        .layoutPriority(0.5)
-                }
-                if policy.showsTeacher, let teacher = course.teacher, !teacher.isEmpty {
-                    Text(teacher).font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(3)
-            .background(courseColor(course.name).opacity(showsWallpaper ? 0.36 : 0.28), in: RoundedRectangle(cornerRadius: 8))
-            .background(Color(uiColor: .secondarySystemGroupedBackground)
-                            .opacity(TimetableWallpaperStyle.cardOpacity(hasPhoto: showsWallpaper)),
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(courseColor(course.name).opacity(showsWallpaper ? 0.7 : 0.55), lineWidth: 0.5))
+            TimetableCourseCardSurface(course: course, color: courseColor(course.name),
+                style: TimetableDetailSourceStyle(rowSpan: rowSpan, showsWallpaper: showsWallpaper,
+                                                   increasedContrast: contrast == .increased))
         }
         .buttonStyle(.plain)
         .frame(width: width, height: height)

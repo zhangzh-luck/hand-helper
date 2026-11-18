@@ -118,13 +118,15 @@ private struct TimetableDetailSurface: View {
                                       source: useMorph ? route.source : nil,
                                       destination: destination, bounds: bounds,
                                       course: route.course, color: route.courseColor,
+                                      sourceStyle: route.sourceStyle,
                                       scrimOpacity: TimetableDetailMotion.scrimOpacity(dark: colorScheme == .dark),
                                       panelOpacity: panelOpacity,
-                                      onBackdrop: { close() }) {
+                                      onBackdrop: { close() }) { transitionProgress in
                     panelSurface(ScrollView(.vertical) {
                         TimetableDetailContent(course: route.course, courseColor: route.courseColor,
                             focusTitle: focusTitle, onClose: { close() },
                             glassHeader: surfaceKind == .glass,
+                            transitionProgress: useMorph ? transitionProgress : nil,
                             onAction: route.editableManualCourse == nil ? nil : { action in
                                 if action == .delete { requestDelete() } else { close(action: action) }
                             })
@@ -182,7 +184,7 @@ private struct TimetableDetailSurface: View {
         DispatchQueue.main.async {
             guard detail.route?.id == route.id, detail.phase == .opening else { return }
             TimetableMotionDiagnostics.event("opening start")
-            withAnimation(.easeInOut(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
+            withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
                           completionCriteria: .removed) {
                 morphProgress = 1
             } completion: {
@@ -207,7 +209,7 @@ private struct TimetableDetailSurface: View {
         let canReverse = useMorph && !reduceMotion && TimetableDetailMotion.canReturn(
             to: route.source, current: detail.sourceGeometry(for: route.context), viewport: bounds.size)
         TimetableMotionDiagnostics.event("closing start")
-        withAnimation(.easeInOut(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.closingDuration),
+        withAnimation(.linear(duration: reduceMotion ? TimetableDetailMotion.reducedDuration : TimetableDetailMotion.morphDuration),
                       completionCriteria: .removed) {
             if canReverse { morphProgress = 0 } else { panelOpacity = 0 }
         } completion: {
@@ -238,10 +240,11 @@ private struct TimetableOpeningMorph<Content: View>: View, Animatable {
     let bounds: CGRect
     let course: CourseSession
     let color: Color
+    let sourceStyle: TimetableDetailSourceStyle?
     let scrimOpacity: Double
     var panelOpacity: Double
     let onBackdrop: () -> Void
-    @ViewBuilder let content: () -> Content
+    @ViewBuilder let content: (CGFloat) -> Content
 
     var animatableData: AnimatablePair<CGFloat, Double> {
         get { AnimatablePair(progress, panelOpacity) }
@@ -250,9 +253,16 @@ private struct TimetableOpeningMorph<Content: View>: View, Animatable {
 
     var body: some View {
         let p = min(max(progress, 0), 1)
-        let frame = source.map { interpolate($0.frame, destination, p) } ?? destination
-        let viewport = source.map { interpolate($0.visibleFrame, bounds, min(p / 0.6, 1)) } ?? bounds
-        let corner = source == nil ? 22 : 8 + 14 * p
+        let curved = TimetableDetailMotion.geometryProgress(p)
+        let frame = source.map { interpolate($0.frame, destination, curved) } ?? destination
+        let viewport = source.map { source in
+            CGRect(x: bounds.minX,
+                   y: source.visibleFrame.minY + (bounds.minY - source.visibleFrame.minY) * TimetableDetailMotion.phase(p, from: 0.35, to: 0.62),
+                   width: bounds.width,
+                   height: source.visibleFrame.height +
+                       (bounds.height - source.visibleFrame.height) * TimetableDetailMotion.phase(p, from: 0.35, to: 0.62))
+        } ?? bounds
+        let corner = source == nil ? 22 : 8 + 14 * curved
         ZStack(alignment: .topLeading) {
             Color.black.opacity(scrimOpacity * Double(p) * panelOpacity)
                 .contentShape(Rectangle())
@@ -263,19 +273,15 @@ private struct TimetableOpeningMorph<Content: View>: View, Animatable {
                     .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous)
                         .fill(color.opacity(0.28 * Double(1 - p))))
                     .opacity(source == nil ? 0 : Double(1 - p))
-                if let source {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(course.name).font(.caption.weight(.semibold)).lineLimit(2)
-                        if let room = course.room, !room.isEmpty { Text(room).font(.caption2).lineLimit(1) }
-                    }
-                    .padding(3)
+                if let source, let sourceStyle {
+                    TimetableCourseCardSurface(course: course, color: color, style: sourceStyle)
                     .frame(width: source.frame.width, height: source.frame.height, alignment: .topLeading)
-                    .opacity(Double(max(0, 1 - p * 3)))
+                    .opacity(Double(1 - TimetableDetailMotion.phase(p, from: 0.18, to: 0.34)))
                     .accessibilityHidden(true)
                 }
-                content()
+                content(p)
                     .frame(width: destination.width, height: destination.height, alignment: .topLeading)
-                    .opacity(source == nil ? Double(p) : Double(max(0, min(1, (p - 0.26) / 0.3))))
+                    .opacity(source == nil ? Double(p) : Double(TimetableDetailMotion.phase(p, from: 0.16, to: 0.26)))
             }
             .frame(width: frame.width, height: frame.height, alignment: .topLeading)
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
@@ -303,6 +309,7 @@ struct TimetableDetailContent: View {
     let focusTitle: Bool
     let onClose: () -> Void
     var glassHeader = false
+    var transitionProgress: CGFloat? = nil
     var onAction: ((TimetableManualCourseAction) -> Void)? = nil
 
     @AccessibilityFocusState private var titleFocused: Bool
@@ -325,6 +332,7 @@ struct TimetableDetailContent: View {
             .padding(.horizontal, 20)
             .padding(.top, 16)
             .padding(.bottom, 12)
+            .opacity(transitionProgress.map { Double(TimetableDetailMotion.phase($0, from: 0.26, to: 0.41)) } ?? 1)
 
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(TimetableDetailInformation.rows(for: course)) { row in
@@ -354,6 +362,8 @@ struct TimetableDetailContent: View {
                     Color(uiColor: .systemGroupedBackground).opacity(0.94)
                 }
             }
+            .opacity(transitionProgress.map { Double(TimetableDetailMotion.phase($0, from: 0.30, to: 0.45)) } ?? 1)
+            .offset(y: transitionProgress.map { 14 * (1 - TimetableDetailMotion.phase($0, from: 0.30, to: 0.45)) } ?? 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)

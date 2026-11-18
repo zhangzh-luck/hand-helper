@@ -18,6 +18,13 @@ struct TimetableDetailRoute: Identifiable {
     let courseColor: Color
     let editableManualCourse: TimetableManualCourseIdentity?
     var source: TimetableDetailSource? = nil
+    var sourceStyle: TimetableDetailSourceStyle? = nil
+}
+
+struct TimetableDetailSourceStyle {
+    let rowSpan: Int
+    let showsWallpaper: Bool
+    let increasedContrast: Bool
 }
 
 struct TimetableDetailSource: Equatable {
@@ -77,6 +84,26 @@ enum TimetableDetailMotion {
     static let closingDuration = 0.22
     static let reducedDuration = 0.15
     static let morphDuration = 0.26
+
+    static func phase(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        guard end > start else { return 0 }
+        return min(max((progress - start) / (end - start), 0), 1)
+    }
+
+    // Flutter's fastOutSlowIn cubic: (0.4, 0, 0.2, 1).
+    static func geometryProgress(_ progress: CGFloat) -> CGFloat {
+        let x = min(max(progress, 0), 1)
+        if x == 0 || x == 1 { return x }
+        var lower: CGFloat = 0
+        var upper: CGFloat = 1
+        for _ in 0..<16 {
+            let t = (lower + upper) / 2
+            let curveX = 3 * (1 - t) * (1 - t) * t * 0.4 + 3 * (1 - t) * t * t * 0.2 + t * t * t
+            if curveX < x { lower = t } else { upper = t }
+        }
+        let t = (lower + upper) / 2
+        return 3 * (1 - t) * t * t + t * t * t
+    }
 
     static func canReturn(to original: TimetableDetailSource?, current: TimetableDetailSource?, viewport: CGSize) -> Bool {
         guard let original, let current, original.isValid, current.isValid,
@@ -165,10 +192,12 @@ final class TimetableCourseDetailCoordinator: ObservableObject {
     @discardableResult
     func open(course: CourseSession, context: TimetableDetailContext, color: Color,
               editableManualCourse: TimetableManualCourseIdentity? = nil,
-              source: TimetableDetailSource? = nil) -> Bool {
+              source: TimetableDetailSource? = nil,
+              sourceStyle: TimetableDetailSourceStyle? = nil) -> Bool {
         guard phase == .idle, !pagerBusy, readyAction == nil else { return false }
         route = TimetableDetailRoute(course: course, context: context, courseColor: color,
-                                     editableManualCourse: editableManualCourse, source: source)
+                                     editableManualCourse: editableManualCourse, source: source,
+                                     sourceStyle: sourceStyle)
         phase = .opening
         return true
     }
