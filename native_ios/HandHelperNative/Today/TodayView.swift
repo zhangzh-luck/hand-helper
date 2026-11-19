@@ -39,6 +39,7 @@ struct TodayView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorContrast
     @ScaledMetric(relativeTo: .title) private var avatarDimension: CGFloat = 60
     @State private var pendingDelete: PendingScheduleDelete?
     @State private var localError: String?
@@ -126,17 +127,13 @@ struct TodayView: View {
             }
             VStack(spacing: 0) {
                 hero
-                scheduleHeader.padding(.top, 24)
-                if !entries.isEmpty && (state.canAccessPrivateData && (model.active != nil || model.upcoming != nil) || model.schedules.isEmpty) {
+                scheduleHeader.padding(.top, 18)
+                if state.canAccessPrivateData && model.hasCourseData && !model.courses.isEmpty {
                     statusCard
                         .padding(.top, 5).padding(.bottom, 9)
                 }
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        if state.canAccessPrivateData {
-                            LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
-                                              onLedger: { ledgerOpen = true })
-                        }
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
                                 Text(courseMessage)
@@ -164,6 +161,12 @@ struct TodayView: View {
                             ForEach(entries) { entry in
                                 entryCard(entry)
                             }
+                        }
+                        if state.canAccessPrivateData {
+                            LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
+                                              onLedger: { ledgerOpen = true },
+                                              hasWallpaper: model.wallpaperImage != nil && !reduceTransparency)
+                                .padding(.top, 12)
                         }
                     }
                     .padding(.top, entries.isEmpty ? 0 : 12)
@@ -320,6 +323,18 @@ struct TodayView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency ? 8 : 0)
+        .padding(.vertical, model.wallpaperImage != nil && !reduceTransparency ? 4 : 0)
+        .background {
+            if model.wallpaperImage != nil && !reduceTransparency {
+                if colorContrast == .increased {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                } else {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -382,7 +397,8 @@ struct TodayView: View {
                 }
             }
         }
-        .padding(22)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(TodayHeroSurface())
     }
@@ -507,10 +523,25 @@ struct TodayView: View {
 
     private var statusCard: some View {
         let complete = model.active == nil && model.upcoming == nil
-        return Text(model.status)
+        let ended = complete && !model.courses.isEmpty && model.courses.allSatisfy {
+            guard let end = $0.end else { return false }
+            return end <= model.now
+        }
+        return Text(ended ? "今天的课程已经结束" : model.status)
             .font(.subheadline.weight(complete ? .medium : .semibold))
             .foregroundStyle(complete ? Color.secondary : Color.accentColor)
-            .padding(.vertical, 10)
+            .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency ? 8 : 0)
+            .padding(.vertical, 8)
+            .background {
+                if model.wallpaperImage != nil && !reduceTransparency {
+                    if colorContrast == .increased {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
+                    }
+                }
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

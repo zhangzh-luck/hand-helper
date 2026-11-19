@@ -31,6 +31,19 @@ final class LifeDashboardTests: XCTestCase {
         XCTAssertEqual(AppTab.today.symbol, "house")
     }
 
+    func testDashboardEmptyAndBudgetStatesDoNotInventAmounts() {
+        let summary = LifeSummary(month: "2026-11", currency: "CNY", incomeMinor: 0,
+                                  expenseMinor: 0, budgetMinor: nil, remainingMinor: nil)
+        let empty = LifeSnapshot(summary: summary, hasTransactions: false, subscriptions: [], savedAt: Date())
+        XCTAssertEqual(LifeDashboardCardText.expense(empty, loading: false), "暂无记录")
+        XCTAssertEqual(LifeDashboardCardText.budget(empty, loading: false), "未设置")
+        XCTAssertEqual(LifeDashboardCardText.expense(nil, loading: true), "正在读取")
+        XCTAssertEqual(LifeDashboardCardText.budget(nil, loading: false), "暂无数据")
+        XCTAssertFalse(LifeDashboardLayout.useSingleColumn(accessibilitySize: false, expense: "CNY 10.00", budget: "未设置"))
+        XCTAssertTrue(LifeDashboardLayout.useSingleColumn(accessibilitySize: true, expense: "CNY 10.00", budget: "未设置"))
+        XCTAssertTrue(LifeDashboardLayout.useSingleColumn(accessibilitySize: false, expense: "CNY 1,234,567,890.00", budget: "未设置"))
+    }
+
     @MainActor
     func testRepositoryUsesReadOnlyEndpointsAndAccountScopedCache() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
