@@ -23,6 +23,30 @@ enum TodayEntryLayout {
     }
 }
 
+enum TodayCarouselSelection {
+    struct Item: Equatable {
+        let id: String
+        let start: Date?
+        let isActiveCourse: Bool
+    }
+
+    static func initial(items: [Item], now: Date) -> String? {
+        items.first(where: { $0.isActiveCourse })?.id
+            ?? items.first(where: { $0.start.map { $0 > now } ?? false })?.id
+            ?? items.last(where: { $0.start != nil })?.id
+            ?? items.last?.id
+    }
+
+    static func reconcile(selected: String?, previous: [String], current: [String], fallback: String?) -> String? {
+        guard !current.isEmpty else { return nil }
+        if let selected, current.contains(selected) { return selected }
+        if let selected, let index = previous.firstIndex(of: selected) {
+            return current[min(index, current.count - 1)]
+        }
+        return fallback.flatMap { current.contains($0) ? $0 : nil } ?? current.first
+    }
+}
+
 @MainActor
 struct TodayView: View {
     @ObservedObject private var state: AppState
@@ -51,6 +75,9 @@ struct TodayView: View {
     @State private var contentMaxWidth = TodayContentWidth.standard
     @State private var entryContentWidth: CGFloat = 0
     @State private var contentViewport: CGSize = .zero
+    @State private var selectedEntryID: String?
+    @State private var previousEntryIDs: [String] = []
+    @State private var selectionDay: String?
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -92,10 +119,7 @@ struct TodayView: View {
     }
 
     private var entryColumnCount: Int {
-        TodayEntryLayout.columnCount(width: entryContentWidth,
-                                     viewport: contentViewport,
-                                     isIPad: UIDevice.current.userInterfaceIdiom == .pad,
-                                     usesLargeText: dynamicTypeSize >= .xxxLarge)
+        UIDevice.current.userInterfaceIdiom == .pad && entryContentWidth >= 700 && dynamicTypeSize < .xxxLarge ? 2 : 1
     }
 
     var body: some View {
@@ -154,18 +178,7 @@ struct TodayView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if UIDevice.current.userInterfaceIdiom == .pad {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: TodayEntryLayout.spacing), count: entryColumnCount),
-                                      spacing: TodayEntryLayout.spacing) {
-                                ForEach(entries) { entry in
-                                    entryCard(entry)
-                                }
-                            }
-                        } else {
-                            ForEach(entries) { entry in
-                                entryCard(entry)
-                            }
-                        }
+                        if !entries.isEmpty { scheduleCarousel }
                         if state.canAccessPrivateData {
                             LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
                                               onLedger: { ledgerOpen = true },
@@ -176,7 +189,7 @@ struct TodayView: View {
                     .padding(.bottom, 16)
                 }
                 .onGeometryChange(for: CGFloat.self) { proxy in
-                    UIDevice.current.userInterfaceIdiom == .pad ? proxy.size.width : 0
+                    proxy.size.width
                 } action: { width in
                     entryContentWidth = width
                 }
@@ -213,6 +226,9 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            selectedEntryID = nil
+            previousEntryIDs = []
+            selectionDay = nil
             ledgerModel.clear()
             ledgerOpen = false
             quickEntryOpen = false
@@ -259,6 +275,15 @@ struct TodayView: View {
                 Task { await refreshCourses() }
             }
         }
+        .onChange(of: entries.map(\.id), initial: true) { _, ids in
+            updateCarouselSelection(ids: ids)
+        }
+        .onChange(of: CourseScheduleCalculator.dateKey(model.now)) { _, _ in
+            selectedEntryID = nil
+            previousEntryIDs = []
+            selectionDay = nil
+            updateCarouselSelection(ids: entries.map(\.id))
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 if state.selectedTab == .today { weatherModel.loadIfNeeded() }
@@ -272,6 +297,46 @@ struct TodayView: View {
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
+    }
+
+    private func updateCarouselSelection(ids: [String]) {
+        let day = CourseScheduleCalculator.dateKey(model.now)
+        if selectionDay != day {
+            selectedEntryID = nil
+            previousEntryIDs = []
+            selectionDay = day
+        }
+        let items = entries.map { entry in
+            TodayCarouselSelection.Item(id: entry.id, start: entry.start(on: model.now),
+                                        isActiveCourse: entry.isActiveCourse(model.active?.id))
+        }
+        selectedEntryID = TodayCarouselSelection.reconcile(
+            selected: selectedEntryID, previous: previousEntryIDs, current: ids,
+            fallback: TodayCarouselSelection.initial(items: items, now: model.now))
+        previousEntryIDs = ids
+    }
+
+    private var scheduleCarousel: some View {
+        let width = max(1, entryContentWidth)
+        let count = entryColumnCount
+        let spacing = TodayEntryLayout.spacing
+        let cardWidth = entries.count == 1 ? width :
+            (count == 2 ? (width - spacing) / 2 : width * 0.9)
+        return ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: spacing) {
+                ForEach(entries) { entry in
+                    entryCard(entry)
+                        .frame(width: cardWidth)
+                        .frame(minHeight: 106, alignment: .top)
+                        .id(entry.id)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.trailing, entries.count > 1 ? max(0, width - cardWidth) : 0)
+        }
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $selectedEntryID)
     }
 
     private func refreshLifeDashboard() {
@@ -321,8 +386,16 @@ struct TodayView: View {
 
     private var scheduleHeading: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("今日安排")
-                .font(.title3.weight(.semibold))
+            HStack(spacing: 8) {
+                Text("今日安排")
+                    .font(.title3.weight(.semibold))
+                if entries.count > 1, let id = selectedEntryID,
+                   let index = entries.firstIndex(where: { $0.id == id }) {
+                    Text("\(index + 1) / \(entries.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("当前起始安排第 \(index + 1) 项，共 \(entries.count) 项")
+                }
+            }
             if state.canAccessPrivateData && !model.schedules.isEmpty {
                 Text("今天有 \(model.schedules.count) 项自定义安排")
                     .font(.subheadline)
@@ -592,6 +665,18 @@ private enum TodayEntry: Identifiable {
             return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
         case .schedule(let value): return value.time
         }
+    }
+
+    func start(on day: Date) -> Date? {
+        switch self {
+        case .course(let value): return value.start
+        case .schedule(let value): return CourseScheduleCalculator.dateTime(day: day, clock: value.time)
+        }
+    }
+
+    func isActiveCourse(_ activeID: Int?) -> Bool {
+        guard let activeID, case .course(let value) = self else { return false }
+        return value.id == activeID
     }
 }
 

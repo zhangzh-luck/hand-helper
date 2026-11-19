@@ -5,6 +5,38 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testCarouselInitialSelectionAndStableOrder() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        func item(_ id: String, _ time: TimeInterval?, active: Bool = false) -> TodayCarouselSelection.Item {
+            .init(id: id, start: time.map { now.addingTimeInterval($0) }, isActiveCourse: active)
+        }
+        let mixed = [item("schedule-1", -20), item("course-2", -10, active: true),
+                     item("schedule-3", 10), item("course-4", 10)]
+        XCTAssertEqual(TodayCarouselSelection.initial(items: mixed, now: now), "course-2")
+        XCTAssertEqual(TodayCarouselSelection.initial(items: [mixed[0], mixed[2], mixed[3]], now: now), "schedule-3")
+        XCTAssertEqual(TodayCarouselSelection.initial(items: [mixed[0]], now: now), "schedule-1")
+        XCTAssertNil(TodayCarouselSelection.initial(items: [], now: now))
+        XCTAssertEqual(TodayCarouselSelection.initial(items: [item("invalid", nil), mixed[0]], now: now), "schedule-1")
+        for count in [1, 2, 5, 10] {
+            let items = (0..<count).map { item("schedule-\($0)", Double($0 + 1)) }
+            XCTAssertEqual(TodayCarouselSelection.initial(items: items, now: now), "schedule-0")
+        }
+    }
+
+    func testCarouselSelectionSurvivesChangesAndRecoversDeletedID() {
+        let old = ["course-1", "schedule-2", "course-3"]
+        XCTAssertEqual(TodayCarouselSelection.reconcile(selected: "schedule-2", previous: old,
+            current: ["new", "course-1", "schedule-2", "course-3"], fallback: "new"), "schedule-2")
+        XCTAssertEqual(TodayCarouselSelection.reconcile(selected: "schedule-2", previous: old,
+            current: ["course-1", "course-3"], fallback: "course-1"), "course-3")
+        XCTAssertEqual(TodayCarouselSelection.reconcile(selected: "course-3", previous: old,
+            current: ["course-1"], fallback: nil), "course-1")
+        XCTAssertEqual(TodayCarouselSelection.reconcile(selected: "old-day", previous: [],
+            current: ["new-day"], fallback: "new-day"), "new-day")
+        XCTAssertNil(TodayCarouselSelection.reconcile(selected: "course-1", previous: old,
+            current: [], fallback: nil))
+    }
+
     func testTodayEntryColumnsRespectAvailableWidthAndAccessibility() {
         let landscape = CGSize(width: 1_000, height: 700)
         let portrait = CGSize(width: 800, height: 1_000)
