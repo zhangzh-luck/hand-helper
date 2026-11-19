@@ -55,7 +55,7 @@ struct WeatherCityPickerView: View {
                     loading = false
                 } catch {
                     guard !Task.isCancelled else { return }
-                    error = "城市搜索暂不可用，请检查网络。"; loading = false
+                    self.error = "城市搜索暂不可用，请检查网络。"; loading = false
                 }
             }
         }
