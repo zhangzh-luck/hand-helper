@@ -33,8 +33,10 @@ struct TodayView: View {
     @StateObject private var model: TodayViewModel
     @StateObject private var lifeModel: LifeDashboardModel
     @StateObject private var ledgerModel: LedgerViewModel
+    @StateObject private var weatherModel = WeatherViewModel()
     @State private var ledgerOpen = false
     @State private var quickEntryOpen = false
+    @State private var weatherCityOpen = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -192,6 +194,7 @@ struct TodayView: View {
                 isIPad: UIDevice.current.userInterfaceIdiom == .pad)
         }
         .task {
+            weatherModel.loadIfNeeded()
             reloadAvatarImageIfNeeded()
             model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData && state.selectedTab == .today { Task { await lifeModel.load() } }
@@ -201,6 +204,7 @@ struct TodayView: View {
                 let delay = 60 - remainder + 0.05
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { break }
+                if scenePhase == .active && state.selectedTab == .today { weatherModel.loadIfNeeded() }
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if changed && state.canAccessPrivateData {
                     if state.selectedTab == .today { Task { await lifeModel.load() } }
@@ -244,6 +248,7 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.selectedTab) { _, tab in
+            if tab == .today { weatherModel.loadIfNeeded() }
             if tab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
                 _ = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
@@ -256,6 +261,7 @@ struct TodayView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                if state.selectedTab == .today { weatherModel.loadIfNeeded() }
                 if state.selectedTab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if state.canAccessPrivateData && (changed || pendingCourseInvalidation != nil) {
@@ -416,7 +422,27 @@ struct TodayView: View {
             Text(dateLabel)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            weatherLine
         }
+    }
+
+    private var weatherLine: some View {
+        Button { weatherCityOpen = true } label: {
+            if let weather = weatherModel.cache {
+                let appearance = WeatherDescription.appearance(code: weather.reading.code, isDay: weather.reading.isDay == 1)
+                Label("\(appearance.text) · \(Int(weather.reading.temperature.rounded()))°C · \(weather.city.name)",
+                      systemImage: appearance.symbol)
+                    .accessibilityLabel("\(appearance.text)，\(Int(weather.reading.temperature.rounded()))度，体感\(Int(weather.reading.apparentTemperature.rounded()))度，\(weather.city.name)，选择城市")
+            } else {
+                Label(weatherModel.loading ? "正在读取天气" : "选择城市查看天气", systemImage: "cloud")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .buttonStyle(.plain)
+        .accessibilityHint("打开城市选择")
+        .sheet(isPresented: $weatherCityOpen) { WeatherCityPickerView(model: weatherModel) }
     }
 
     private var avatarButton: some View {
