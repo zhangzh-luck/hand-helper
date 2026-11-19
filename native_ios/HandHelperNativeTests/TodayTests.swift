@@ -5,6 +5,49 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testCarouselFollowEventsDistinguishUserAndProgrammaticChanges() {
+        XCTAssertFalse(TodayCarouselFollow.update(true, event: .horizontalUserDrag))
+        XCTAssertFalse(TodayCarouselFollow.update(false, event: .programmaticPosition))
+        XCTAssertTrue(TodayCarouselFollow.update(true, event: .programmaticPosition))
+        XCTAssertTrue(TodayCarouselFollow.update(false, event: .returnToCurrent))
+        XCTAssertTrue(TodayCarouselFollow.update(false, event: .newDay))
+    }
+
+    func testCarouselTimeStatesAndTargetBoundaries() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        func item(_ id: String, _ start: TimeInterval?, _ end: TimeInterval?, hasEnd: Bool) -> TodayCarouselItem {
+            .init(id: id, start: start.map { now.addingTimeInterval($0) },
+                  end: end.map { now.addingTimeInterval($0) }, hasEnd: hasEnd)
+        }
+        XCTAssertEqual(item("a", 0, 60, hasEnd: true).status(at: now), .ongoing)
+        XCTAssertEqual(item("a", -60, 0, hasEnd: true).status(at: now), .ended)
+        XCTAssertEqual(item("b", 60, nil, hasEnd: false).status(at: now), .upcoming)
+        XCTAssertEqual(item("b", 0, nil, hasEnd: false).status(at: now), .startedWithoutKnownEnd)
+        XCTAssertEqual(item("c", 60, nil, hasEnd: true).status(at: now), .unknown)
+        XCTAssertEqual(item("c", nil, nil, hasEnd: false).status(at: now), .unknown)
+        XCTAssertEqual(item("d", 60, 0, hasEnd: true).status(at: now), .unknown)
+        let values = TodayCarouselItem.ordered([item("schedule-2", -10, 20, hasEnd: true),
+                                               item("course-1", -10, 10, hasEnd: true),
+                                               item("schedule-3", 60, nil, hasEnd: false)])
+        XCTAssertEqual(TodayCarouselItem.target(values, now: now), "course-1")
+        XCTAssertEqual(TodayCarouselItem.target(values, now: now.addingTimeInterval(11)), "schedule-2")
+        XCTAssertEqual(TodayCarouselItem.target(values, now: now.addingTimeInterval(21)), "schedule-3")
+        XCTAssertEqual(TodayCarouselItem.target(values, now: now.addingTimeInterval(61)), "schedule-3")
+    }
+
+    func testCarouselOrderingInvalidAndEditedTimes() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        func item(_ id: String, _ start: Date?) -> TodayCarouselItem {
+            .init(id: id, start: start, end: nil, hasEnd: false)
+        }
+        let values = [item("schedule-1", now), item("course-2", now), item("bad", nil)]
+        XCTAssertEqual(TodayCarouselItem.ordered(values).map(\.id), ["course-2", "schedule-1", "bad"])
+        XCTAssertEqual(TodayCarouselItem.ordered([item("schedule-1", now.addingTimeInterval(-60)), values[1]])
+            .map(\.id), ["schedule-1", "course-2"])
+        XCTAssertNil(ScheduleTimeRange.date("2026-11-19", time: "9:00"))
+        XCTAssertNil(ScheduleTimeRange.date("2026-11-19", time: "25:00"))
+    }
+
     func testCarouselInitialSelectionAndStableOrder() {
         let now = Date(timeIntervalSince1970: 1_000)
         func item(_ id: String, _ time: TimeInterval?, active: Bool = false) -> TodayCarouselSelection.Item {

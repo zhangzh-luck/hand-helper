@@ -47,6 +47,82 @@ enum TodayCarouselSelection {
     }
 }
 
+enum TodayTimeStatus: Equatable {
+    case ongoing, upcoming, startedWithoutKnownEnd, ended, unknown
+
+    static func evaluate(start: Date?, end: Date?, hasEnd: Bool, now: Date) -> Self {
+        guard let start else { return .unknown }
+        if hasEnd {
+            guard let end, end > start else { return .unknown }
+            if now < start { return .upcoming }
+            return now < end ? .ongoing : .ended
+        }
+        return now < start ? .upcoming : .startedWithoutKnownEnd
+    }
+}
+
+enum TodayCarouselFollowEvent {
+    case horizontalUserDrag, returnToCurrent, newDay, programmaticPosition
+}
+
+enum TodayCarouselFollow {
+    static func update(_ following: Bool, event: TodayCarouselFollowEvent) -> Bool {
+        switch event {
+        case .horizontalUserDrag: return false
+        case .returnToCurrent, .newDay: return true
+        case .programmaticPosition: return following
+        }
+    }
+}
+
+struct TodayCarouselItem: Equatable {
+    let id: String
+    let start: Date?
+    let end: Date?
+    let hasEnd: Bool
+
+    func status(at now: Date) -> TodayTimeStatus {
+        TodayTimeStatus.evaluate(start: start, end: end, hasEnd: hasEnd, now: now)
+    }
+
+    static func ordered(_ items: [Self]) -> [Self] {
+        items.sorted { lhs, rhs in
+            switch (lhs.start, rhs.start) {
+            case let (a?, b?): return a == b ? lhs.id < rhs.id : a < b
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.id < rhs.id
+            }
+        }
+    }
+
+    static func target(_ items: [Self], now: Date) -> String? {
+        let valid = items.filter { $0.status(at: now) != .unknown }
+        return valid.first(where: { $0.status(at: now) == .ongoing })?.id
+            ?? valid.first(where: { $0.status(at: now) == .upcoming })?.id
+            ?? valid.last?.id ?? items.first?.id
+    }
+}
+
+// Measures every card at its natural height and proposes the maximum to each.
+struct TodayEqualHeightRow: Layout {
+    let width: CGFloat
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let height = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }.max() ?? 0
+        return CGSize(width: CGFloat(subviews.count) * width + CGFloat(max(0, subviews.count - 1)) * spacing,
+                      height: max(106, height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (index, view) in subviews.enumerated() {
+            view.place(at: CGPoint(x: bounds.minX + CGFloat(index) * (width + spacing), y: bounds.minY),
+                       anchor: .topLeading, proposal: ProposedViewSize(width: width, height: bounds.height))
+        }
+    }
+}
+
 @MainActor
 struct TodayView: View {
     @ObservedObject private var state: AppState
@@ -78,6 +154,7 @@ struct TodayView: View {
     @State private var selectedEntryID: String?
     @State private var previousEntryIDs: [String] = []
     @State private var selectionDay: String?
+    @State private var followsCurrent = true
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -113,9 +190,15 @@ struct TodayView: View {
                                        sourceFrameInGlobal: sourceFrameInGlobal)
     }
     private var entries: [TodayEntry] {
-        ((state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
-         (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule))
-            .sorted { ($0.sortTime, $0.id) < ($1.sortTime, $1.id) }
+        let values = (state.canAccessPrivateData ? model.courses : []).map(TodayEntry.course) +
+            (state.canAccessPrivateData ? model.schedules : []).map(TodayEntry.schedule)
+        let ordered = TodayCarouselItem.ordered(values.map { $0.carouselItem })
+        let byID = Dictionary(values.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ordered.compactMap { byID[$0.id] }
+    }
+
+    private var suggestedEntryID: String? {
+        TodayCarouselItem.target(entries.map(\.carouselItem), now: model.now)
     }
 
     private var entryColumnCount: Int {
@@ -229,6 +312,7 @@ struct TodayView: View {
             selectedEntryID = nil
             previousEntryIDs = []
             selectionDay = nil
+            followsCurrent = TodayCarouselFollow.update(followsCurrent, event: .newDay)
             ledgerModel.clear()
             ledgerOpen = false
             quickEntryOpen = false
@@ -275,14 +359,20 @@ struct TodayView: View {
                 Task { await refreshCourses() }
             }
         }
-        .onChange(of: entries.map(\.id), initial: true) { _, ids in
-            updateCarouselSelection(ids: ids)
+        .onChange(of: entries.map(\.carouselItem), initial: true) { _, items in
+            updateCarouselSelection(ids: items.map(\.id))
         }
         .onChange(of: CourseScheduleCalculator.dateKey(model.now)) { _, _ in
             selectedEntryID = nil
             previousEntryIDs = []
             selectionDay = nil
+            followsCurrent = TodayCarouselFollow.update(followsCurrent, event: .newDay)
             updateCarouselSelection(ids: entries.map(\.id))
+        }
+        .onChange(of: model.now) { _, _ in
+            if followsCurrent && state.selectedTab == .today {
+                selectedEntryID = suggestedEntryID
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -305,14 +395,12 @@ struct TodayView: View {
             selectedEntryID = nil
             previousEntryIDs = []
             selectionDay = day
-        }
-        let items = entries.map { entry in
-            TodayCarouselSelection.Item(id: entry.id, start: entry.start(on: model.now),
-                                        isActiveCourse: entry.isActiveCourse(model.active?.id))
+            followsCurrent = TodayCarouselFollow.update(followsCurrent, event: .newDay)
         }
         selectedEntryID = TodayCarouselSelection.reconcile(
             selected: selectedEntryID, previous: previousEntryIDs, current: ids,
-            fallback: TodayCarouselSelection.initial(items: items, now: model.now))
+            fallback: suggestedEntryID)
+        if followsCurrent { selectedEntryID = suggestedEntryID }
         previousEntryIDs = ids
     }
 
@@ -323,11 +411,10 @@ struct TodayView: View {
         let cardWidth = entries.count == 1 ? width :
             (count == 2 ? (width - spacing) / 2 : width * 0.9)
         return ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: spacing) {
+            TodayEqualHeightRow(width: cardWidth, spacing: spacing) {
                 ForEach(entries) { entry in
                     entryCard(entry)
                         .frame(width: cardWidth)
-                        .frame(minHeight: 106, alignment: .top)
                         .id(entry.id)
                 }
             }
@@ -337,6 +424,11 @@ struct TodayView: View {
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $selectedEntryID)
+        .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in
+            if abs(value.translation.width) > abs(value.translation.height) {
+                followsCurrent = TodayCarouselFollow.update(followsCurrent, event: .horizontalUserDrag)
+            }
+        })
     }
 
     private func refreshLifeDashboard() {
@@ -347,7 +439,7 @@ struct TodayView: View {
     private func entryCard(_ entry: TodayEntry) -> some View {
         switch entry {
         case .course(let course):
-            CourseCardView(course: course, active: model.active?.id == course.id,
+            CourseCardView(course: course, active: entry.carouselItem.status(at: model.now) == .ongoing,
                            hasWallpaper: model.wallpaperData != nil)
         case .schedule(let schedule):
             scheduleCard(schedule, revision: state.authenticationRevision)
@@ -356,6 +448,7 @@ struct TodayView: View {
 
     private func scheduleCard(_ schedule: CustomSchedule, revision: Int) -> some View {
         ScheduleCardView(schedule: schedule, hasWallpaper: model.wallpaperData != nil,
+                         active: TodayEntry.schedule(schedule).carouselItem.status(at: model.now) == .ongoing,
                          onEdit: {
                              guard (try? state.requireCurrentAccount(revision: revision)) != nil else { return }
                              presentScheduleEditor(schedule: schedule, revision: revision)
@@ -394,6 +487,14 @@ struct TodayView: View {
                     Text("\(index + 1) / \(entries.count)")
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityLabel("当前起始安排第 \(index + 1) 项，共 \(entries.count) 项")
+                }
+                if !followsCurrent, let target = suggestedEntryID, target != selectedEntryID {
+                    Button("回到当前") {
+                        followsCurrent = TodayCarouselFollow.update(followsCurrent, event: .returnToCurrent)
+                        selectedEntryID = target
+                    }
+                    .font(.caption.weight(.medium))
+                    .accessibilityHint("恢复自动跟随当前安排")
                 }
             }
             if state.canAccessPrivateData && !model.schedules.isEmpty {
@@ -654,6 +755,18 @@ private enum TodayEntry: Identifiable {
         switch self {
         case .course(let value): "course-\(value.id)"
         case .schedule(let value): "schedule-\(value.id)"
+        }
+    }
+
+    var carouselItem: TodayCarouselItem {
+        switch self {
+        case .course(let value):
+            let start = value.start.flatMap { CourseScheduleCalculator.dateKey($0) == value.date ? $0 : nil }
+            return TodayCarouselItem(id: id, start: start, end: value.end, hasEnd: true)
+        case .schedule(let value):
+            let start = ScheduleTimeRange.date(value.date, time: value.time)
+            let end = value.endTime.flatMap { ScheduleTimeRange.date(value.date, time: $0) }
+            return TodayCarouselItem(id: id, start: start, end: end, hasEnd: value.endTime != nil)
         }
     }
 

@@ -35,9 +35,12 @@ struct TodayEntryFace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(kind)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(active ? Color.accentColor : (custom ? Color.accentColor : Color.secondary))
+            HStack(spacing: 6) {
+                Text(kind)
+                if active { Label("进行中", systemImage: "clock.fill") }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(active || custom ? Color.accentColor : Color.secondary)
             Text(title)
                 .font(.headline)
                 .foregroundStyle(.primary)
@@ -54,7 +57,7 @@ struct TodayEntryFace: View {
             }
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
             if hasWallpaper && !reduceTransparency && contrast != .increased {
@@ -66,7 +69,7 @@ struct TodayEntryFace: View {
         .overlay {
             if active {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(TodayStyle.color(colorScheme == .dark ? 0x0A84FF : 0x60A5FA), lineWidth: 2)
+                    .strokeBorder(TodayStyle.color(colorScheme == .dark ? 0x0A84FF : 0x60A5FA, alpha: 0.7), lineWidth: 1)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -78,13 +81,14 @@ struct TodayEntryFace: View {
 struct ScheduleCardView: View {
     let schedule: CustomSchedule
     let hasWallpaper: Bool
+    var active: Bool = false
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         TodayEntryFace(kind: "自定义安排", title: schedule.title,
                        time: schedule.endTime.map { "\(schedule.time)—\($0)" } ?? schedule.time,
-                       detail: "", active: false, custom: true,
+                       detail: "", active: active, custom: true,
                        hasWallpaper: hasWallpaper)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contextMenu {
