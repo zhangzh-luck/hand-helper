@@ -3,6 +3,8 @@ import SwiftUI
 @MainActor
 struct LifeDashboardView: View {
     @ObservedObject var model: LifeDashboardModel
+    let onAdd: () -> Void
+    let onLedger: () -> Void
     @State private var currencyInput = "CNY"
     @State private var unavailable: String?
 
@@ -103,8 +105,8 @@ struct LifeDashboardView: View {
 
     private var shortcuts: some View {
         Group {
-            shortcut("记一笔", symbol: "plus.circle")
-            shortcut("查看账本", symbol: "list.bullet.rectangle")
+            Button(action: onAdd) { Label("记一笔", systemImage: "plus.circle") }.font(.subheadline)
+            Button(action: onLedger) { Label("查看账本", systemImage: "list.bullet.rectangle") }.font(.subheadline)
             shortcut("订阅管理", symbol: "calendar.badge.clock")
         }
     }

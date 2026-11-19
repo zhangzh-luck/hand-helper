@@ -32,6 +32,9 @@ struct TodayView: View {
     private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TodayViewModel
     @StateObject private var lifeModel: LifeDashboardModel
+    @StateObject private var ledgerModel: LedgerViewModel
+    @State private var ledgerOpen = false
+    @State private var quickEntryOpen = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -60,6 +63,7 @@ struct TodayView: View {
         let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
         _lifeModel = StateObject(wrappedValue: LifeDashboardModel(state: state))
+        _ledgerModel = StateObject(wrappedValue: LedgerViewModel(state: state))
     }
 
     private var dark: Bool { colorScheme == .dark }
@@ -92,6 +96,21 @@ struct TodayView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            page
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(isPresented: $ledgerOpen) {
+                    TabBarHiddenNavigationDestination(state: state, tab: .today) {
+                        LedgerView(state: state, model: ledgerModel, didChange: refreshLifeDashboard)
+                    }
+                }
+        }
+        .sheet(isPresented: $quickEntryOpen) {
+            LedgerEditorSheet(model: ledgerModel, transaction: nil, didChange: refreshLifeDashboard)
+        }
+    }
+
+    private var page: some View {
         ZStack {
             TodayStyle.background.ignoresSafeArea()
             if !reduceTransparency, state.canAccessPrivateData,
@@ -115,7 +134,8 @@ struct TodayView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         if state.canAccessPrivateData {
-                            LifeDashboardView(model: lifeModel)
+                            LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
+                                              onLedger: { ledgerOpen = true })
                         }
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
@@ -185,6 +205,9 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            ledgerModel.clear()
+            ledgerOpen = false
+            quickEntryOpen = false
             lifeModel.clear()
             if state.canAccessPrivateData && state.selectedTab == .today { Task { await lifeModel.load() } }
             appliedCourseInvalidationSequence = nil
@@ -239,6 +262,10 @@ struct TodayView: View {
         .alert("操作失败", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
             Button("确定", role: .cancel) { localError = nil }
         } message: { Text(localError ?? "") }
+    }
+
+    private func refreshLifeDashboard() {
+        Task { await lifeModel.load(force: true) }
     }
 
     @ViewBuilder
