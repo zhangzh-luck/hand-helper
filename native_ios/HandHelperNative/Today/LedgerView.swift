@@ -89,7 +89,15 @@ struct LedgerView: View {
                     .accessibilityLabel("记一笔").disabled(!model.canWrite)
             }
         }
-        .task { if model.snapshot == nil { await model.refresh() } }
+        .task {
+            currencyInput = model.currency
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.dateFormat = "yyyy-MM-dd"
+            if let date = formatter.date(from: model.month + "-01") { selectedDate = date }
+            if model.snapshot == nil { await model.refresh() }
+        }
         .refreshable { await model.refresh() }
         .sheet(isPresented: $showingEditor) { LedgerEditorSheet(model: model, transaction: nil, didChange: didChange) }
         .sheet(isPresented: $showingBudget) { LedgerBudgetSheet(model: model, didChange: didChange) }

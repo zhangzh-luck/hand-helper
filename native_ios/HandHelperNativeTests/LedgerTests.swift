@@ -109,7 +109,7 @@ final class LedgerTests: XCTestCase {
         let model = LedgerViewModel(state: state, repository: LedgerRepository(state: state, api: api, directory: folder))
         await model.refresh()
         api.waitForWrite = true
-        let task = Task { await model.saveTransaction(input(), id: nil) }
+        let task = Task { await model.saveTransaction(self.input(), id: nil) }
         await fulfillment(of: [api.started], timeout: 3)
         let duplicate = await model.saveTransaction(input(), id: nil)
         XCTAssertFalse(duplicate)

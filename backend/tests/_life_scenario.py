@@ -221,6 +221,39 @@ def test_life_api(client):
     assert summary["expense_minor"] == 722
 
 
+def test_ios_read_contracts(client):
+    client.cookies.clear()
+    assert (
+        client.post(
+            "/api/v1/auth/login", json={"username": "life-test", "password": "temporary-password"}
+        ).status_code
+        == 200
+    )
+    base = "/api/v1/life"
+    categories = client.get(base + "/categories").json()["data"]
+    assert categories and {"id", "name", "kind"} <= categories[0].keys()
+    response = client.get(
+        base + "/transactions",
+        params={"month": "2024-02", "currency": "CNY", "limit": 200, "offset": 0},
+    )
+    assert response.status_code == 200
+    records = response.json()["data"]
+    assert (
+        records
+        and {"id", "kind", "amount_minor", "currency", "category_id", "occurred_on", "note"}
+        <= records[0].keys()
+    )
+    budget = client.get(base + "/budgets/2024-02", params={"currency": "CNY"}).json()["data"]
+    assert budget["amount_minor"] == 100
+    assert client.get(base + "/budgets/2024-02", params={"currency": "JPY"}).json()["data"] is None
+    subscriptions = client.get(base + "/subscriptions").json()["data"]
+    assert (
+        subscriptions
+        and {"id", "name", "amount_minor", "currency", "next_due_date", "status"}
+        <= subscriptions[0].keys()
+    )
+
+
 def test_concurrent_confirmation(client):
     base = "/api/v1/life"
     sub = {
