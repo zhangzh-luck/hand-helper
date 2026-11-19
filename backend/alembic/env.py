@@ -8,6 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.db import Base
 from app import db_models  # noqa: F401
+from app import life_models  # noqa: F401
 from app.config import get_settings
 
 config = context.config

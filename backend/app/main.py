@@ -25,6 +25,7 @@ from app.ai_analysis import AiConfigurationError, AiServiceError, analyze_grades
 from app.ai_jobs import AiJobConflictError, AiJobError, cancel_job, create_or_reuse_job, get_job
 from app.security import client_ip, create_session, csrf_request_is_allowed, destroy_session, find_valid_session, login_rate_limiter, verify_admin_password
 from app.passkeys import PasskeyError, authentication_options, consume_challenge, issue_challenge, owner_for, registration_options, verify_authentication, verify_registration
+from app.life import router as life_router
 from app.services import import_grades, import_printed_timetable, period_times, rebuild_sessions, set_period_time, set_term_start_date
 from app.importers.academic_files import ImportParseError, RawGrade, parse_grade_file, parse_printed_timetable_xls, parse_week_expression
 
@@ -60,6 +61,7 @@ async def lifespan(_app: FastAPI):
             scheduler.shutdown(wait=False)
         await engine.dispose()
 app=FastAPI(title="航的助手 · Hand Helper", version="0.2.0", lifespan=lifespan)
+app.include_router(life_router)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type", "Idempotency-Key"])
 
 PUBLIC_API_PATHS = {
@@ -98,7 +100,7 @@ async def session_auth_middleware(request: Request, call_next):
                 )
             request.state.session_id = raw_session_id
     result = await call_next(request)
-    if path in AUTH_RESPONSE_PATHS:
+    if path in AUTH_RESPONSE_PATHS or path.startswith("/api/v1/life/"):
         result.headers["Cache-Control"] = "no-store, private"
         result.headers["Pragma"] = "no-cache"
     return result
