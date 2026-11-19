@@ -5,10 +5,10 @@ enum AppTab: Int, CaseIterable, Hashable {
 
     var title: String {
         switch self {
-        case .today: "今日"
+        case .today: "生活"
         case .timetable: "课程表"
         case .analysis: "分析"
-        case .settings: "设置"
+        case .settings: "我的"
         }
     }
 

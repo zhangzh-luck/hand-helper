@@ -31,6 +31,7 @@ struct TodayView: View {
     @ObservedObject private var scheduleEditor: ScheduleEditorCoordinator
     private let deleteConfirmation: DestructiveConfirmationCoordinator
     @StateObject private var model: TodayViewModel
+    @StateObject private var lifeModel: LifeDashboardModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -58,6 +59,7 @@ struct TodayView: View {
                                               account: state.verifiedAccount)
         let wallpaper = WallpaperStore(session: state.sessionStore, account: state.verifiedAccount)
         _model = StateObject(wrappedValue: TodayViewModel(repository: repository, wallpaperStore: wallpaper))
+        _lifeModel = StateObject(wrappedValue: LifeDashboardModel(state: state))
     }
 
     private var dark: Bool { colorScheme == .dark }
@@ -112,6 +114,9 @@ struct TodayView: View {
                 }
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        if state.canAccessPrivateData {
+                            LifeDashboardView(model: lifeModel)
+                        }
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
                                 Text(courseMessage)
@@ -165,16 +170,23 @@ struct TodayView: View {
         .task {
             reloadAvatarImageIfNeeded()
             model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
+            if state.canAccessPrivateData && state.selectedTab == .today { Task { await lifeModel.load() } }
             if state.canAccessPrivateData && state.selectedTab == .today { await refreshCourses() }
             while !Task.isCancelled {
                 let remainder = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
                 let delay = 60 - remainder + 0.05
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { break }
-                if model.tick(allowLocalSchedules: mayShowLocalSchedules) && state.canAccessPrivateData { await refreshCourses() }
+                let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
+                if changed && state.canAccessPrivateData {
+                    if state.selectedTab == .today { Task { await lifeModel.load() } }
+                    await refreshCourses()
+                }
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            lifeModel.clear()
+            if state.canAccessPrivateData && state.selectedTab == .today { Task { await lifeModel.load() } }
             appliedCourseInvalidationSequence = nil
             pendingDelete = nil
             model.authenticationDidChange(allowPrivateCache: state.canAccessPrivateData,
@@ -205,6 +217,7 @@ struct TodayView: View {
             }
         }
         .onChange(of: state.selectedTab) { _, tab in
+            if tab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
                 _ = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
                                                       allowLocalSchedules: mayShowLocalSchedules)
@@ -216,6 +229,7 @@ struct TodayView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                if state.selectedTab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if state.canAccessPrivateData && (changed || pendingCourseInvalidation != nil) {
                     Task { await refreshCourses() }

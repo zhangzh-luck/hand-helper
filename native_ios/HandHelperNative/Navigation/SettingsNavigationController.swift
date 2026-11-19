@@ -44,7 +44,7 @@ final class SettingsNavigationController: UINavigationController, UINavigationCo
         let root = UIHostingController(
             rootView: AnyView(SettingsView(state: state).environment(\.settingsNavigator, navigator))
         )
-        root.title = "设置"
+        root.title = "我的"
         root.navigationItem.largeTitleDisplayMode = .always
         self.navigator = navigator
         super.init(rootViewController: root)
