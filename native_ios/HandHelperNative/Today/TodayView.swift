@@ -127,13 +127,15 @@ struct TodayView: View {
             }
             VStack(spacing: 0) {
                 hero
-                scheduleHeader.padding(.top, 18)
-                if state.canAccessPrivateData && model.hasCourseData && !model.courses.isEmpty {
-                    statusCard
-                        .padding(.top, 5).padding(.bottom, 9)
-                }
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        VStack(spacing: 0) {
+                            scheduleHeader.padding(.top, 18)
+                            if state.canAccessPrivateData && model.hasCourseData && !model.courses.isEmpty {
+                                statusCard
+                                    .padding(.top, 5).padding(.bottom, 9)
+                            }
+                        }
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
                                 Text(courseMessage)
@@ -169,7 +171,6 @@ struct TodayView: View {
                                 .padding(.top, 12)
                         }
                     }
-                    .padding(.top, entries.isEmpty ? 0 : 12)
                     .padding(.bottom, 16)
                 }
                 .onGeometryChange(for: CGFloat.self) { proxy in

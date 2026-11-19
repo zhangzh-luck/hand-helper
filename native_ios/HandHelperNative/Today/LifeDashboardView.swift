@@ -37,8 +37,8 @@ struct LifeDashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             financialSection
-            subscriptionSection
             shortcutsSection
+            subscriptionSection
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .privacySensitive()
