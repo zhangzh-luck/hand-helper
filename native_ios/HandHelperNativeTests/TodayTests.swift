@@ -5,6 +5,32 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testScheduleDisplayStatePrioritiesAndRefresh() {
+        let day = "2026-11-19"
+        func state(_ course: TodayCourseReadState, _ local: TodayLocalReadState,
+                   count: Int = 0, loading: Bool = false, identity: Bool = true,
+                   date: String = "2026-11-19") -> TodayScheduleDisplayState {
+            TodayScheduleDisplayState.resolve(identityValid: identity, entryCount: count,
+                course: course, local: local, day: date, isLoading: loading)
+        }
+        XCTAssertEqual(state(.notLoaded, .notRead), .loading)
+        XCTAssertEqual(state(.loading, .available, loading: true), .loading)
+        XCTAssertEqual(state(.loading, .notRead, loading: true), .loading)
+        XCTAssertEqual(state(.stale, .available), .uncertain)
+        XCTAssertEqual(state(.stale, .available, loading: true), .loading)
+        XCTAssertEqual(state(.available(day: day), .notRead), .loading)
+        XCTAssertEqual(state(.available(day: day), .available), .empty)
+        XCTAssertEqual(state(.available(day: day), .available, loading: true), .empty)
+        XCTAssertEqual(state(.available(day: day), .available, date: "2026-11-20"), .uncertain)
+        XCTAssertEqual(state(.failed, .available), .failure)
+        XCTAssertEqual(state(.available(day: day), .failed("本机读取失败")), .failure)
+        XCTAssertEqual(state(.failed, .failed("本机读取失败")), .failure)
+        XCTAssertEqual(state(.loading, .failed("本机读取失败"), loading: true), .failure)
+        XCTAssertEqual(state(.failed, .failed("本机读取失败"), count: 1), .entries)
+        XCTAssertEqual(state(.loading, .available, count: 1, loading: true), .entries)
+        XCTAssertEqual(state(.available(day: day), .available, count: 1, identity: false), .identityUnavailable)
+    }
+
     func testConfirmedEmptyRequiresBothSourcesCurrentAndNoEntries() {
         let day = "2026-11-19"
         func confirmed(_ course: TodayCourseReadState, _ local: TodayLocalReadState,
@@ -37,6 +63,11 @@ final class TodayTests: XCTestCase {
         let session = TodayTestSessionStore()
         let model = TodayViewModel(repository: repo,
             wallpaperStore: WallpaperStore(session: session, account: VerifiedAccountContext()), clock: clock)
+        XCTAssertEqual(model.courseReadState, .notLoaded)
+        XCTAssertEqual(model.localReadState, .notRead)
+        XCTAssertEqual(TodayScheduleDisplayState.resolve(identityValid: true, entryCount: 0,
+            course: model.courseReadState, local: model.localReadState, day: "2026-11-19",
+            isLoading: model.isLoading), .loading)
         repo.failLocal = true
         model.load()
         await model.refresh()
@@ -56,6 +87,12 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(model.localReadState, .available)
         XCTAssertNotNil(model.snapshot)
         XCTAssertNotNil(model.errorMessage)
+        XCTAssertNotNil(model.courseReadError)
+        repo.failLocal = true
+        await model.refresh()
+        if case .failed = model.localReadState {} else { XCTFail("Expected local read failure") }
+        XCTAssertNotNil(model.courseReadError)
+        repo.failLocal = false
         repo.failCourse = false
         clock.now = localDate(2026, 11, 20, 12, 0)
         _ = model.tick()

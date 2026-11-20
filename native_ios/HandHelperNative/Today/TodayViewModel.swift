@@ -27,6 +27,7 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var courseReadState: TodayCourseReadState = .notLoaded
     @Published private(set) var localReadState: TodayLocalReadState = .notRead
     private var courseErrorMessage: String?
+    var courseReadError: String? { courseReadState == .failed ? courseErrorMessage : nil }
 
     private let repository: any CourseRepository
     private let wallpaperStore: WallpaperStore

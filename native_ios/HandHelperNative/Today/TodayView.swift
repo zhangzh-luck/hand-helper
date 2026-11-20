@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum TodayScheduleDisplayState: Equatable {
+    case identityUnavailable, entries, empty, failure, loading, uncertain
+
+    static func resolve(identityValid: Bool, entryCount: Int, course: TodayCourseReadState,
+                        local: TodayLocalReadState, day: String, isLoading: Bool) -> Self {
+        guard identityValid else { return .identityUnavailable }
+        if entryCount > 0 { return .entries }
+        if TodayEmptyState.isConfirmed(identityValid: true, course: course, local: local,
+                                       day: day, entryCount: entryCount) { return .empty }
+        if case .failed = local { return .failure }
+        if course == .failed { return .failure }
+        if isLoading || course == .notLoaded || course == .loading || local == .notRead { return .loading }
+        return .uncertain
+    }
+}
+
 enum TodayContentWidth {
     static let standard: CGFloat = 680
     static let wideMaximum: CGFloat = 1_100
@@ -197,6 +213,19 @@ struct TodayView: View {
         return ordered.compactMap { byID[$0.id] }
     }
 
+    private var scheduleDisplayState: TodayScheduleDisplayState {
+        TodayScheduleDisplayState.resolve(identityValid: state.canAccessPrivateData, entryCount: entries.count,
+            course: model.courseReadState, local: model.localReadState,
+            day: CourseScheduleCalculator.dateKey(model.now), isLoading: model.isLoading)
+    }
+
+    private var scheduleReadErrors: [String] {
+        var errors: [String] = []
+        if let error = model.courseReadError { errors.append("课程：\(error)") }
+        if case .failed(let error) = model.localReadState { errors.append(error) }
+        return errors
+    }
+
     private var suggestedEntryID: String? {
         TodayCarouselItem.target(entries.map(\.carouselItem), now: model.now)
     }
@@ -245,38 +274,23 @@ struct TodayView: View {
                                     .padding(.top, 5).padding(.bottom, 9)
                             }
                         }
-                        if !state.canAccessPrivateData || !model.hasCourseData {
-                            HStack(spacing: 12) {
-                                Text(state.canAccessPrivateData && model.isLoading && model.errorMessage == nil
-                                     ? "正在读取今日课程…" : courseMessage)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                if state.canAccessPrivateData {
-                                    Button("重试") { Task { await refreshCourses() } }
+                        switch scheduleDisplayState {
+                        case .identityUnavailable:
+                            Text(courseMessage).font(.subheadline).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        case .entries:
+                            if !scheduleReadErrors.isEmpty {
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text(scheduleReadErrors.joined(separator: "\n"))
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 0)
+                                    Button("重试") { Task { await refreshCourses() } }.disabled(model.isLoading)
                                 }
                             }
-                            .padding(.top, 12)
-                        } else if let error = model.errorMessage {
-                            HStack(alignment: .top, spacing: 12) {
-                                Text(error).font(.subheadline).foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 0)
-                                Button("重试") { Task { await refreshCourses() } }
-                            }
-                        }
-                        if !entries.isEmpty { scheduleCarousel }
-                        else if TodayEmptyState.isConfirmed(identityValid: state.canAccessPrivateData,
-                                    course: model.courseReadState, local: model.localReadState,
-                                    day: CourseScheduleCalculator.dateKey(model.now), entryCount: entries.count) {
-                            emptyScheduleCard
-                        } else if state.canAccessPrivateData && model.errorMessage == nil && !model.isLoading && model.hasCourseData {
-                            HStack {
-                                Text(model.localReadState == .notRead ? "本机安排尚未读取" : "课程数据需要更新")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                                Spacer(minLength: 0)
-                                Button("重试") { Task { await refreshCourses() } }
-                            }
+                            scheduleCarousel
+                        case .empty, .failure, .loading, .uncertain:
+                            schedulePlaceholder(scheduleDisplayState)
                         }
                         if state.canAccessPrivateData {
                             LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
@@ -551,10 +565,23 @@ struct TodayView: View {
         }
     }
 
-    private var emptyScheduleCard: some View {
+    private func schedulePlaceholder(_ display: TodayScheduleDisplayState) -> some View {
         VStack(spacing: 6) {
-            Text("今天暂无安排").font(.subheadline.weight(.semibold))
-            Text("享受属于自己的空闲时间").font(.footnote).foregroundStyle(.secondary)
+            switch display {
+            case .empty:
+                Text("今天暂无安排").font(.subheadline.weight(.semibold))
+                Text("享受属于自己的空闲时间").font(.footnote).foregroundStyle(.secondary)
+            case .failure:
+                Text("今日安排暂时无法读取").font(.subheadline.weight(.semibold))
+                Text(scheduleReadErrors.joined(separator: "\n"))
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("重试") { Task { await refreshCourses() } }.disabled(model.isLoading)
+            case .uncertain:
+                Text("今日安排需要更新").font(.subheadline.weight(.semibold))
+                Button("重试") { Task { await refreshCourses() } }.disabled(model.isLoading)
+            default:
+                Text("正在读取今日安排…").font(.subheadline).foregroundStyle(.secondary)
+            }
         }
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
@@ -568,7 +595,7 @@ struct TodayView: View {
                 shape.fill(Color(uiColor: .secondarySystemGroupedBackground))
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var addScheduleButton: some View {
