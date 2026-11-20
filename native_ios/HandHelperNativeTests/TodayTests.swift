@@ -5,6 +5,66 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    func testConfirmedEmptyRequiresBothSourcesCurrentAndNoEntries() {
+        let day = "2026-11-19"
+        func confirmed(_ course: TodayCourseReadState, _ local: TodayLocalReadState,
+                       _ count: Int = 0, identity: Bool = true, date: String = "2026-11-19") -> Bool {
+            TodayEmptyState.isConfirmed(identityValid: identity, course: course,
+                                        local: local, day: date, entryCount: count)
+        }
+        XCTAssertTrue(confirmed(.available(day: day), .available))
+        XCTAssertFalse(confirmed(.notLoaded, .notRead))
+        XCTAssertFalse(confirmed(.loading, .available))
+        XCTAssertFalse(confirmed(.failed, .available))
+        XCTAssertFalse(confirmed(.stale, .available))
+        XCTAssertFalse(confirmed(.available(day: day), .failed("读取失败")))
+        XCTAssertFalse(confirmed(.available(day: day), .notRead))
+        XCTAssertFalse(confirmed(.available(day: day), .available, 1))
+        XCTAssertFalse(confirmed(.available(day: day), .available, 2))
+        XCTAssertFalse(confirmed(.available(day: day), .available, identity: false))
+        XCTAssertFalse(confirmed(.available(day: day), .available, date: "2026-11-20"))
+        // Adding the first entry hides the card; removing the last restores it.
+        XCTAssertFalse(confirmed(.available(day: day), .available, 1))
+        XCTAssertTrue(confirmed(.available(day: day), .available, 0))
+    }
+
+    @MainActor
+    func testLocalReadErrorSurvivesSuccessfulCourseRefreshAndIdentityReset() async {
+        let repo = TodayReadStateRepository()
+        let clock = MutableTodayClock(now: localDate(2026, 11, 19, 12, 0))
+        repo.snapshot.lastRefreshDate = "2026-11-19"
+        repo.snapshot.serverSchedulesImported = true
+        let session = TodayTestSessionStore()
+        let model = TodayViewModel(repository: repo,
+            wallpaperStore: WallpaperStore(session: session, account: VerifiedAccountContext()), clock: clock)
+        repo.failLocal = true
+        model.load()
+        await model.refresh()
+        if case .failed = model.localReadState {} else { XCTFail("Expected local read failure") }
+        XCTAssertTrue(model.errorMessage?.contains("本机安排无法读取") == true)
+        XCTAssertEqual(model.courseReadState, .available(day: "2026-11-19"))
+        repo.failLocal = false
+        model.load()
+        XCTAssertEqual(model.localReadState, .available)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.courseReadState, .stale)
+        await model.refresh()
+        XCTAssertEqual(model.courseReadState, .available(day: "2026-11-19"))
+        repo.failCourse = true
+        await model.refresh()
+        XCTAssertEqual(model.courseReadState, .failed)
+        XCTAssertEqual(model.localReadState, .available)
+        XCTAssertNotNil(model.snapshot)
+        XCTAssertNotNil(model.errorMessage)
+        repo.failCourse = false
+        clock.now = localDate(2026, 11, 20, 12, 0)
+        _ = model.tick()
+        XCTAssertEqual(model.courseReadState, .stale)
+        model.authenticationDidChange(allowPrivateCache: false, allowLocalSchedules: false)
+        XCTAssertEqual(model.courseReadState, .notLoaded)
+        XCTAssertEqual(model.localReadState, .notRead)
+    }
+
     func testCarouselFollowEventsDistinguishUserAndProgrammaticChanges() {
         XCTAssertFalse(TodayCarouselFollow.update(true, event: .horizontalUserDrag))
         XCTAssertFalse(TodayCarouselFollow.update(false, event: .programmaticPosition))
@@ -704,6 +764,29 @@ private final class TodayTestSessionStore: SessionStore {
     private(set) var cookie: String?
     func save(cookie: String) { self.cookie = cookie }
     @discardableResult func clear() -> Bool { cookie = nil; return true }
+}
+
+@MainActor
+private final class TodayReadStateRepository: CourseRepository {
+    var sessionCookie: String? { "session=fixture" }
+    var canEditSchedules: Bool { true }
+    var snapshot = CourseSnapshot.empty
+    var failLocal = false
+    var failCourse = false
+    func cached() throws -> CourseSnapshot? { snapshot }
+    func refresh(on date: Date) async throws -> CourseSnapshot {
+        if failCourse { throw APIError.connection }
+        return snapshot
+    }
+    func localSchedules(on date: Date) throws -> [CustomSchedule] { try allLocalSchedules() }
+    func allLocalSchedules() throws -> [CustomSchedule] {
+        if failLocal { throw APIError.connection }
+        return []
+    }
+    func saveSchedule(_ schedule: CustomSchedule) throws {}
+    func deleteSchedule(id: Int) throws {}
+    func saveManualRule(_ rule: ManualCourseRule) throws {}
+    func saveProfile(_ profile: TodayProfile) throws {}
 }
 
 @MainActor

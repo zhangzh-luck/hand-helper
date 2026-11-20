@@ -247,7 +247,8 @@ struct TodayView: View {
                         }
                         if !state.canAccessPrivateData || !model.hasCourseData {
                             HStack(spacing: 12) {
-                                Text(courseMessage)
+                                Text(state.canAccessPrivateData && model.isLoading && model.errorMessage == nil
+                                     ? "正在读取今日课程…" : courseMessage)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 Spacer()
@@ -257,11 +258,26 @@ struct TodayView: View {
                             }
                             .padding(.top, 12)
                         } else if let error = model.errorMessage {
-                            Text(error).font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(error).font(.subheadline).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                                Button("重试") { Task { await refreshCourses() } }
+                            }
                         }
                         if !entries.isEmpty { scheduleCarousel }
+                        else if TodayEmptyState.isConfirmed(identityValid: state.canAccessPrivateData,
+                                    course: model.courseReadState, local: model.localReadState,
+                                    day: CourseScheduleCalculator.dateKey(model.now), entryCount: entries.count) {
+                            emptyScheduleCard
+                        } else if state.canAccessPrivateData && model.errorMessage == nil && !model.isLoading && model.hasCourseData {
+                            HStack {
+                                Text(model.localReadState == .notRead ? "本机安排尚未读取" : "课程数据需要更新")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                                Button("重试") { Task { await refreshCourses() } }
+                            }
+                        }
                         if state.canAccessPrivateData {
                             LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
                                               onLedger: { ledgerOpen = true },
@@ -497,12 +513,6 @@ struct TodayView: View {
                     .accessibilityHint("恢复自动跟随当前安排")
                 }
             }
-            if state.canAccessPrivateData && !model.schedules.isEmpty {
-                Text("今天有 \(model.schedules.count) 项自定义安排")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency ? 8 : 0)
         .padding(.vertical, model.wallpaperImage != nil && !reduceTransparency ? 4 : 0)
@@ -527,12 +537,38 @@ struct TodayView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            HStack(alignment: .center, spacing: 12) {
-                scheduleHeading
-                Spacer(minLength: 0)
-                if state.canAccessPrivateData { addScheduleButton }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    scheduleHeading.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    if state.canAccessPrivateData { addScheduleButton.fixedSize(horizontal: true, vertical: false) }
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    scheduleHeading
+                    if state.canAccessPrivateData { addScheduleButton }
+                }
             }
         }
+    }
+
+    private var emptyScheduleCard: some View {
+        VStack(spacing: 6) {
+            Text("今天暂无安排").font(.subheadline.weight(.semibold))
+            Text("享受属于自己的空闲时间").font(.footnote).foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 106)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+            if model.wallpaperImage != nil && !reduceTransparency && colorContrast != .increased {
+                shape.fill(.regularMaterial)
+            } else {
+                shape.fill(Color(uiColor: .secondarySystemGroupedBackground))
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var addScheduleButton: some View {
@@ -656,7 +692,7 @@ struct TodayView: View {
         case .verifying: return "正在验证登录状态…"
         case .offline: return "网络暂不可用，登录状态尚未验证"
         case .expired: return state.credentialRemovalError ?? "登录状态已失效，请重新登录"
-        case .signedIn: return model.errorMessage ?? "今天暂无课程"
+        case .signedIn: return model.errorMessage ?? "课程数据尚未就绪"
         }
     }
 

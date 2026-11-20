@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum TodayCourseReadState: Equatable {
+    case notLoaded, loading, available(day: String), stale, failed
+}
+
+enum TodayLocalReadState: Equatable {
+    case notRead, available, failed(String)
+}
+
+enum TodayEmptyState {
+    static func isConfirmed(identityValid: Bool, course: TodayCourseReadState,
+                            local: TodayLocalReadState, day: String, entryCount: Int) -> Bool {
+        identityValid && course == .available(day: day) && local == .available && entryCount == 0
+    }
+}
+
 @MainActor
 final class TodayViewModel: ObservableObject {
     @Published private(set) var snapshot: CourseSnapshot?
@@ -9,6 +24,9 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var wallpaperImage: UIImage?
     @Published private(set) var isLoading = false
     @Published private(set) var localSchedules: [CustomSchedule] = []
+    @Published private(set) var courseReadState: TodayCourseReadState = .notLoaded
+    @Published private(set) var localReadState: TodayLocalReadState = .notRead
+    private var courseErrorMessage: String?
 
     private let repository: any CourseRepository
     private let wallpaperStore: WallpaperStore
@@ -77,6 +95,14 @@ final class TodayViewModel: ObservableObject {
     }
 
     private func setErrorMessage(_ value: String?) {
+        courseErrorMessage = value
+        updateErrorMessage()
+    }
+
+    private func updateErrorMessage() {
+        let localError: String?
+        if case .failed(let message) = localReadState { localError = message } else { localError = nil }
+        let value = localError ?? courseErrorMessage
         guard errorMessage != value else { return }
         errorMessage = value
     }
@@ -106,15 +132,20 @@ final class TodayViewModel: ObservableObject {
     private func reloadSchedules() {
         guard repository.canEditSchedules else {
             hasReadLocalSchedules = false
+            localReadState = .notRead
+            updateErrorMessage()
             setLocalSchedules([])
             return
         }
         do {
             setLocalSchedules(try repository.allLocalSchedules())
             hasReadLocalSchedules = true
+            localReadState = .available
+            updateErrorMessage()
         } catch {
             hasReadLocalSchedules = false
-            setErrorMessage("本机安排无法读取：\(error.localizedDescription)")
+            localReadState = .failed("本机安排无法读取：\(error.localizedDescription)")
+            updateErrorMessage()
         }
     }
 
@@ -131,11 +162,16 @@ final class TodayViewModel: ObservableObject {
             reloadSchedules()
         } else {
             hasReadLocalSchedules = false
+            localReadState = .notRead
+            updateErrorMessage()
             setLocalSchedules([])
         }
         guard allowPrivateCache else {
             hasReadPrivateCache = false
             hasReadLocalSchedules = false
+            courseReadState = .notLoaded
+            localReadState = .notRead
+            updateErrorMessage()
             setSnapshot(nil)
             setWallpaperData(nil)
             return false
@@ -143,11 +179,13 @@ final class TodayViewModel: ObservableObject {
         do {
             setSnapshot(try repository.cached())
             hasReadPrivateCache = true
+            courseReadState = snapshot == nil ? .notLoaded : .stale
             setWallpaperData(try? wallpaperStore.load())
             if errorMessage == nil { setErrorMessage(snapshot == nil ? "课程数据暂不可用" : nil) }
             return snapshot != nil
         } catch {
             hasReadPrivateCache = false
+            courseReadState = .failed
             setErrorMessage("本机数据无法读取：\(error.localizedDescription)")
             return false
         }
@@ -168,6 +206,9 @@ final class TodayViewModel: ObservableObject {
         isLoading = false
         hasReadPrivateCache = false
         hasReadLocalSchedules = false
+        courseReadState = .notLoaded
+        localReadState = .notRead
+        setErrorMessage(nil)
         setSnapshot(nil)
         setWallpaperData(nil)
         _ = load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules,
@@ -189,7 +230,14 @@ final class TodayViewModel: ObservableObject {
         refreshGeneration += 1
         let generation = refreshGeneration
         isLoading = true
-        defer { if generation == refreshGeneration { isLoading = false } }
+        let dayAtStart = CourseScheduleCalculator.dateKey(clock.now)
+        if courseReadState != .available(day: dayAtStart) { courseReadState = .loading }
+        defer {
+            if generation == refreshGeneration {
+                isLoading = false
+                if courseReadState == .loading { courseReadState = snapshot == nil ? .notLoaded : .stale }
+            }
+        }
         do {
             let fresh: CourseSnapshot
             if strict {
@@ -199,11 +247,23 @@ final class TodayViewModel: ObservableObject {
             }
             guard generation == refreshGeneration, repository.sessionCookie == requestCookie,
                   isCurrent() else { return (false, false) }
+            // The repository can silently fall back when its cached snapshot cannot
+            // be read. Require previously read inputs and confirm they survived.
+            let hadVerifiedInputs = hasReadPrivateCache && snapshot != nil &&
+                snapshot?.manualRules == fresh.manualRules
             setSnapshot(fresh)
             hasReadPrivateCache = true
             reloadSchedules()
             let currentNow = clock.now
             setNow(currentNow)
+            let today = CourseScheduleCalculator.dateKey(currentNow)
+            // Normal refresh may retain old term/period inputs when requests fail.
+            // Such a fallback cannot establish that manual course rules yield no classes.
+            // An unsuccessful legacy schedule import is also an unknown source,
+            // even when the local schedule file was read successfully.
+            courseReadState = hadVerifiedInputs && fresh.serverSchedulesImported &&
+                fresh.lastRefreshDate == today && (strict || fresh.manualRules.isEmpty)
+                ? .available(day: today) : .stale
             setErrorMessage(nil)
             return (false, true)
         } catch {
@@ -212,6 +272,7 @@ final class TodayViewModel: ObservableObject {
                 return (false, false)
             }
             reloadSchedules()
+            courseReadState = .failed
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 hasReadPrivateCache = false
                 setSnapshot(nil)
@@ -228,6 +289,7 @@ final class TodayViewModel: ObservableObject {
         let currentNow = clock.now
         setNow(currentNow)
         let changed = previous != CourseScheduleCalculator.dateKey(now)
+        if changed { courseReadState = snapshot == nil ? .notLoaded : .stale }
         if changed && allowLocalSchedules { reloadSchedules() }
         return changed
     }
