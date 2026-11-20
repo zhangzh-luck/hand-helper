@@ -171,6 +171,7 @@ struct TodayView: View {
     @State private var previousEntryIDs: [String] = []
     @State private var selectionDay: String?
     @State private var followsCurrent = true
+    @State private var appearanceRefreshPending = false
 
     init(state: AppState, onAvatarPreview: @escaping @MainActor (TodayAvatarPreviewRoute) -> Void,
          avatarPreviewCoordinator: AvatarPreviewCoordinator,
@@ -322,9 +323,14 @@ struct TodayView: View {
         .task {
             weatherModel.loadIfNeeded()
             reloadAvatarImageIfNeeded()
-            model.load(allowPrivateCache: state.canAccessPrivateData, allowLocalSchedules: mayShowLocalSchedules)
+            let needsRefresh = model.prepareForAppearance(allowPrivateCache: state.canAccessPrivateData,
+                                                         allowLocalSchedules: mayShowLocalSchedules)
             if state.canAccessPrivateData && state.selectedTab == .today { Task { await lifeModel.load() } }
-            if state.canAccessPrivateData && state.selectedTab == .today { await refreshCourses() }
+            if state.canAccessPrivateData && state.selectedTab == .today &&
+                (needsRefresh || pendingCourseInvalidation != nil) {
+                if model.isLoading { appearanceRefreshPending = true }
+                else { await refreshCourses() }
+            }
             while !Task.isCancelled {
                 let remainder = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
                 let delay = 60 - remainder + 0.05
@@ -334,11 +340,13 @@ struct TodayView: View {
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if changed && state.canAccessPrivateData {
                     if state.selectedTab == .today { Task { await lifeModel.load() } }
-                    await refreshCourses()
+                    if model.isLoading { appearanceRefreshPending = true }
+                    else { await refreshCourses() }
                 }
             }
         }
         .onChange(of: state.authenticationRevision) { _, _ in
+            appearanceRefreshPending = false
             selectedEntryID = nil
             previousEntryIDs = []
             selectionDay = nil
@@ -381,12 +389,24 @@ struct TodayView: View {
             if tab == .today { weatherModel.loadIfNeeded() }
             if tab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
             if tab == .today && state.canAccessPrivateData && pendingCourseInvalidation == nil {
-                _ = model.restoreInMemoryIfAvailable(allowPrivateCache: true,
-                                                      allowLocalSchedules: mayShowLocalSchedules)
-                    ?? model.load(allowPrivateCache: true, allowLocalSchedules: mayShowLocalSchedules)
+                let needsRefresh = model.prepareForAppearance(allowPrivateCache: true,
+                                                               allowLocalSchedules: mayShowLocalSchedules)
+                if needsRefresh {
+                    if model.isLoading { appearanceRefreshPending = true }
+                    else { Task { await refreshCourses() } }
+                }
             }
             if tab == .today && pendingCourseInvalidation != nil {
                 Task { await refreshCourses() }
+            }
+        }
+        .onChange(of: model.isLoading) { _, loading in
+            if !loading && appearanceRefreshPending {
+                appearanceRefreshPending = false
+                if state.selectedTab == .today && state.canAccessPrivateData &&
+                    (model.needsAppearanceRefresh || pendingCourseInvalidation != nil) && model.courseReadState != .failed {
+                    Task { await refreshCourses() }
+                }
             }
         }
         .onChange(of: entries.map(\.carouselItem), initial: true) { _, items in
@@ -410,7 +430,8 @@ struct TodayView: View {
                 if state.selectedTab == .today && state.canAccessPrivateData { Task { await lifeModel.load() } }
                 let changed = model.tick(allowLocalSchedules: mayShowLocalSchedules)
                 if state.canAccessPrivateData && (changed || pendingCourseInvalidation != nil) {
-                    Task { await refreshCourses() }
+                    if model.isLoading { appearanceRefreshPending = true }
+                    else { Task { await refreshCourses() } }
                 }
             }
         }
@@ -754,6 +775,7 @@ struct TodayView: View {
                 state.handleUnauthorized()
             }
         } else {
+            guard !model.isLoading else { return }
             let unauthorized = await model.refresh(isCurrent: {
                 state.selectedTab == .today && state.authenticationRevision == revision && state.canAccessPrivateData
             })

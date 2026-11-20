@@ -35,6 +35,7 @@ final class TodayViewModel: ObservableObject {
     private var refreshGeneration = 0
     private var hasReadPrivateCache = false
     private var hasReadLocalSchedules = false
+    private var completedRefreshDay: String?
     private var cachedPresentation: TodayPresentation?
     private(set) var derivedPresentationBuildCount = 0
 
@@ -158,6 +159,7 @@ final class TodayViewModel: ObservableObject {
                                                             allowLocalSchedules: allowLocalSchedules) {
             return cacheAvailable
         }
+        if forceDiskRead { completedRefreshDay = nil }
         setErrorMessage(nil)
         if allowLocalSchedules {
             reloadSchedules()
@@ -202,11 +204,29 @@ final class TodayViewModel: ObservableObject {
         return snapshot != nil
     }
 
+    /// Called when the page task starts or restarts. A non-nil memory result,
+    /// including false (a successful read with no snapshot), must not read disk again.
+    func prepareForAppearance(allowPrivateCache: Bool, allowLocalSchedules: Bool) -> Bool {
+        let dayChanged = tick(allowLocalSchedules: allowLocalSchedules)
+        let restored = restoreInMemoryIfAvailable(allowPrivateCache: allowPrivateCache,
+                                                   allowLocalSchedules: allowLocalSchedules)
+        if restored == nil {
+            _ = load(allowPrivateCache: allowPrivateCache, allowLocalSchedules: allowLocalSchedules)
+        }
+        guard allowPrivateCache else { return false }
+        return dayChanged || needsAppearanceRefresh
+    }
+
+    var needsAppearanceRefresh: Bool {
+        completedRefreshDay != CourseScheduleCalculator.dateKey(clock.now)
+    }
+
     func authenticationDidChange(allowPrivateCache: Bool, allowLocalSchedules: Bool = true) {
         refreshGeneration += 1
         isLoading = false
         hasReadPrivateCache = false
         hasReadLocalSchedules = false
+        completedRefreshDay = nil
         courseReadState = .notLoaded
         localReadState = .notRead
         setErrorMessage(nil)
@@ -246,7 +266,8 @@ final class TodayViewModel: ObservableObject {
             } else {
                 fresh = try await repository.refresh(on: clock.now, isCurrent: isCurrent)
             }
-            guard generation == refreshGeneration, repository.sessionCookie == requestCookie,
+            guard !Task.isCancelled, generation == refreshGeneration, repository.sessionCookie == requestCookie,
+                  CourseScheduleCalculator.dateKey(clock.now) == dayAtStart,
                   isCurrent() else { return (false, false) }
             // The repository can silently fall back when its cached snapshot cannot
             // be read. Require previously read inputs and confirm they survived.
@@ -265,10 +286,13 @@ final class TodayViewModel: ObservableObject {
             courseReadState = hadVerifiedInputs && fresh.serverSchedulesImported &&
                 fresh.lastRefreshDate == today && (strict || fresh.manualRules.isEmpty)
                 ? .available(day: today) : .stale
+            completedRefreshDay = today
             setErrorMessage(nil)
             return (false, true)
         } catch {
-            guard generation == refreshGeneration, isCurrent() else { return (false, false) }
+            guard !Task.isCancelled, generation == refreshGeneration,
+                  CourseScheduleCalculator.dateKey(clock.now) == dayAtStart,
+                  isCurrent() else { return (false, false) }
             guard repository.sessionCookie == requestCookie || repository.sessionCookie == nil else {
                 return (false, false)
             }

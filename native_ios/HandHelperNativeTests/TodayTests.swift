@@ -5,6 +5,70 @@ import UIKit
 @testable import HandHelperNative
 
 final class TodayTests: XCTestCase {
+    @MainActor
+    func testAppearanceReusesConfirmedStateAndRefreshesAfterDayOrIdentityChange() async {
+        let repo = TodayReadStateRepository()
+        let clock = MutableTodayClock(now: localDate(2026, 11, 19, 12, 0))
+        repo.snapshot.lastRefreshDate = "2026-11-19"
+        repo.snapshot.serverSchedulesImported = true
+        let model = TodayViewModel(repository: repo,
+            wallpaperStore: WallpaperStore(session: TodayTestSessionStore(), account: VerifiedAccountContext()),
+            clock: clock)
+        XCTAssertTrue(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+        XCTAssertEqual(repo.cachedReadCount, 1)
+        await model.refresh()
+        XCTAssertEqual(model.courseReadState, .available(day: "2026-11-19"))
+        XCTAssertFalse(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+        XCTAssertEqual(model.courseReadState, .available(day: "2026-11-19"))
+        XCTAssertEqual(repo.cachedReadCount, 1)
+        XCTAssertEqual(TodayScheduleDisplayState.resolve(identityValid: true, entryCount: 0,
+            course: model.courseReadState, local: model.localReadState, day: "2026-11-19", isLoading: model.isLoading), .empty)
+        _ = model.load(forceDiskRead: true)
+        XCTAssertEqual(repo.cachedReadCount, 2)
+        await model.refresh() // Explicit retry is not suppressed by appearance bookkeeping.
+        XCTAssertEqual(repo.refreshCount, 2)
+        clock.now = localDate(2026, 11, 20, 12, 0)
+        XCTAssertTrue(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+        XCTAssertEqual(model.courseReadState, .stale)
+        model.authenticationDidChange(allowPrivateCache: false, allowLocalSchedules: false)
+        XCTAssertNil(model.snapshot)
+        XCTAssertTrue(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+    }
+
+    @MainActor
+    func testAppearanceTreatsMissingSnapshotAsCompletedMemoryRead() {
+        let repo = TodayReadStateRepository()
+        repo.returnNoCache = true
+        let model = TodayViewModel(repository: repo,
+            wallpaperStore: WallpaperStore(session: TodayTestSessionStore(), account: VerifiedAccountContext()))
+        XCTAssertTrue(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+        XCTAssertEqual(model.restoreInMemoryIfAvailable(allowPrivateCache: true, allowLocalSchedules: true), false)
+        XCTAssertTrue(model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true))
+        XCTAssertEqual(repo.cachedReadCount, 1)
+        XCTAssertEqual(repo.localReadCount, 1)
+    }
+
+    @MainActor
+    func testPriorDayResponseCannotOverwriteCurrentSnapshot() async {
+        let repo = TodayReadStateRepository()
+        let clock = MutableTodayClock(now: localDate(2026, 11, 19, 23, 59))
+        repo.snapshot.lastRefreshDate = "2026-11-19"
+        let model = TodayViewModel(repository: repo,
+            wallpaperStore: WallpaperStore(session: TodayTestSessionStore(), account: VerifiedAccountContext()),
+            clock: clock)
+        _ = model.prepareForAppearance(allowPrivateCache: true, allowLocalSchedules: true)
+        repo.pauseRefresh = true
+        let task = Task { await model.refresh() }
+        for _ in 0..<100 where repo.refreshGate == nil { await Task.yield() }
+        guard let gate = repo.refreshGate else { task.cancel(); XCTFail("Refresh did not start"); return }
+        clock.now = localDate(2026, 11, 20, 0, 1)
+        repo.snapshot.lastRefreshDate = "2026-11-20"
+        gate.resume()
+        _ = await task.value
+        XCTAssertEqual(model.snapshot?.lastRefreshDate, "2026-11-19")
+        XCTAssertTrue(model.needsAppearanceRefresh)
+    }
+
     func testScheduleDisplayStatePrioritiesAndRefresh() {
         let day = "2026-11-19"
         func state(_ course: TodayCourseReadState, _ local: TodayLocalReadState,
@@ -810,13 +874,22 @@ private final class TodayReadStateRepository: CourseRepository {
     var snapshot = CourseSnapshot.empty
     var failLocal = false
     var failCourse = false
-    func cached() throws -> CourseSnapshot? { snapshot }
+    var returnNoCache = false
+    var cachedReadCount = 0
+    var localReadCount = 0
+    var refreshCount = 0
+    var pauseRefresh = false
+    var refreshGate: CheckedContinuation<Void, Never>?
+    func cached() throws -> CourseSnapshot? { cachedReadCount += 1; return returnNoCache ? nil : snapshot }
     func refresh(on date: Date) async throws -> CourseSnapshot {
+        refreshCount += 1
+        if pauseRefresh { await withCheckedContinuation { refreshGate = $0 } }
         if failCourse { throw APIError.connection }
         return snapshot
     }
     func localSchedules(on date: Date) throws -> [CustomSchedule] { try allLocalSchedules() }
     func allLocalSchedules() throws -> [CustomSchedule] {
+        localReadCount += 1
         if failLocal { throw APIError.connection }
         return []
     }
