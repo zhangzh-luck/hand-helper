@@ -26,9 +26,9 @@ final class SettingsLayoutTests: XCTestCase {
             String(format: "y=%.1f h=%.1f", $0.frame.minY, $0.frame.height)
         }.joined(separator: ", ")
         print("SETTINGS_ROW_FRAMES: \(rowFrames)")
-        guard rows.count >= 6 else { XCTFail("Missing settings list cells"); return }
-        let preferenceRows = Array(rows[1...2])
-        let dataAndAssistantRows = Array(rows[3...5])
+        guard rows.count >= 7 else { XCTFail("Missing settings list cells"); return }
+        let preferenceRows = Array(rows[1...3])
+        let dataAndAssistantRows = Array(rows[4...6])
         for row in preferenceRows + dataAndAssistantRows {
             XCTAssertGreaterThanOrEqual(row.frame.height, 56)
             XCTAssertLessThanOrEqual(row.frame.height, 60)
@@ -39,12 +39,12 @@ final class SettingsLayoutTests: XCTestCase {
                 XCTAssertLessThanOrEqual(abs(gap), 1, "Separators should sit at adjacent row boundaries")
             }
         }
-        let preferenceHeight = preferenceRows[1].frame.maxY - preferenceRows[0].frame.minY
+        let preferenceHeight = preferenceRows[2].frame.maxY - preferenceRows[0].frame.minY
         let dataAndAssistantHeight = dataAndAssistantRows[2].frame.maxY - dataAndAssistantRows[0].frame.minY
-        XCTAssertEqual(preferenceHeight, 112, accuracy: 0.5)
+        XCTAssertEqual(preferenceHeight, 168, accuracy: 0.5)
         XCTAssertEqual(dataAndAssistantHeight, 168, accuracy: 0.5)
         let accountToPreferences = preferenceRows[0].frame.minY - rows[0].frame.maxY
-        let preferencesToDataAndAssistant = dataAndAssistantRows[0].frame.minY - preferenceRows[1].frame.maxY
+        let preferencesToDataAndAssistant = dataAndAssistantRows[0].frame.minY - preferenceRows[2].frame.maxY
         XCTAssertGreaterThan(accountToPreferences, 0)
         XCTAssertGreaterThan(preferencesToDataAndAssistant, 0)
     }
