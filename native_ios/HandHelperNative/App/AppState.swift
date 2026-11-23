@@ -54,6 +54,32 @@ struct PendingAcademicTimeWrite: Identifiable, Equatable {
     var phase: Phase
     var message: String?
 }
+struct LifeHomePreferences: Equatable {
+    var showWeather = true
+    var showFinance = true
+    var showShortcuts = true
+    var showSubscriptions = true
+    var hideFinancialAmounts = false
+
+    var hasVisibleModules: Bool { showFinance || showShortcuts || showSubscriptions }
+    var needsLedgerFallback: Bool { !showShortcuts }
+
+    static let key = "life.home.preferences.v1"
+    init(defaults: UserDefaults) {
+        let values = defaults.dictionary(forKey: Self.key) ?? [:]
+        showWeather = values["weather"] as? Bool ?? true
+        showFinance = values["finance"] as? Bool ?? true
+        showShortcuts = values["shortcuts"] as? Bool ?? true
+        showSubscriptions = values["subscriptions"] as? Bool ?? true
+        hideFinancialAmounts = values["hideAmounts"] as? Bool ?? false
+    }
+    func save(to defaults: UserDefaults) {
+        defaults.set(["weather": showWeather, "finance": showFinance,
+                      "shortcuts": showShortcuts, "subscriptions": showSubscriptions,
+                      "hideAmounts": hideFinancialAmounts], forKey: Self.key)
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     enum AuthenticationStatus: Equatable {
@@ -64,6 +90,8 @@ final class AppState: ObservableObject {
         case login, verifying, offline, main, credentialRecovery
     }
 
+    @Published private(set) var lifeHomePreferences: LifeHomePreferences
+    let weatherModel: WeatherViewModel
     @Published var selectedTab: AppTab = .today
     @Published private(set) var appearance: AppearanceMode
     @Published var isDetailPresented = false
@@ -151,6 +179,9 @@ final class AppState: ObservableObject {
     ) {
         self.sessionStore = sessionStore
         self.preferences = preferences
+        let homePreferences = LifeHomePreferences(defaults: preferences)
+        self.lifeHomePreferences = homePreferences
+        self.weatherModel = WeatherViewModel(defaults: preferences, enabled: homePreferences.showWeather)
         self.profileDirectory = profileDirectory
         appearance = AppearanceMode(rawValue: preferences.string(forKey: Self.appearanceKey) ?? "") ?? .system
         liveActivitiesEnabled = preferences.bool(forKey: Self.liveActivitiesKey)
@@ -166,6 +197,15 @@ final class AppState: ObservableObject {
                 Task { @MainActor [weak self] in self?.handleSessionEvent(event) }
             }
         }
+    }
+
+    func setLifeHomePreference(_ keyPath: WritableKeyPath<LifeHomePreferences, Bool>, value: Bool) {
+        guard lifeHomePreferences[keyPath: keyPath] != value else { return }
+        var updated = lifeHomePreferences
+        updated[keyPath: keyPath] = value
+        lifeHomePreferences = updated
+        updated.save(to: preferences)
+        weatherModel.setEnabled(updated.showWeather)
     }
 
     func setAppearance(_ mode: AppearanceMode) {

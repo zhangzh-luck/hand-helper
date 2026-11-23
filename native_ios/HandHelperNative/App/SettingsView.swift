@@ -56,6 +56,13 @@ struct SettingsView: View {
                                               color: Color(uiColor: .systemPurple))
                     }
                     .listRowInsets(SettingsNavigationRow.rowInsets)
+                    SettingsNavigationButton {
+                        navigator?.push(title: "生活首页") { LifeHomeSettingsView(state: state) }
+                    } label: {
+                        SettingsNavigationRow(title: "生活首页", symbol: "house",
+                                              color: Color(uiColor: .systemOrange))
+                    }
+                    .listRowInsets(SettingsNavigationRow.rowInsets)
                 } header: {
                     Text("偏好设置")
                 }

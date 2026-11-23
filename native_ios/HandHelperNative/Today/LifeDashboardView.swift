@@ -1,6 +1,8 @@
 import SwiftUI
 
 enum LifeDashboardCardText {
+    static func display(_ value: String, concealed: Bool) -> String { concealed ? "••••" : value }
+
     static func expense(_ snapshot: LifeSnapshot?, loading: Bool) -> String {
         guard let snapshot else { return loading ? "正在读取" : "暂无数据" }
         guard snapshot.hasTransactions else { return "暂无记录" }
@@ -27,6 +29,7 @@ struct LifeDashboardView: View {
     let onAdd: () -> Void
     let onLedger: () -> Void
     let hasWallpaper: Bool
+    let preferences: LifeHomePreferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -36,9 +39,9 @@ struct LifeDashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            financialSection
-            shortcutsSection
-            subscriptionSection
+            if preferences.showFinance { financialSection }
+            if preferences.showShortcuts { shortcutsSection }
+            if preferences.showSubscriptions { subscriptionSection }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .privacySensitive()
@@ -129,17 +132,20 @@ struct LifeDashboardView: View {
     }
 
     private var expenseValue: String {
-        LifeDashboardCardText.expense(model.snapshot, loading: model.isLoading)
+        LifeDashboardCardText.display(LifeDashboardCardText.expense(model.snapshot, loading: model.isLoading),
+                                      concealed: preferences.hideFinancialAmounts && model.snapshot?.hasTransactions == true)
     }
 
     private var budgetValue: String {
-        LifeDashboardCardText.budget(model.snapshot, loading: model.isLoading)
+        LifeDashboardCardText.display(LifeDashboardCardText.budget(model.snapshot, loading: model.isLoading),
+                                      concealed: preferences.hideFinancialAmounts && model.snapshot?.summary.remainingMinor != nil)
     }
 
     private func financialCard(_ title: String, value: String, symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: symbol).font(.subheadline).foregroundStyle(.secondary)
             Text(value).font(.headline.weight(.semibold))
+                .accessibilityLabel(value == "••••" ? "金额已隐藏" : value)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -164,7 +170,9 @@ struct LifeDashboardView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("续费日期：\(item.nextDueDate)")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(LifeDashboardRules.amount(item.amountMinor, currency: item.currency))
+                            Text(LifeDashboardCardText.display(LifeDashboardRules.amount(item.amountMinor, currency: item.currency),
+                                                               concealed: preferences.hideFinancialAmounts))
+                                .accessibilityLabel(preferences.hideFinancialAmounts ? "金额已隐藏" : LifeDashboardRules.amount(item.amountMinor, currency: item.currency))
                                 .font(.subheadline.weight(.medium))
                                 .fixedSize(horizontal: false, vertical: true)
                         }

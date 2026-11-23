@@ -149,7 +149,7 @@ struct TodayView: View {
     @StateObject private var model: TodayViewModel
     @StateObject private var lifeModel: LifeDashboardModel
     @StateObject private var ledgerModel: LedgerViewModel
-    @StateObject private var weatherModel = WeatherViewModel()
+    @ObservedObject private var weatherModel: WeatherViewModel
     @State private var ledgerOpen = false
     @State private var quickEntryOpen = false
     @State private var weatherCityOpen = false
@@ -178,6 +178,7 @@ struct TodayView: View {
          scheduleEditor: ScheduleEditorCoordinator,
          deleteConfirmation: DestructiveConfirmationCoordinator) {
         self.state = state
+        _weatherModel = ObservedObject(wrappedValue: state.weatherModel)
         self.onAvatarPreview = onAvatarPreview
         self.avatarPreviewCoordinator = avatarPreviewCoordinator
         self.scheduleEditor = scheduleEditor
@@ -294,10 +295,21 @@ struct TodayView: View {
                             schedulePlaceholder(scheduleDisplayState)
                         }
                         if state.canAccessPrivateData {
-                            LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
-                                              onLedger: { ledgerOpen = true },
-                                              hasWallpaper: model.wallpaperImage != nil && !reduceTransparency)
-                                .padding(.top, 12)
+                            if state.lifeHomePreferences.hasVisibleModules {
+                                LifeDashboardView(model: lifeModel, onAdd: { quickEntryOpen = true },
+                                                  onLedger: { ledgerOpen = true },
+                                                  hasWallpaper: model.wallpaperImage != nil && !reduceTransparency,
+                                                  preferences: state.lifeHomePreferences)
+                                    .padding(.top, 12)
+                            }
+                            if state.lifeHomePreferences.needsLedgerFallback {
+                                HStack(spacing: 20) {
+                                    Button("记一笔") { quickEntryOpen = true }
+                                    Button("账本") { ledgerOpen = true }
+                                }
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
                     .padding(.bottom, 16)
@@ -680,7 +692,7 @@ struct TodayView: View {
             Text(dateLabel)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            weatherLine
+            if state.lifeHomePreferences.showWeather { weatherLine }
         }
     }
 

@@ -21,6 +21,8 @@ final class WeatherViewModel: ObservableObject {
     @Published private(set) var cache: WeatherCache?
     @Published private(set) var loading = false
     @Published private(set) var needsCity = false
+    @Published private(set) var selectedManualCity: WeatherCity?
+    private(set) var enabled: Bool
     private let service: any WeatherServing
     private let defaults: UserDefaults
     private let now: () -> Date
@@ -30,8 +32,9 @@ final class WeatherViewModel: ObservableObject {
     private let cacheKey = "weather.cityForecast.v1"
 
     init(service: any WeatherServing = OpenMeteoWeatherService(), defaults: UserDefaults = .standard,
-         now: @escaping () -> Date = Date.init) {
-        self.service = service; self.defaults = defaults; self.now = now
+         now: @escaping () -> Date = Date.init, enabled: Bool = true) {
+        self.service = service; self.defaults = defaults; self.now = now; self.enabled = enabled
+        self.selectedManualCity = defaults.data(forKey: "weather.manualCity.v1").flatMap { try? JSONDecoder().decode(WeatherCity.self, from: $0) }
         if let data = defaults.data(forKey: cacheKey),
            let saved = try? JSONDecoder().decode(WeatherCache.self, from: data), saved.isValid(at: now()) {
             let manual = defaults.data(forKey: cityKey).flatMap { try? JSONDecoder().decode(WeatherCity.self, from: $0) }
@@ -40,18 +43,41 @@ final class WeatherViewModel: ObservableObject {
     }
 
     func loadIfNeeded() {
+        guard enabled else { return }
         if let cache, cache.isValid(at: now()) { return }
         guard !loading, !needsCity else { return }
         start(manual: manualCity())
     }
 
-    func retry() { start(manual: manualCity()) }
+    func retry() { guard enabled else { return }; start(manual: manualCity()) }
+
+    func setEnabled(_ value: Bool) {
+        guard enabled != value else { return }
+        enabled = value
+        if !value {
+            generation += 1; task?.cancel(); task = nil; loading = false
+        } else {
+            needsCity = false
+            loadIfNeeded()
+        }
+    }
+
+    func restoreAutomatic() {
+        defaults.removeObject(forKey: cityKey)
+        defaults.removeObject(forKey: cacheKey)
+        selectedManualCity = nil
+        cache = nil
+        generation += 1; task?.cancel(); task = nil; loading = false; needsCity = false
+        if enabled { start(manual: nil) }
+    }
 
     func choose(_ city: WeatherCity) {
         let city = city.coarse
         guard let encoded = try? JSONEncoder().encode(city) else { return }
         defaults.set(encoded, forKey: cityKey)
-        start(manual: city)
+        selectedManualCity = city
+        if enabled { start(manual: city) }
+        else if cache?.city.id != city.id { cache = nil; defaults.removeObject(forKey: cacheKey) }
     }
 
     func search(_ name: String) async throws -> [WeatherCity] {

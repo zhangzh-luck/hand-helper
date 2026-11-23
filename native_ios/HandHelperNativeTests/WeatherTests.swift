@@ -117,6 +117,73 @@ final class WeatherTests: XCTestCase {
     }
 
     @MainActor
+    func testDisabledWeatherDoesNotRequestAndEnablingUsesValidCache() async throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let cached = WeatherCache(city: city, reading: reading, savedAt: now)
+        defaults.set(try JSONEncoder().encode(cached), forKey: "weather.cityForecast.v1")
+        let service = WeatherServiceStub(automatic: city, reading: reading)
+        let model = WeatherViewModel(service: service, defaults: defaults, now: { now }, enabled: false)
+        model.loadIfNeeded(); model.retry()
+        model.setEnabled(true)
+        XCTAssertEqual(model.cache, cached)
+        let automatic = await service.automaticCalls
+        let forecasts = await service.forecastCalls
+        XCTAssertEqual(automatic, 0)
+        XCTAssertEqual(forecasts, 0)
+    }
+
+    @MainActor
+    func testEnablingWeatherRefreshesExpiredCache() async throws {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let stale = WeatherCache(city: city, reading: reading, savedAt: now.addingTimeInterval(-1800))
+        defaults.set(try JSONEncoder().encode(stale), forKey: "weather.cityForecast.v1")
+        let service = WeatherServiceStub(automatic: city, reading: reading)
+        let model = WeatherViewModel(service: service, defaults: defaults, now: { now }, enabled: false)
+        model.setEnabled(true)
+        try await settle(model)
+        XCTAssertEqual(model.cache?.savedAt, now)
+        let calls = await service.forecastCalls
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
+    func testRestoreAutomaticRemovesManualPreferenceAndRefreshes() async throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(try JSONEncoder().encode(city), forKey: "weather.manualCity.v1")
+        let automatic = WeatherCity(id: 2, name: "大理", latitude: 25.6, longitude: 100.2,
+                                    admin1: "云南", country: "中国", countryCode: "CN")
+        let service = WeatherServiceStub(automatic: automatic, reading: reading)
+        let model = WeatherViewModel(service: service, defaults: defaults)
+        model.restoreAutomatic()
+        try await settle(model)
+        XCTAssertNil(defaults.data(forKey: "weather.manualCity.v1"))
+        XCTAssertNil(model.selectedManualCity)
+        XCTAssertEqual(model.cache?.city, automatic)
+        let calls = await service.automaticCalls
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
+    func testDisableCancelsOldRequestAndIgnoresLateResult() async throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let started = expectation(description: "automatic lookup started")
+        let service = WeatherServiceStub(automatic: city, reading: reading, delayAutomatic: true,
+                                         automaticStarted: started)
+        let model = WeatherViewModel(service: service, defaults: defaults)
+        model.loadIfNeeded()
+        await fulfillment(of: [started], timeout: 3)
+        model.setEnabled(false)
+        model.loadIfNeeded(); model.retry()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertNil(model.cache)
+        XCTAssertFalse(model.loading)
+        let calls = await service.automaticCalls
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
     private func settle(_ model: WeatherViewModel) async throws {
         for _ in 0..<100 where model.loading { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertFalse(model.loading)
