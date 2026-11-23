@@ -1,5 +1,22 @@
 import Foundation
 import SwiftUI
+import CryptoKit
+
+struct TimetableTermPreferences {
+    private let defaults: UserDefaults
+    private let baseURL: URL
+    init(defaults: UserDefaults = .standard, baseURL: URL = APIConfiguration.development.baseURL) {
+        self.defaults = defaults
+        self.baseURL = baseURL
+    }
+    private func key(owner: String) -> String {
+        let digest = SHA256.hash(data: Data("\(baseURL.absoluteString)|\(owner)".utf8))
+        return "timetable_selected_term_" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+    func get(owner: String) -> String? { defaults.string(forKey: key(owner: owner)) }
+    func set(_ sourceID: String, owner: String) { defaults.set(sourceID, forKey: key(owner: owner)) }
+    func remove(owner: String) { defaults.removeObject(forKey: key(owner: owner)) }
+}
 
 @MainActor
 final class TimetableViewModel: ObservableObject {
@@ -14,6 +31,10 @@ final class TimetableViewModel: ObservableObject {
     private let state: AppState
     private let repository: any CourseRepository
     private let calendar: Calendar
+    private let termPreferences: TimetableTermPreferences
+    private var preferenceOwner: String?
+    private var preferredSourceID: String?
+    private var attemptedIncompleteRefresh = false
     private let now: () -> Date
     private var appliedSequence: Int?
     /// Identifies the in-memory snapshot that was read for the current verified account.
@@ -22,15 +43,19 @@ final class TimetableViewModel: ObservableObject {
     private var cachedTicket: WeeklyTimetableAccountTicket?
     private var appliedLocalManualCourseSequence: Int?
     private var operation = 0
+    private var selectionRevision = 0
 
     init(state: AppState, repository: any CourseRepository, calendar: Calendar = .current,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         termPreferences: TimetableTermPreferences = .init()) {
         self.state = state
         self.repository = repository
         self.calendar = calendar
         self.now = now
+        self.termPreferences = termPreferences
     }
 
+    var isRestoringTerm: Bool { selectedTermID == nil && errorMessage == nil && (isLoading || snapshot == nil || preferredSourceID != nil) }
     var terms: [TermInfo] { snapshot?.terms ?? [] }
     var periods: [PeriodInfo] { snapshot?.periods.sorted { $0.periodNumber < $1.periodNumber } ?? [] }
 
@@ -44,6 +69,7 @@ final class TimetableViewModel: ObservableObject {
 
     func clear() {
         operation += 1
+        selectionRevision += 1
         snapshotRevision += 1
         snapshot = nil
         projection = nil
@@ -51,6 +77,9 @@ final class TimetableViewModel: ObservableObject {
         selectedWeek = 1
         appliedSequence = nil
         cachedTicket = nil
+        preferenceOwner = nil
+        preferredSourceID = nil
+        attemptedIncompleteRefresh = false
         appliedLocalManualCourseSequence = nil
         errorMessage = nil
         isLoading = false
@@ -155,7 +184,14 @@ final class TimetableViewModel: ObservableObject {
     }
 
     func selectTerm(_ id: Int) {
-        guard terms.contains(where: { $0.id == id }) else { return }
+        guard let term = terms.first(where: { $0.id == id }),
+              let owner = try? state.requireCurrentAccount(revision: state.authenticationRevision) else { return }
+        let source = term.sourceTermID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, terms.filter({ $0.sourceTermID == source }).count == 1 else { return }
+        selectionRevision += 1
+        preferenceOwner = owner
+        preferredSourceID = source
+        termPreferences.set(source, owner: owner)
         selectedTermID = id
         jumpToCurrentWeek()
     }
@@ -188,16 +224,23 @@ final class TimetableViewModel: ObservableObject {
     }
 
     func updateIfNeeded() async {
-        guard state.selectedTab == .timetable, state.canAccessPrivateData else { return }
+        guard state.selectedTab == .timetable, state.canAccessPrivateData, !isLoading else { return }
         let marker = state.pendingCourseInvalidation(after: appliedSequence)
         if !canReuseInMemorySnapshot(marker: marker) {
             _ = loadCached()
         }
-        if let marker, state.completedCourseRefresh == marker {
-            if snapshot != nil { appliedSequence = marker.sequence }
+        if let marker, state.completedCourseRefresh == marker,
+           snapshot != nil, !terms.isEmpty,
+           preferredSourceID == nil || terms.contains(where: { $0.sourceTermID == preferredSourceID }) {
+            appliedSequence = marker.sequence
             return
         }
-        if marker == nil && snapshot != nil { return }
+        if marker == nil && snapshot != nil {
+            let needsConfirmation = terms.isEmpty ||
+                (preferredSourceID != nil && !terms.contains { $0.sourceTermID == preferredSourceID })
+            guard needsConfirmation, !attemptedIncompleteRefresh else { return }
+            attemptedIncompleteRefresh = true
+        }
         await refresh(marker: marker)
     }
 
@@ -210,12 +253,31 @@ final class TimetableViewModel: ObservableObject {
         WeeklyTimetableSnapshotAccess(state: state, repository: repository)
     }
 
-    private func accept(_ newSnapshot: CourseSnapshot, ticket: WeeklyTimetableAccountTicket) throws {
-        _ = try state.requireCurrentAccount(revision: ticket.authenticationRevision)
+    private func accept(_ newSnapshot: CourseSnapshot, ticket: WeeklyTimetableAccountTicket,
+                        authoritative: Bool = false) throws {
+        let owner = try state.requireCurrentAccount(revision: ticket.authenticationRevision)
+        if preferenceOwner != owner {
+            preferenceOwner = owner
+            preferredSourceID = termPreferences.get(owner: owner)
+        }
+        let valid = newSnapshot.terms.filter { !$0.sourceTermID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let ids = valid.map(\.sourceTermID)
+        let unambiguous = valid.count == newSnapshot.terms.count && Set(ids).count == ids.count
+        let preferred = preferredSourceID.flatMap { source in
+            valid.filter { $0.sourceTermID == source }.count == 1
+                ? valid.first { $0.sourceTermID == source } : nil
+        }
+        if authoritative && unambiguous && preferredSourceID != nil && preferred == nil {
+            termPreferences.remove(owner: owner)
+            preferredSourceID = nil
+        }
         let oldTerm = selectedTermID
+        let current = valid.filter(\.isCurrent)
+        let nextTerm: Int?
+        if let preferred { nextTerm = preferred.id }
+        else if preferredSourceID != nil { nextTerm = nil }
+        else { nextTerm = current.count == 1 ? current.first?.id : nil }
         let contentChanged = snapshot != newSnapshot
-        let nextTerm = oldTerm.flatMap { id in newSnapshot.terms.contains(where: { $0.id == id }) ? id : nil }
-            ?? newSnapshot.terms.first(where: \.isCurrent)?.id ?? newSnapshot.terms.first?.id
         guard contentChanged || nextTerm != oldTerm else { return }
         if contentChanged {
             snapshot = newSnapshot
@@ -223,9 +285,13 @@ final class TimetableViewModel: ObservableObject {
         }
         if nextTerm != oldTerm {
             selectedTermID = nextTerm
-            jumpToCurrentWeek()
+            if nextTerm == nil { projection = nil; errorMessage = nil }
+            else { jumpToCurrentWeek() }
         } else {
             reproject()
+        }
+        if authoritative && !unambiguous && preferredSourceID != nil && preferred == nil {
+            errorMessage = "学期数据不完整或存在重复，请刷新课程后重试。"
         }
     }
 
@@ -278,6 +344,7 @@ final class TimetableViewModel: ObservableObject {
         guard let ticket = try? access.ticket() else { clear(); return }
         operation += 1
         let request = operation
+        let selectionAtStart = selectionRevision
         isLoading = true
         defer { if operation == request { isLoading = false } }
         do {
@@ -290,7 +357,8 @@ final class TimetableViewModel: ObservableObject {
             })
             guard operation == request, state.selectedTab == .timetable,
                   (try? state.requireCurrentAccount(revision: ticket.authenticationRevision)) == ticket.owner else { return }
-            try accept(fresh, ticket: ticket)
+            guard selectionRevision == selectionAtStart else { return }
+            try accept(fresh, ticket: ticket, authoritative: true)
             try? state.courseSnapshotDidChange(revision: ticket.authenticationRevision)
             if let marker, state.courseDataInvalidation == marker {
                 state.acknowledgeCourseRefresh(marker)
@@ -304,7 +372,9 @@ final class TimetableViewModel: ObservableObject {
                 state.handleUnauthorized()
                 clear()
             } else {
-                errorMessage = "课程刷新失败，仍显示本账号已缓存的课程：\(error.localizedDescription)"
+                errorMessage = snapshot == nil
+                    ? "学期或课程读取失败：\(error.localizedDescription)"
+                    : "课程刷新失败，仍显示本账号已缓存的课程：\(error.localizedDescription)"
             }
         }
     }

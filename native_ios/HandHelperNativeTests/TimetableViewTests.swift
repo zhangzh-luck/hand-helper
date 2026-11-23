@@ -42,10 +42,82 @@ final class TimetableViewTests: XCTestCase {
         let repository = TimetableModelRepository()
         repository.stored = fixture()
         let model = TimetableViewModel(state: state, repository: repository,
-                                       calendar: calendar, now: { self.fixedDate })
+                                       calendar: calendar, now: { self.fixedDate },
+                                       termPreferences: .init(defaults: preferences))
         await state.restoreSession()
         state.selectedTab = .timetable
         return (state, repository, model)
+    }
+
+    @MainActor
+    func testPreferencePersistsAndRestoresBySourceIDWhenNumericIDChanges() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        let first = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        first.loadCached()
+        first.selectTerm(2)
+        XCTAssertEqual(store.get(owner: "user:alice"), "b")
+        var changed = fixture()
+        changed.terms[1] = TermInfo(id: 99, sourceTermID: "b", displayName: "春季",
+                                    startDate: "2026-09-07", isCurrent: false)
+        repository.stored = changed
+        let restored = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                          now: { self.fixedDate }, termPreferences: store)
+        restored.loadCached()
+        XCTAssertEqual(restored.selectedTermID, 99)
+    }
+
+    @MainActor
+    func testMissingCachedPreferenceNeedsStrictRefreshAndFailureKeepsPreference() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        store.set("b", owner: "user:alice")
+        var incomplete = fixture()
+        incomplete.terms.removeLast()
+        repository.stored = incomplete
+        repository.refreshError = APIError.invalidResponse
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        await model.updateIfNeeded()
+        XCTAssertNil(model.selectedTermID)
+        XCTAssertEqual(store.get(owner: "user:alice"), "b")
+        XCTAssertEqual(repository.refreshCount, 1)
+        await model.updateIfNeeded()
+        XCTAssertEqual(repository.refreshCount, 1)
+        repository.refreshError = nil
+        repository.fresh = fixture()
+        await model.refreshManually()
+        XCTAssertEqual(model.selectedTermID, 2)
+    }
+
+    @MainActor
+    func testAuthoritativeListInvalidatesMissingPreferenceAndNoCurrentDoesNotPickFirst() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        store.set("missing", owner: "user:alice")
+        var snapshot = fixture()
+        snapshot.terms = [TermInfo(id: 1, sourceTermID: "a", displayName: "秋季",
+                                   startDate: "2026-08-31", isCurrent: false)]
+        repository.stored = snapshot
+        repository.fresh = snapshot
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        await model.updateIfNeeded()
+        XCTAssertNil(store.get(owner: "user:alice"))
+        XCTAssertNil(model.selectedTermID)
+    }
+
+    func testPreferenceScopeIncludesOwnerAndServer() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let one = TimetableTermPreferences(defaults: defaults, baseURL: URL(string: "https://one.example")!)
+        let two = TimetableTermPreferences(defaults: defaults, baseURL: URL(string: "https://two.example")!)
+        one.set("a", owner: "user:alice")
+        XCTAssertNil(one.get(owner: "user:bob"))
+        XCTAssertNil(two.get(owner: "user:alice"))
     }
 
     @MainActor

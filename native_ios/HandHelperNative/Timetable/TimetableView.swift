@@ -206,13 +206,13 @@ struct TimetableView: View {
                                                   })
                             }
                         }
-                    } else if model.isLoading && model.snapshot == nil {
-                        ProgressView("正在加载课程表")
+                    } else if model.isRestoringTerm {
+                        ProgressView("正在读取学期和课程表")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ContentUnavailableView(model.terms.isEmpty ? "暂无学期" : "暂无可显示的课程表",
                                                systemImage: "calendar",
-                                               description: Text(model.errorMessage ?? "请选择学期，或检查学期第一周日期。"))
+                                               description: Text(model.errorMessage ?? "请选择学期。"))
                     }
                 }
                 .background { pageBackground }
