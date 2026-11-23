@@ -267,10 +267,8 @@ final class TimetableViewModel: ObservableObject {
             valid.filter { $0.sourceTermID == source }.count == 1
                 ? valid.first { $0.sourceTermID == source } : nil
         }
-        if authoritative && unambiguous && preferredSourceID != nil && preferred == nil {
-            termPreferences.remove(owner: owner)
-            preferredSourceID = nil
-        }
+        // The endpoint filters imported terms; absence, including an empty response,
+        // cannot establish permanent deletion. Keep the user's preference.
         let oldTerm = selectedTermID
         let current = valid.filter(\.isCurrent)
         let nextTerm: Int?
@@ -278,7 +276,12 @@ final class TimetableViewModel: ObservableObject {
         else if preferredSourceID != nil { nextTerm = nil }
         else { nextTerm = current.count == 1 ? current.first?.id : nil }
         let contentChanged = snapshot != newSnapshot
-        guard contentChanged || nextTerm != oldTerm else { return }
+        if !contentChanged && nextTerm == oldTerm {
+            if authoritative && preferredSourceID != nil && preferred == nil {
+                errorMessage = "已保存的学期暂不可用，请刷新或手动选择学期。"
+            }
+            return
+        }
         if contentChanged {
             snapshot = newSnapshot
             snapshotRevision += 1
@@ -290,8 +293,10 @@ final class TimetableViewModel: ObservableObject {
         } else {
             reproject()
         }
-        if authoritative && !unambiguous && preferredSourceID != nil && preferred == nil {
-            errorMessage = "学期数据不完整或存在重复，请刷新课程后重试。"
+        if authoritative && preferredSourceID != nil && preferred == nil {
+            errorMessage = unambiguous
+                ? "已保存的学期暂不可用，请刷新或手动选择学期。"
+                : "学期数据不完整或存在重复，请刷新课程后重试。"
         }
     }
 
@@ -368,6 +373,10 @@ final class TimetableViewModel: ObservableObject {
         } catch {
             guard operation == request,
                   (try? state.requireCurrentAccount(revision: ticket.authenticationRevision)) == ticket.owner else { return }
+            guard state.selectedTab == .timetable else {
+                attemptedIncompleteRefresh = false
+                return
+            }
             if let apiError = error as? APIError, case .unauthorized = apiError {
                 state.handleUnauthorized()
                 clear()

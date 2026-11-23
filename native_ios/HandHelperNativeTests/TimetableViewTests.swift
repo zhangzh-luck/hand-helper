@@ -94,7 +94,7 @@ final class TimetableViewTests: XCTestCase {
     }
 
     @MainActor
-    func testAuthoritativeListInvalidatesMissingPreferenceAndNoCurrentDoesNotPickFirst() async throws {
+    func testMissingPreferenceIsNotDeletedAfterStrictRefresh() async throws {
         let (state, repository, _) = try await setup()
         let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = TimetableTermPreferences(defaults: defaults)
@@ -107,8 +107,9 @@ final class TimetableViewTests: XCTestCase {
         let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
                                        now: { self.fixedDate }, termPreferences: store)
         await model.updateIfNeeded()
-        XCTAssertNil(store.get(owner: "user:alice"))
+        XCTAssertEqual(store.get(owner: "user:alice"), "missing")
         XCTAssertNil(model.selectedTermID)
+        XCTAssertNotNil(model.errorMessage)
     }
 
     func testPreferenceScopeIncludesOwnerAndServer() throws {
@@ -118,6 +119,134 @@ final class TimetableViewTests: XCTestCase {
         one.set("a", owner: "user:alice")
         XCTAssertNil(one.get(owner: "user:bob"))
         XCTAssertNil(two.get(owner: "user:alice"))
+    }
+
+    @MainActor
+    func testEmptyCacheAndEmptyStrictResultKeepSavedPreference() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        store.set("b", owner: "user:alice")
+        repository.stored = .empty
+        repository.fresh = .empty
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        await model.updateIfNeeded()
+        XCTAssertEqual(store.get(owner: "user:alice"), "b")
+        XCTAssertNil(model.selectedTermID)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testDelayedRefreshDoesNotOverrideManualSelection() async throws {
+        let (state, repository, model) = try await setup()
+        model.loadCached()
+        let started = expectation(description: "refresh started")
+        repository.onPaused = { started.fulfill() }
+        repository.pauseRefresh = true
+        repository.fresh = fixture()
+        let task = Task { await model.refreshManually() }
+        await fulfillment(of: [started], timeout: 5)
+        model.selectTerm(2)
+        repository.resumeRefresh()
+        await task.value
+        XCTAssertEqual(model.selectedTermID, 2)
+        XCTAssertEqual(state.selectedTab, .timetable)
+    }
+
+    @MainActor
+    func testOldAccountResponseCannotChangeNewAccountSelection() async throws {
+        let (state, repository, model) = try await setup()
+        model.loadCached()
+        let started = expectation(description: "old account refresh started")
+        repository.onPaused = { started.fulfill() }
+        repository.pauseRefresh = true
+        repository.fresh = fixture()
+        let task = Task { await model.refreshManually() }
+        await fulfillment(of: [started], timeout: 5)
+        await state.logout()
+        model.clear()
+        await state.login(username: "bob", password: "fixture")
+        state.selectedTab = .timetable
+        model.loadCached()
+        model.selectTerm(2)
+        repository.resumeRefresh()
+        await task.value
+        XCTAssertEqual(model.selectedTermID, 2)
+    }
+
+    @MainActor
+    func testDelayedListRestoresSavedPreference() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        store.set("b", owner: "user:alice")
+        var partial = fixture()
+        partial.terms = []
+        repository.stored = partial
+        repository.fresh = fixture()
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        let started = expectation(description: "list request started")
+        repository.onPaused = { started.fulfill() }
+        repository.pauseRefresh = true
+        let task = Task { await model.updateIfNeeded() }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertNil(model.selectedTermID)
+        XCTAssertEqual(store.get(owner: "user:alice"), "b")
+        repository.resumeRefresh()
+        await task.value
+        XCTAssertEqual(model.selectedTermID, 2)
+    }
+
+    @MainActor
+    func testTabReturnKeepsManualTermAndWeek() async throws {
+        let (state, repository, model) = try await setup()
+        model.loadCached()
+        model.selectTerm(2)
+        model.selectWeek(3)
+        state.selectedTab = .today
+        await model.updateIfNeeded()
+        state.selectedTab = .timetable
+        await model.updateIfNeeded()
+        await model.updateIfNeeded()
+        XCTAssertEqual(model.selectedTermID, 2)
+        XCTAssertEqual(model.selectedWeek, 3)
+        XCTAssertEqual(repository.refreshCount, 0)
+    }
+
+    @MainActor
+    func testAutomaticChoiceIsNotPersistedAndHistoryWinsOverNewCurrent() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        model.loadCached()
+        XCTAssertEqual(model.selectedTermID, 1)
+        XCTAssertNil(store.get(owner: "user:alice"))
+        model.selectTerm(2)
+        repository.fresh = fixture()
+        await model.refreshManually()
+        XCTAssertEqual(model.selectedTermID, 2)
+        XCTAssertEqual(store.get(owner: "user:alice"), "b")
+    }
+
+    @MainActor
+    func testSameAccountCanRestoreAfterLogout() async throws {
+        let (state, repository, _) = try await setup()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let store = TimetableTermPreferences(defaults: defaults)
+        let model = TimetableViewModel(state: state, repository: repository, calendar: calendar,
+                                       now: { self.fixedDate }, termPreferences: store)
+        model.loadCached()
+        model.selectTerm(2)
+        await state.logout()
+        model.clear()
+        await state.login(username: "alice", password: "fixture")
+        state.selectedTab = .timetable
+        model.loadCached()
+        XCTAssertEqual(model.selectedTermID, 2)
     }
 
     @MainActor
@@ -662,6 +791,10 @@ private final class TimetableModelRepository: CourseRepository {
     var fresh: CourseSnapshot?
     var refreshError: Error?
     var refreshCount = 0
+    var pauseRefresh = false
+    var onPaused: (() -> Void)?
+    private var refreshContinuation: CheckedContinuation<Void, Never>?
+    func resumeRefresh() { refreshContinuation?.resume(); refreshContinuation = nil }
     var cachedCount = 0
     var createCount = 0
     var updateCount = 0
@@ -675,6 +808,12 @@ private final class TimetableModelRepository: CourseRepository {
     func refresh(on date: Date) async throws -> CourseSnapshot { throw APIError.invalidResponse }
     func refreshStrict(on date: Date, isCurrent: @escaping @MainActor () -> Bool) async throws -> CourseSnapshot {
         refreshCount += 1
+        if pauseRefresh {
+            await withCheckedContinuation { continuation in
+                refreshContinuation = continuation
+                onPaused?()
+            }
+        }
         if let refreshError { throw refreshError }
         guard isCurrent(), let fresh else { throw APIError.invalidResponse }
         stored = fresh
