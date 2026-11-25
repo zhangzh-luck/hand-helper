@@ -697,6 +697,26 @@ final class TodayTests: XCTestCase {
         XCTAssertFalse(ScheduleEditorMotion.matches(rect, CGRect(x: CGFloat.nan, y: 20, width: 200, height: 300)))
     }
 
+    func testScheduleEditorContentZoomTracksContainerCenterAndHandlesInvalidGeometry() {
+        let source = CGRect(x: 20, y: 60, width: 120, height: 40)
+        let target = CGRect(x: 10, y: 150, width: 300, height: 400)
+        let start = ScheduleEditorMotion.contentTransform(source: source, destination: target, curvedProgress: 0)
+        XCTAssertEqual(start.scale, 0.35, accuracy: 0.0001)
+        XCTAssertEqual(target.midX + start.offset.width, source.midX, accuracy: 0.0001)
+        XCTAssertEqual(target.midY + start.offset.height, source.midY, accuracy: 0.0001)
+        let middle = ScheduleEditorMotion.contentTransform(source: source, destination: target, curvedProgress: 0.5)
+        let frame = ScheduleEditorMotion.interpolateCurved(source, target, progress: 0.5)
+        XCTAssertEqual(middle.scale, 0.675, accuracy: 0.0001)
+        XCTAssertEqual(target.midX + middle.offset.width, frame.midX, accuracy: 0.0001)
+        XCTAssertEqual(target.midY + middle.offset.height, frame.midY, accuracy: 0.0001)
+        let end = ScheduleEditorMotion.contentTransform(source: source, destination: target, curvedProgress: 1)
+        XCTAssertEqual(end.scale, 1, accuracy: 0.0001)
+        XCTAssertEqual(end.offset, .zero)
+        let invalid = ScheduleEditorMotion.contentTransform(source: .zero, destination: target, curvedProgress: 0.5)
+        XCTAssertEqual(invalid.scale, 1)
+        XCTAssertEqual(invalid.offset, .zero)
+    }
+
     @MainActor
     func testScheduleEditorSourceIsRestoredOnClearAndStaleCompletionCannotUnhideNewRoute() throws {
         let coordinator = ScheduleEditorCoordinator()

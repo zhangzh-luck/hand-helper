@@ -148,6 +148,17 @@ enum ScheduleEditorMotion {
                       width: a.width + (b.width - a.width) * p,
                       height: a.height + (b.height - a.height) * p)
     }
+
+    static func contentTransform(source: CGRect, destination: CGRect, curvedProgress: CGFloat) -> (scale: CGFloat, offset: CGSize) {
+        let values = [source.minX, source.minY, source.width, source.height,
+                      destination.minX, destination.minY, destination.width, destination.height, curvedProgress]
+        guard values.allSatisfy(\.isFinite), source.width > 0, source.height > 0,
+              destination.width > 0, destination.height > 0 else { return (1, .zero) }
+        let p = min(max(curvedProgress, 0), 1)
+        let rect = interpolateCurved(source, destination, progress: p)
+        return (0.35 + 0.65 * p,
+                CGSize(width: rect.midX - destination.midX, height: rect.midY - destination.midY))
+    }
 }
 
 struct ScheduleEditorOverlay: View {
@@ -211,12 +222,12 @@ private struct ScheduleEditorTransitionSurface: View {
                                    onSave: route.onSave, onClose: dismiss,
                                    readyForFocus: coordinator.isVisible && !opening)
                     .frame(maxWidth: 520)
+                    .modifier(ScheduleEditorContentReveal(progress: progress, destination: destination,
+                                                          source: source, opening: opening))
                     .background(ScheduleEditorAnchor(coordinator: coordinator, kind: .target))
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { _ in
                         validateOpeningGeometry()
                     }
-                    .modifier(ScheduleEditorContentReveal(progress: progress, destination: destination,
-                                                          source: source, opening: opening))
                     .padding(.horizontal, 20).padding(.vertical, 24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .opacity(opening || coordinator.isVisible ? 1 : 0)
@@ -314,11 +325,17 @@ private struct ScheduleEditorContentReveal: AnimatableModifier {
     }
     func body(content: Content) -> some View {
         let p = min(max(progress, 0), 1)
+        let curved = TimetableDetailMotion.geometryProgress(p)
+        let transform = source.flatMap { source in
+            destination.map { ScheduleEditorMotion.contentTransform(source: source, destination: $0, curvedProgress: curved) }
+        }
         return content
-            .opacity(opening ? Double(ScheduleEditorMotion.phase(p, from: 0.20, to: 0.65)) : 1)
+            .scaleEffect(opening ? (transform?.scale ?? 1) : 1, anchor: .center)
+            .offset(x: opening ? (transform?.offset.width ?? 0) : 0,
+                    y: opening ? (transform?.offset.height ?? 0) : 0)
+            .opacity(opening ? Double(ScheduleEditorMotion.phase(p, from: 0.08, to: 0.55)) : 1)
             .mask(alignment: .topLeading) {
                 if opening, let source, let destination {
-                    let curved = TimetableDetailMotion.geometryProgress(p)
                     let rect = ScheduleEditorMotion.interpolateCurved(source, destination, progress: curved)
                     let corner = source.height / 2 + (22 - source.height / 2) * curved
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
