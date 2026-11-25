@@ -694,7 +694,7 @@ final class TodayTests: XCTestCase {
         let rect = CGRect(x: 10, y: 20, width: 200, height: 300)
         XCTAssertTrue(ScheduleEditorMotion.matches(rect, rect.offsetBy(dx: 0.2, dy: 0.2)))
         XCTAssertFalse(ScheduleEditorMotion.matches(rect, rect.offsetBy(dx: 1, dy: 0)))
-        XCTAssertFalse(ScheduleEditorMotion.matches(rect, CGRect(x: .nan, y: 20, width: 200, height: 300)))
+        XCTAssertFalse(ScheduleEditorMotion.matches(rect, CGRect(x: CGFloat.nan, y: 20, width: 200, height: 300)))
     }
 
     @MainActor
