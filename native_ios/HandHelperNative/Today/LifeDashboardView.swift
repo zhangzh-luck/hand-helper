@@ -117,10 +117,8 @@ struct LifeDashboardView: View {
         }
         .padding(.horizontal, 8).padding(.vertical, 6)
         .background {
-            if hasWallpaper {
-                if reduceTransparency || contrast == .increased {
-                    Capsule().fill(Color(uiColor: .secondarySystemGroupedBackground))
-                } else { Capsule().fill(.regularMaterial) }
+            if hasWallpaper && (reduceTransparency || contrast == .increased) {
+                Capsule().fill(Color(uiColor: .secondarySystemGroupedBackground))
             }
         }
     }
@@ -225,12 +223,11 @@ struct LifeDashboardView: View {
 
     private func heading(_ title: String) -> some View {
         Text(title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
-            .padding(.horizontal, hasWallpaper ? 8 : 0).padding(.vertical, hasWallpaper ? 4 : 0)
+            .padding(.horizontal, hasWallpaper && (reduceTransparency || contrast == .increased) ? 8 : 0)
+            .padding(.vertical, hasWallpaper && (reduceTransparency || contrast == .increased) ? 4 : 0)
             .background {
-                if hasWallpaper {
-                    if reduceTransparency || contrast == .increased {
-                        Capsule().fill(Color(uiColor: .secondarySystemGroupedBackground))
-                    } else { Capsule().fill(.regularMaterial) }
+                if hasWallpaper && (reduceTransparency || contrast == .increased) {
+                    Capsule().fill(Color(uiColor: .secondarySystemGroupedBackground))
                 }
             }
             .accessibilityAddTraits(.isHeader)

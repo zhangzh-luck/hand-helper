@@ -582,16 +582,12 @@ struct TodayView: View {
                 }
             }
         }
-        .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency ? 8 : 0)
-        .padding(.vertical, model.wallpaperImage != nil && !reduceTransparency ? 4 : 0)
+        .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency && colorContrast == .increased ? 8 : 0)
+        .padding(.vertical, model.wallpaperImage != nil && !reduceTransparency && colorContrast == .increased ? 4 : 0)
         .background {
-            if model.wallpaperImage != nil && !reduceTransparency {
-                if colorContrast == .increased {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                } else {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
-                }
+            if model.wallpaperImage != nil && !reduceTransparency && colorContrast == .increased {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
             }
         }
     }
@@ -849,16 +845,12 @@ struct TodayView: View {
         return Text(ended ? "今天的课程已经结束" : model.status)
             .font(.subheadline.weight(complete ? .medium : .semibold))
             .foregroundStyle(complete ? Color.secondary : Color.accentColor)
-            .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency ? 8 : 0)
+            .padding(.horizontal, model.wallpaperImage != nil && !reduceTransparency && colorContrast == .increased ? 8 : 0)
             .padding(.vertical, 8)
             .background {
-                if model.wallpaperImage != nil && !reduceTransparency {
-                    if colorContrast == .increased {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                    } else {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
-                    }
+                if model.wallpaperImage != nil && !reduceTransparency && colorContrast == .increased {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
