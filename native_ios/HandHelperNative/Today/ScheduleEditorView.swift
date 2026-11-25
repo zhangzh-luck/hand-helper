@@ -112,6 +112,20 @@ struct ScheduleEditorAnchor: UIViewRepresentable {
 }
 
 enum ScheduleEditorMotion {
+    static let openingDuration = 0.32
+
+    static func phase(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        guard end > start else { return 0 }
+        return min(max((progress - start) / (end - start), 0), 1)
+    }
+
+    static func matches(_ first: CGRect, _ second: CGRect) -> Bool {
+        let a = [first.minX, first.minY, first.width, first.height]
+        let b = [second.minX, second.minY, second.width, second.height]
+        return zip(a, b).allSatisfy { pair in
+            pair.0.isFinite && pair.1.isFinite && abs(pair.0 - pair.1) < 0.5
+        }
+    }
     static func mayMorph(reduceMotion: Bool, isEditing: Bool) -> Bool {
         !reduceMotion && !isEditing
     }
@@ -125,7 +139,10 @@ enum ScheduleEditorMotion {
     }
 
     static func interpolate(_ a: CGRect, _ b: CGRect, progress: CGFloat) -> CGRect {
-        let p = TimetableDetailMotion.geometryProgress(progress)
+        interpolateCurved(a, b, progress: TimetableDetailMotion.geometryProgress(progress))
+    }
+
+    static func interpolateCurved(_ a: CGRect, _ b: CGRect, progress p: CGFloat) -> CGRect {
         return CGRect(x: a.minX + (b.minX - a.minX) * p,
                       y: a.minY + (b.minY - a.minY) * p,
                       width: a.width + (b.width - a.width) * p,
@@ -179,26 +196,34 @@ private struct ScheduleEditorTransitionSurface: View {
             ZStack(alignment: .topLeading) {
                 ScheduleEditorAnchor(coordinator: coordinator, kind: .root)
                     .allowsHitTesting(false)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { _ in
+                        validateOpeningGeometry()
+                    }
                 Color.black.opacity(reduceTransparency ? 0.56 : 0.34)
                     .ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
                     .opacity(opening ? Double(progress) : (coordinator.isVisible ? 1 : 0))
+                if opening, let source, let destination {
+                    ScheduleEditorOpeningShape(progress: progress, source: source, destination: destination)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
                 ScheduleEditorView(schedule: route.schedule, now: route.now,
                                    maximumFormHeight: ScheduleEditorLayout.maximumFormHeight(in: geometry.size.height - 48),
                                    onSave: route.onSave, onClose: dismiss,
                                    readyForFocus: coordinator.isVisible && !opening)
                     .frame(maxWidth: 520)
                     .background(ScheduleEditorAnchor(coordinator: coordinator, kind: .target))
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { _ in
+                        validateOpeningGeometry()
+                    }
+                    .modifier(ScheduleEditorContentReveal(progress: progress, destination: destination,
+                                                          source: source, opening: opening))
                     .padding(.horizontal, 20).padding(.vertical, 24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .opacity(opening ? Double(progress) : (coordinator.isVisible ? 1 : 0))
+                    .opacity(opening || coordinator.isVisible ? 1 : 0)
                     .scaleEffect(opening || reduceMotion ? 1 : (coordinator.isVisible ? 1 : 0.96))
                     .allowsHitTesting(coordinator.isVisible && !opening)
                     .accessibilityHidden(!coordinator.isVisible || opening)
                     .accessibilityAddTraits(.isModal)
-                if opening, let source, let destination {
-                    ScheduleEditorOpeningShape(progress: progress, source: source, destination: destination)
-                        .allowsHitTesting(false).accessibilityHidden(true)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -238,14 +263,72 @@ private struct ScheduleEditorTransitionSurface: View {
                 return
             }
             coordinator.show(id: route.id)
-            withAnimation(.linear(duration: TimetableDetailMotion.morphDuration), completionCriteria: .removed) {
+            withAnimation(.linear(duration: ScheduleEditorMotion.openingDuration), completionCriteria: .removed) {
                 progress = 1
             } completion: {
-                guard coordinator.route?.id == route.id else { return }
-                opening = false
-                coordinator.restoreSource(id: route.id)
+                guard coordinator.route?.id == route.id, opening else { return }
+                guard let final = coordinator.frames(),
+                      ScheduleEditorMotion.matches(final.target, current.target),
+                      ScheduleEditorMotion.matches(final.source, current.source) else {
+                    finishOpening()
+                    return
+                }
+                finishOpening()
             }
         }
+    }
+
+    private func validateOpeningGeometry() {
+        guard opening, let source, let destination else { return }
+        DispatchQueue.main.async {
+            guard opening, coordinator.route?.id == route.id else { return }
+            guard let current = coordinator.frames(),
+                  ScheduleEditorMotion.matches(current.source, source),
+                  ScheduleEditorMotion.matches(current.target, destination) else {
+                finishOpening()
+                return
+            }
+        }
+    }
+
+    private func finishOpening() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            opening = false
+            progress = 1
+            coordinator.show(id: route.id)
+            coordinator.restoreSource(id: route.id)
+        }
+    }
+}
+
+private struct ScheduleEditorContentReveal: AnimatableModifier {
+    var progress: CGFloat
+    let destination: CGRect?
+    let source: CGRect?
+    let opening: Bool
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let p = min(max(progress, 0), 1)
+        return content
+            .opacity(opening ? Double(ScheduleEditorMotion.phase(p, from: 0.20, to: 0.65)) : 1)
+            .mask(alignment: .topLeading) {
+                if opening, let source, let destination {
+                    let curved = TimetableDetailMotion.geometryProgress(p)
+                    let rect = ScheduleEditorMotion.interpolateCurved(source, destination, progress: curved)
+                    let corner = source.height / 2 + (22 - source.height / 2) * curved
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX - destination.minX, y: rect.minY - destination.minY)
+                } else {
+                    // Leave room for the existing card shadow once the transition ends.
+                    Rectangle().padding(-64)
+                }
+            }
     }
 }
 
@@ -260,13 +343,13 @@ private struct ScheduleEditorOpeningShape: View, Animatable {
     var body: some View {
         let p = min(max(progress, 0), 1)
         let curved = TimetableDetailMotion.geometryProgress(p)
-        let rect = ScheduleEditorMotion.interpolate(source, destination, progress: p)
+        let rect = ScheduleEditorMotion.interpolateCurved(source, destination, progress: curved)
         let corner = source.height / 2 + (22 - source.height / 2) * curved
         RoundedRectangle(cornerRadius: corner, style: .continuous)
             .fill(Color(uiColor: .systemBackground))
             .overlay {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(Color.accentColor.opacity(Double(1 - curved)))
+                    .fill(Color.accentColor.opacity(Double(1 - ScheduleEditorMotion.phase(p, from: 0.20, to: 0.65))))
             }
             .overlay(alignment: .topLeading) {
                 Label("添加安排", systemImage: "plus")
@@ -276,7 +359,6 @@ private struct ScheduleEditorOpeningShape: View, Animatable {
             }
             .frame(width: rect.width, height: rect.height)
             .position(x: rect.midX, y: rect.midY)
-            .opacity(Double(1 - p))
     }
 }
 

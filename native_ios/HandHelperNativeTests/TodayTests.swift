@@ -685,6 +685,18 @@ final class TodayTests: XCTestCase {
         XCTAssertFalse(ScheduleEditorMotion.mayMorph(reduceMotion: false, isEditing: true))
     }
 
+    func testScheduleEditorRevealPhasesAndLayoutStability() {
+        XCTAssertEqual(ScheduleEditorMotion.phase(0, from: 0.20, to: 0.65), 0)
+        XCTAssertEqual(ScheduleEditorMotion.phase(0.20, from: 0.20, to: 0.65), 0)
+        XCTAssertEqual(ScheduleEditorMotion.phase(0.425, from: 0.20, to: 0.65), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(ScheduleEditorMotion.phase(0.65, from: 0.20, to: 0.65), 1)
+        XCTAssertEqual(ScheduleEditorMotion.phase(1, from: 0.20, to: 0.65), 1)
+        let rect = CGRect(x: 10, y: 20, width: 200, height: 300)
+        XCTAssertTrue(ScheduleEditorMotion.matches(rect, rect.offsetBy(dx: 0.2, dy: 0.2)))
+        XCTAssertFalse(ScheduleEditorMotion.matches(rect, rect.offsetBy(dx: 1, dy: 0)))
+        XCTAssertFalse(ScheduleEditorMotion.matches(rect, CGRect(x: .nan, y: 20, width: 200, height: 300)))
+    }
+
     @MainActor
     func testScheduleEditorSourceIsRestoredOnClearAndStaleCompletionCannotUnhideNewRoute() throws {
         let coordinator = ScheduleEditorCoordinator()
