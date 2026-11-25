@@ -670,6 +670,40 @@ final class TodayTests: XCTestCase {
         XCTAssertEqual(ScheduleEditorLayout.formViewportHeight(contentHeight: nil, maximum: maximum), maximum)
     }
 
+    func testScheduleEditorMotionValidatesGeometryAndInterpolatesEndpoints() {
+        let source = CGRect(x: 20, y: 40, width: 120, height: 40)
+        let target = CGRect(x: 10, y: 100, width: 300, height: 400)
+        let visible = CGRect(x: 0, y: 0, width: 400, height: 800)
+        XCTAssertTrue(ScheduleEditorMotion.valid(source: source, target: target, visible: visible))
+        XCTAssertFalse(ScheduleEditorMotion.valid(source: source, target: .zero, visible: visible))
+        XCTAssertFalse(ScheduleEditorMotion.valid(source: source, target: target,
+                                                   visible: CGRect(x: 0, y: 60, width: 400, height: 740)))
+        XCTAssertEqual(ScheduleEditorMotion.interpolate(source, target, progress: 0), source)
+        XCTAssertEqual(ScheduleEditorMotion.interpolate(source, target, progress: 1), target)
+        XCTAssertTrue(ScheduleEditorMotion.mayMorph(reduceMotion: false, isEditing: false))
+        XCTAssertFalse(ScheduleEditorMotion.mayMorph(reduceMotion: true, isEditing: false))
+        XCTAssertFalse(ScheduleEditorMotion.mayMorph(reduceMotion: false, isEditing: true))
+    }
+
+    @MainActor
+    func testScheduleEditorSourceIsRestoredOnClearAndStaleCompletionCannotUnhideNewRoute() throws {
+        let coordinator = ScheduleEditorCoordinator()
+        let day = localDate(2026, 10, 23, 12, 0)
+        coordinator.present(schedule: nil, now: day, revision: 7) { _, _, _, _, _ in }
+        let old = try XCTUnwrap(coordinator.route?.id)
+        coordinator.hideSource(id: old)
+        XCTAssertTrue(coordinator.sourceHidden)
+        coordinator.clear()
+        XCTAssertFalse(coordinator.sourceHidden)
+        coordinator.present(schedule: nil, now: day, revision: 8) { _, _, _, _, _ in }
+        let current = try XCTUnwrap(coordinator.route?.id)
+        coordinator.hideSource(id: current)
+        coordinator.restoreSource(id: old)
+        XCTAssertTrue(coordinator.sourceHidden)
+        coordinator.restoreSource(id: current)
+        XCTAssertFalse(coordinator.sourceHidden)
+    }
+
     @MainActor
     func testScheduleEndTimePersistenceValidationAndRemoval() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

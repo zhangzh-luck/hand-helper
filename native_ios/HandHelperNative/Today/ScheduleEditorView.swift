@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 typealias ScheduleEditorSaveAction = (Int?, String, Date, String, String?) throws -> Void
 
@@ -14,7 +15,44 @@ struct ScheduleEditorRoute: Identifiable {
 final class ScheduleEditorCoordinator: ObservableObject {
     @Published private(set) var route: ScheduleEditorRoute?
     @Published private(set) var isVisible = false
+    @Published private(set) var sourceHidden = false
     private var isDismissing = false
+    private weak var sourceView: UIView?
+    private weak var rootView: UIView?
+    private weak var targetView: UIView?
+
+    func setAnchor(_ view: UIView, kind: ScheduleEditorAnchor.Kind) {
+        switch kind {
+        case .source: sourceView = view
+        case .root: rootView = view
+        case .target: targetView = view
+        }
+    }
+
+    func frames() -> (source: CGRect, target: CGRect)? {
+        guard let root = rootView, let source = sourceView, let target = targetView,
+              let window = root.window, source.window === window, target.window === window else { return nil }
+        let sourceFrame = source.convert(source.bounds, to: root)
+        let targetFrame = target.convert(target.bounds, to: root)
+        var visible = root.bounds
+        var ancestor = source.superview
+        while let view = ancestor, view !== window {
+            if view.clipsToBounds { visible = visible.intersection(view.convert(view.bounds, to: root)) }
+            ancestor = view.superview
+        }
+        guard ScheduleEditorMotion.valid(source: sourceFrame, target: targetFrame, visible: visible) else { return nil }
+        return (sourceFrame, targetFrame)
+    }
+
+    func hideSource(id: UUID) {
+        guard route?.id == id, !isDismissing else { return }
+        sourceHidden = true
+    }
+
+    func restoreSource(id: UUID) {
+        guard route == nil || route?.id == id else { return }
+        sourceHidden = false
+    }
 
     var isPresenting: Bool { route != nil }
 
@@ -45,6 +83,7 @@ final class ScheduleEditorCoordinator: ObservableObject {
     func finishDismissal(id: UUID) {
         guard route?.id == id, isDismissing, !isVisible else { return }
         route = nil
+        sourceHidden = false
         isDismissing = false
     }
 
@@ -52,7 +91,45 @@ final class ScheduleEditorCoordinator: ObservableObject {
         guard route != nil || isVisible || isDismissing else { return }
         route = nil
         isVisible = false
+        sourceHidden = false
         isDismissing = false
+    }
+}
+
+struct ScheduleEditorAnchor: UIViewRepresentable {
+    enum Kind { case source, root, target }
+    let coordinator: ScheduleEditorCoordinator
+    let kind: Kind
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        coordinator.setAnchor(view, kind: kind)
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) { coordinator.setAnchor(view, kind: kind) }
+}
+
+enum ScheduleEditorMotion {
+    static func mayMorph(reduceMotion: Bool, isEditing: Bool) -> Bool {
+        !reduceMotion && !isEditing
+    }
+
+    static func valid(source: CGRect, target: CGRect, visible: CGRect) -> Bool {
+        let values = [source.minX, source.minY, source.width, source.height,
+                      target.minX, target.minY, target.width, target.height,
+                      visible.minX, visible.minY, visible.width, visible.height]
+        return values.allSatisfy(\.isFinite) && source.width > 0 && source.height > 0 &&
+            target.width > 0 && target.height > 0 && visible.contains(source)
+    }
+
+    static func interpolate(_ a: CGRect, _ b: CGRect, progress: CGFloat) -> CGRect {
+        let p = TimetableDetailMotion.geometryProgress(progress)
+        return CGRect(x: a.minX + (b.minX - a.minX) * p,
+                      y: a.minY + (b.minY - a.minY) * p,
+                      width: a.width + (b.width - a.width) * p,
+                      height: a.height + (b.height - a.height) * p)
     }
 }
 
@@ -63,38 +140,16 @@ struct ScheduleEditorOverlay: View {
 
     var body: some View {
         if let route = coordinator.route {
-            GeometryReader { geometry in
-                ZStack {
-                    Color.black
-                        .opacity(reduceTransparency ? 0.56 : 0.34)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {}
-                        .opacity(coordinator.isVisible ? 1 : 0)
-
-                    ScheduleEditorView(schedule: route.schedule, now: route.now,
-                                       maximumFormHeight: ScheduleEditorLayout.maximumFormHeight(
-                                        in: geometry.size.height - 48),
-                                       onSave: route.onSave, onClose: { dismiss(routeID: route.id) })
-                        .frame(maxWidth: 520)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 24)
-                        .opacity(coordinator.isVisible ? 1 : 0)
-                        .scaleEffect(reduceMotion ? 1 : (coordinator.isVisible ? 1 : 0.96))
-                        .accessibilityAddTraits(.isModal)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .onAppear { show(routeID: route.id) }
+            ScheduleEditorTransitionSurface(coordinator: coordinator, route: route,
+                                            reduceMotion: reduceMotion,
+                                            reduceTransparency: reduceTransparency,
+                                            dismiss: { dismiss(routeID: route.id) })
+                .id(route.id)
         }
     }
 
     private var animation: Animation {
         reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.22)
-    }
-
-    private func show(routeID: UUID) {
-        withAnimation(animation) { coordinator.show(id: routeID) }
     }
 
     private func dismiss(routeID: UUID) {
@@ -107,12 +162,131 @@ struct ScheduleEditorOverlay: View {
     }
 }
 
+private struct ScheduleEditorTransitionSurface: View {
+    @ObservedObject var coordinator: ScheduleEditorCoordinator
+    let route: ScheduleEditorRoute
+    let reduceMotion: Bool
+    let reduceTransparency: Bool
+    let dismiss: () -> Void
+    @State private var source: CGRect?
+    @State private var destination: CGRect?
+    @State private var progress: CGFloat = 0
+    @State private var opening = false
+    @State private var started = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                ScheduleEditorAnchor(coordinator: coordinator, kind: .root)
+                    .allowsHitTesting(false)
+                Color.black.opacity(reduceTransparency ? 0.56 : 0.34)
+                    .ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
+                    .opacity(opening ? Double(progress) : (coordinator.isVisible ? 1 : 0))
+                ScheduleEditorView(schedule: route.schedule, now: route.now,
+                                   maximumFormHeight: ScheduleEditorLayout.maximumFormHeight(in: geometry.size.height - 48),
+                                   onSave: route.onSave, onClose: dismiss,
+                                   readyForFocus: coordinator.isVisible && !opening)
+                    .frame(maxWidth: 520)
+                    .background(ScheduleEditorAnchor(coordinator: coordinator, kind: .target))
+                    .padding(.horizontal, 20).padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(opening ? Double(progress) : (coordinator.isVisible ? 1 : 0))
+                    .scaleEffect(opening || reduceMotion ? 1 : (coordinator.isVisible ? 1 : 0.96))
+                    .allowsHitTesting(coordinator.isVisible && !opening)
+                    .accessibilityHidden(!coordinator.isVisible || opening)
+                    .accessibilityAddTraits(.isModal)
+                if opening, let source, let destination {
+                    ScheduleEditorOpeningShape(progress: progress, source: source, destination: destination)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear {
+            // Two layout turns allow the form's intrinsic height to settle; an
+            // unstable or unavailable measurement falls back to the existing fade.
+            DispatchQueue.main.async {
+                let first = coordinator.frames()
+                DispatchQueue.main.async { start(first: first) }
+            }
+        }
+        .onDisappear { coordinator.restoreSource(id: route.id) }
+    }
+
+    private func start(first: (source: CGRect, target: CGRect)?) {
+        guard !started, coordinator.route?.id == route.id else { return }
+        started = true
+        guard ScheduleEditorMotion.mayMorph(reduceMotion: reduceMotion, isEditing: route.schedule != nil),
+              let first, let current = coordinator.frames(),
+              first.source == current.source, first.target == current.target else {
+            withAnimation(reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.22)) {
+                coordinator.show(id: route.id)
+            }
+            return
+        }
+        source = current.source
+        destination = current.target
+        opening = true
+        coordinator.hideSource(id: route.id)
+        DispatchQueue.main.async {
+            guard coordinator.route?.id == route.id else { return }
+            guard let latest = coordinator.frames(), latest.source == current.source,
+                  latest.target == current.target else {
+                opening = false
+                coordinator.restoreSource(id: route.id)
+                withAnimation(.easeOut(duration: 0.22)) { coordinator.show(id: route.id) }
+                return
+            }
+            coordinator.show(id: route.id)
+            withAnimation(.linear(duration: TimetableDetailMotion.morphDuration), completionCriteria: .removed) {
+                progress = 1
+            } completion: {
+                guard coordinator.route?.id == route.id else { return }
+                opening = false
+                coordinator.restoreSource(id: route.id)
+            }
+        }
+    }
+}
+
+private struct ScheduleEditorOpeningShape: View, Animatable {
+    var progress: CGFloat
+    let source: CGRect
+    let destination: CGRect
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    var body: some View {
+        let p = min(max(progress, 0), 1)
+        let curved = TimetableDetailMotion.geometryProgress(p)
+        let rect = ScheduleEditorMotion.interpolate(source, destination, progress: p)
+        let corner = source.height / 2 + (22 - source.height / 2) * curved
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(Color(uiColor: .systemBackground))
+            .overlay {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(Color.accentColor.opacity(Double(1 - curved)))
+            }
+            .overlay(alignment: .topLeading) {
+                Label("添加安排", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: source.width, height: source.height)
+                    .opacity(Double(max(0, 1 - p * 4)))
+            }
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+            .opacity(Double(1 - p))
+    }
+}
+
 struct ScheduleEditorView: View {
     let schedule: CustomSchedule?
     let now: Date
     let maximumFormHeight: CGFloat
     let onSave: ScheduleEditorSaveAction
     let onClose: () -> Void
+    let readyForFocus: Bool
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -129,12 +303,14 @@ struct ScheduleEditorView: View {
 
     init(schedule: CustomSchedule?, now: Date,
          maximumFormHeight: CGFloat,
-         onSave: @escaping ScheduleEditorSaveAction, onClose: @escaping () -> Void) {
+         onSave: @escaping ScheduleEditorSaveAction, onClose: @escaping () -> Void,
+         readyForFocus: Bool = true) {
         self.schedule = schedule
         self.now = now
         self.maximumFormHeight = maximumFormHeight
         self.onSave = onSave
         self.onClose = onClose
+        self.readyForFocus = readyForFocus
         _title = State(initialValue: schedule?.title ?? "")
         let parsedDate: Date?
         if let raw = schedule?.date {
@@ -186,7 +362,10 @@ struct ScheduleEditorView: View {
                   measuredFormHeight.map({ abs($0 - height) > 0.5 }) ?? true else { return }
             measuredFormHeight = height
         }
-        .onAppear { titleIsFocused = true }
+        .onAppear { if readyForFocus { titleIsFocused = true } }
+        .onChange(of: readyForFocus) { _, ready in
+            if ready { titleIsFocused = true }
+        }
     }
 
     private var header: some View {

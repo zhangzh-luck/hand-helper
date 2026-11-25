@@ -665,6 +665,8 @@ struct TodayView: View {
                 button.buttonStyle(.borderedProminent)
             }
         }
+        .background(ScheduleEditorAnchor(coordinator: scheduleEditor, kind: .source))
+        .opacity(scheduleEditor.sourceHidden ? 0 : 1)
     }
 
     private func presentScheduleEditor(schedule: CustomSchedule?, revision: Int) {
