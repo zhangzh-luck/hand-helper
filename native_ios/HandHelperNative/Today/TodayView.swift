@@ -164,6 +164,7 @@ struct TodayView: View {
     @State private var appliedCourseInvalidationSequence: Int?
     @State private var avatarSourceData: Data?
     @State private var avatarImage: UIImage?
+    @State private var heroHeight: CGFloat?
     @State private var contentMaxWidth = TodayContentWidth.standard
     @State private var entryContentWidth: CGFloat = 0
     @State private var contentViewport: CGSize = .zero
@@ -265,8 +266,7 @@ struct TodayView: View {
                         .overlay(TodayStyle.background.opacity(dark ? 0.48 : 0.62))
                 }.ignoresSafeArea().allowsHitTesting(false)
             }
-            VStack(spacing: 0) {
-                hero
+            ZStack(alignment: .top) {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         VStack(spacing: 0) {
@@ -312,14 +312,35 @@ struct TodayView: View {
                             }
                         }
                     }
+                    // Reserve the measured hero height inside the scrollable content.
+                    // The schedule header retains its own existing 18pt top padding.
+                    .padding(.top, heroHeight ?? 0)
                     .padding(.bottom, 16)
                 }
+                // Do not flash the first schedule row under the hero before measuring it.
+                .opacity(heroHeight == nil ? 0 : 1)
+                .allowsHitTesting(heroHeight != nil)
+                .accessibilityHidden(heroHeight == nil)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.width
                 } action: { width in
                     entryContentWidth = width
                 }
                 .scrollIndicators(.hidden)
+
+                hero
+                    // A card-sized hit target prevents taps passing through transparent
+                    // material while leaving the rest of the scroll viewport unobstructed.
+                    .background {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { }
+                            .accessibilityHidden(true)
+                    }
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        guard height.isFinite, height > 0, heroHeight != height else { return }
+                        heroHeight = height
+                    }
             }
             .frame(maxWidth: contentMaxWidth)
             .padding(.horizontal, 18)
